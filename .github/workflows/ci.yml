@@ -46,15 +46,16 @@ jobs:
       - name: Start local Supabase (applies migrations + seed.sql)
         run: supabase start -x studio,imgproxy,inbucket,edge-runtime,logflare,vector
       - name: Export local credentials
+        # `supabase status -o env` wraps values in literal double quotes; strip them.
         run: |
-          supabase status -o env >> "$GITHUB_ENV"
-          echo "NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:55321" >> "$GITHUB_ENV"
-          echo "DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55322/postgres" >> "$GITHUB_ENV"
-          echo "DIRECT_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55322/postgres" >> "$GITHUB_ENV"
-      - name: Map Supabase env names
-        run: |
-          echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=${ANON_KEY}" >> "$GITHUB_ENV"
-          echo "SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}" >> "$GITHUB_ENV"
+          eval "$(supabase status -o env)"
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:55321"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=${ANON_KEY}"
+            echo "SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}"
+            echo "DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55322/postgres"
+            echo "DIRECT_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55322/postgres"
+          } >> "$GITHUB_ENV"
       - run: pnpm db:seed
       - run: pnpm turbo run test:integration
       - if: always()
