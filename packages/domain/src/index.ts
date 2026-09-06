@@ -6,3 +6,5 @@ export * from "./movement";
 export * from "./registry";
 export * from "./alert";
 export * from "./compliance";
+export * from "./movement-inputs";
+export * from "./movement-validation";

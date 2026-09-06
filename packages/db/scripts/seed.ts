@@ -201,8 +201,256 @@ export async function seed() {
       values (${otherOrgId}, 'Nora', 'Bergstrom', 'B9999-00000-11111', 'BC', ${day(365)})
       on conflict do nothing`;
 
+    // 4. movements spanning every status. Children are inserted while draft
+    //    (edit-lock trigger), then the status is walked through VALID transitions
+    //    so the DB state machine + timeline are exercised exactly like production.
+    const existingRows = await sql<{ existing: number }[]>`
+      select count(*)::int as existing from public.movements where organization_id = ${orgId}`;
+    if ((existingRows[0]?.existing ?? 0) === 0) {
+      const ids = async (table: string, col: string, val: string) =>
+        (
+          await sql<
+            { id: string }[]
+          >`select id from ${sql(table)} where organization_id = ${orgId} and ${sql(col)} = ${val} limit 1`
+        )[0]!.id;
+      const dispatcherId = (
+        await sql<
+          { id: string }[]
+        >`select id from auth.users where email = 'dispatch@pathfinder.demo'`
+      )[0]!.id;
+      const gurpreet = await ids("drivers", "last_name", "Singh");
+      const marcus = await ids("drivers", "last_name", "Reyes");
+      const dale = await ids("drivers", "last_name", "Thompson");
+      const t101 = await ids("trucks", "unit_number", "T-101");
+      const t103 = await ids("trucks", "unit_number", "T-103");
+      const tr501 = await ids("trailers", "unit_number", "TR-501");
+      const tr503 = await ids("trailers", "unit_number", "TR-503");
+      const maple = await ids("partners", "name", "Maple Ridge Steel Ltd");
+      const glf = await ids("partners", "name", "Great Lakes Fabrication Inc");
+      const erie = await ids("partners", "name", "Erie Produce Co");
+
+      const CUSTOMS_DRIVEN = new Set(["accepted", "rejected", "released", "held"]);
+      let seq = 0;
+      const seedMovement = async (spec: {
+        regime: "ACE" | "ACI";
+        driver: string;
+        truck: string;
+        trailer: string | null;
+        crossing: { code: string; name: string };
+        etaDays: number;
+        cargo: Array<{
+          desc: string;
+          hs: string;
+          kg: number;
+          pcs: number;
+          shipper: string;
+          consignee: string;
+          value: number;
+          ccy: "USD" | "CAD";
+          origin: string;
+        }>;
+        seals: string[];
+        path: Array<
+          "sent" | "accepted" | "rejected" | "released" | "held" | "arrived" | "cancelled"
+        >;
+        ref?: string;
+      }) => {
+        seq++;
+        const number = `${spec.regime}-${new Date().getUTCFullYear().toString().slice(-2)}-${String(seq).padStart(5, "0")}`;
+        const eta = new Date();
+        eta.setUTCDate(eta.getUTCDate() + spec.etaDays);
+        const [m] = await sql<{ id: string }[]>`
+          insert into public.movements (organization_id, regime, movement_number, trip_number, crossing_point,
+            scheduled_crossing_at, driver_id, truck_id, trailer_id, created_by)
+          values (${orgId}, ${spec.regime}, ${number}, ${"TRIP-" + String(1000 + seq)}, ${sql.json(spec.crossing)},
+            ${eta.toISOString()}, ${spec.driver}, ${spec.truck}, ${spec.trailer}, ${dispatcherId})
+          returning id`;
+        const id = m!.id;
+        await sql`
+          insert into public.movement_events (movement_id, organization_id, event_type, from_status, to_status, actor_type, actor_id, payload)
+          values (${id}, ${orgId}, 'status_change', null, 'draft', 'user', ${dispatcherId}, ${sql.json({ movementNumber: number })})`;
+        let line = 0;
+        for (const c of spec.cargo) {
+          line++;
+          await sql`
+            insert into public.cargo (movement_id, organization_id, line_number, shipper_id, consignee_id, commodity_description,
+              hs_code, weight_kg, piece_count, packaging_type, value_amount, value_currency, country_of_origin)
+            values (${id}, ${orgId}, ${line}, ${c.shipper}, ${c.consignee}, ${c.desc}, ${c.hs}, ${c.kg}, ${c.pcs}, 'pallet',
+              ${c.value}, ${c.ccy}, ${c.origin})`;
+        }
+        for (const s of spec.seals) {
+          await sql`
+            insert into public.seals (movement_id, organization_id, trailer_id, seal_number, seal_type, applied_by, applied_at)
+            values (${id}, ${orgId}, ${spec.trailer}, ${s}, 'bolt', 'Yard', now())`;
+        }
+        let from = "draft";
+        for (const to of spec.path) {
+          const customs = CUSTOMS_DRIVEN.has(to);
+          if (customs) {
+            await sql`
+              insert into public.movement_events (movement_id, organization_id, event_type, actor_type, payload)
+              values (${id}, ${orgId}, 'customs_response', 'customs_api',
+                ${sql.json({ decision: to, referenceNumber: spec.ref ?? null, simulated: true })})`;
+          }
+          await sql`update public.movements set status = ${to}, customs_reference_number = ${spec.ref ?? null} where id = ${id}`;
+          await sql`
+            insert into public.movement_events (movement_id, organization_id, event_type, from_status, to_status, actor_type, actor_id)
+            values (${id}, ${orgId}, 'status_change', ${from}, ${to}, ${customs ? "customs_api" : "user"},
+              ${customs ? null : dispatcherId})`;
+          from = to;
+        }
+      };
+
+      const DET = { code: "3801", name: "Detroit — Ambassador Bridge, MI" };
+      const BUF = { code: "0901", name: "Buffalo — Peace Bridge, NY" };
+      const WIN = { code: "0453", name: "Windsor — Ambassador Bridge, ON" };
+      const FE = { code: "0410", name: "Fort Erie — Peace Bridge, ON" };
+      const steel = {
+        desc: "Hot-rolled steel coils",
+        hs: "7208.10",
+        kg: 21500,
+        pcs: 12,
+        shipper: maple,
+        consignee: glf,
+        value: 48000,
+        ccy: "USD" as const,
+        origin: "CA",
+      };
+      const produce = {
+        desc: "Fresh apples, bulk bins",
+        hs: "0808.10",
+        kg: 18200,
+        pcs: 40,
+        shipper: erie,
+        consignee: erie,
+        value: 22000,
+        ccy: "USD" as const,
+        origin: "US",
+      };
+      const fab = {
+        desc: "Fabricated steel brackets",
+        hs: "7308.90",
+        kg: 9800,
+        pcs: 22,
+        shipper: glf,
+        consignee: maple,
+        value: 31000,
+        ccy: "CAD" as const,
+        origin: "US",
+      };
+
+      await seedMovement({
+        regime: "ACE",
+        driver: gurpreet,
+        truck: t101,
+        trailer: tr501,
+        crossing: DET,
+        etaDays: 2,
+        cargo: [steel],
+        seals: ["SL-100231"],
+        path: [],
+      });
+      await seedMovement({
+        regime: "ACE",
+        driver: dale,
+        truck: t103,
+        trailer: tr503,
+        crossing: BUF,
+        etaDays: 1,
+        cargo: [
+          steel,
+          {
+            ...steel,
+            desc: "Galvanized sheet, coils",
+            hs: "7210.49",
+            kg: 4000,
+            pcs: 3,
+            value: 9000,
+          },
+        ],
+        seals: ["SL-100232"],
+        path: ["sent"],
+      });
+      await seedMovement({
+        regime: "ACE",
+        driver: gurpreet,
+        truck: t101,
+        trailer: tr501,
+        crossing: DET,
+        etaDays: 0,
+        cargo: [steel],
+        seals: ["SL-100233"],
+        path: ["sent", "accepted"],
+        ref: "ACE-A7K2Q9",
+      });
+      await seedMovement({
+        regime: "ACI",
+        driver: dale,
+        truck: t103,
+        trailer: tr503,
+        crossing: WIN,
+        etaDays: 0,
+        cargo: [fab],
+        seals: ["SL-200101"],
+        path: ["sent", "accepted", "released"],
+        ref: "ACI-88213Q",
+      });
+      await seedMovement({
+        regime: "ACI",
+        driver: marcus,
+        truck: t101,
+        trailer: tr501,
+        crossing: FE,
+        etaDays: 0,
+        cargo: [produce],
+        seals: ["SL-200102"],
+        path: ["sent", "accepted", "held"],
+        ref: "ACI-88214H",
+      });
+      await seedMovement({
+        regime: "ACE",
+        driver: marcus,
+        truck: t103,
+        trailer: tr503,
+        crossing: BUF,
+        etaDays: 3,
+        cargo: [produce],
+        seals: [],
+        path: ["sent", "rejected"],
+        ref: "ACE-R0011X",
+      });
+      await seedMovement({
+        regime: "ACE",
+        driver: gurpreet,
+        truck: t101,
+        trailer: tr501,
+        crossing: DET,
+        etaDays: -3,
+        cargo: [steel],
+        seals: ["SL-100229"],
+        path: ["sent", "accepted", "released", "arrived"],
+        ref: "ACE-D4M1Z2",
+      });
+      await seedMovement({
+        regime: "ACI",
+        driver: dale,
+        truck: t103,
+        trailer: null,
+        crossing: WIN,
+        etaDays: -1,
+        cargo: [fab],
+        seals: [],
+        path: ["cancelled"],
+      });
+
+      await sql`
+        insert into public.organization_counters (organization_id, key, value)
+        values (${orgId}, ${"movement:" + new Date().getUTCFullYear()}, ${seq})
+        on conflict (organization_id, key) do update set value = greatest(organization_counters.value, excluded.value)`;
+    }
+
     console.log(
-      `seeded org ${DEMO_ORG.name} (${orgId}) with ${DEMO_USERS.length} users + registries`,
+      `seeded org ${DEMO_ORG.name} (${orgId}) with ${DEMO_USERS.length} users + registries + movements`,
     );
     console.log(`seeded org ${OTHER_ORG.name} (${otherOrgId}) with 1 user`);
     return { orgId, otherOrgId };
