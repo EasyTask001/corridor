@@ -1,0 +1,29 @@
+{
+  "name": "corridor",
+  "private": true,
+  "packageManager": "pnpm@10.32.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:integration": "turbo run test:integration",
+    "db:start": "supabase start",
+    "db:stop": "supabase stop",
+    "db:reset": "supabase db reset",
+    "db:seed": "pnpm --filter @corridor/db seed",
+    "db:types": "supabase gen types typescript --local > packages/db/src/supabase-types.ts",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json,sql}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,md,json,sql}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2",
+    "supabase": "^2.116.0",
+    "turbo": "^2.10.12",
+    "typescript": "^5.9.2"
+  }
+}

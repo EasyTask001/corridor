@@ -1,0 +1,23 @@
+{
+  "name": "@corridor/config",
+  "version": "0.0.0",
+  "private": true,
+  "files": [
+    "tsconfig",
+    "eslint"
+  ],
+  "exports": {
+    "./tsconfig/base.json": "./tsconfig/base.json",
+    "./tsconfig/library.json": "./tsconfig/library.json",
+    "./tsconfig/nextjs.json": "./tsconfig/nextjs.json",
+    "./eslint/base.js": "./eslint/base.js",
+    "./eslint/next.js": "./eslint/next.js"
+  },
+  "dependencies": {
+    "@eslint/js": "^9.35.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-import": "^2.32.0",
+    "typescript-eslint": "^8.43.0"
+  },
+  "type": "module"
+}

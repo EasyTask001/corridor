@@ -1,0 +1,10 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+onlyBuiltDependencies:
+  - supabase
+  - esbuild
+  - sharp
+  - "@tailwindcss/oxide"
+  - unrs-resolver

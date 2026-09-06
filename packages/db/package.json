@@ -1,0 +1,35 @@
+{
+  "name": "@corridor/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --project unit --passWithNoTests",
+    "test:integration": "vitest run --project integration",
+    "seed": "tsx scripts/seed.ts",
+    "seed:generate": "tsx scripts/generate-seed-sql.ts"
+  },
+  "dependencies": {
+    "@corridor/domain": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "postgres": "^3.4.7"
+  },
+  "devDependencies": {
+    "@corridor/config": "workspace:*",
+    "@supabase/supabase-js": "^2.57.4",
+    "@types/node": "^22.18.0",
+    "drizzle-kit": "^0.31.4",
+    "eslint": "^9.35.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^5.0.0"
+  }
+}

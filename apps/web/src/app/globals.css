@@ -1,0 +1,68 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  /* Corridor palette: deep navy ground, signal amber accent (border / customs) */
+  --color-ink-950: #0b1220;
+  --color-ink-900: #111a2e;
+  --color-ink-800: #1a2540;
+  --color-ink-700: #2a3856;
+  --color-ink-500: #5b6b8c;
+  --color-ink-300: #aab5cc;
+  --color-ink-100: #e6eaf2;
+  --color-ink-50: #f5f7fb;
+  --color-signal-500: #f0a93a;
+  --color-signal-600: #d9932a;
+  --color-ok-500: #22a06b;
+  --color-warn-500: #e0a20c;
+  --color-danger-500: #d9534f;
+}
+
+:root {
+  color-scheme: light;
+  --bg: var(--color-ink-50);
+  --fg: var(--color-ink-950);
+  --muted: var(--color-ink-500);
+  --panel: #ffffff;
+  --border: var(--color-ink-100);
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+@utility label {
+  @apply mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500;
+}
+
+@utility input {
+  @apply w-full rounded-md border border-ink-100 bg-white px-3 py-2 text-sm text-ink-950
+    placeholder:text-ink-300 focus:border-ink-700 focus:outline-none focus:ring-2 focus:ring-ink-700/15;
+}
+
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium
+    transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+}
+@utility btn-primary {
+  @apply btn bg-ink-950 text-white hover:bg-ink-800;
+}
+@utility btn-secondary {
+  @apply btn border border-ink-100 bg-white text-ink-950 hover:bg-ink-50;
+}
+@utility btn-signal {
+  @apply btn bg-signal-500 text-ink-950 hover:bg-signal-600;
+}

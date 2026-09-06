@@ -1,0 +1,29 @@
+# deps
+node_modules/
+.pnpm-store/
+
+# build
+.next/
+dist/
+out/
+.turbo/
+*.tsbuildinfo
+
+# env
+.env
+.env.*
+!.env.example
+
+# supabase local
+supabase/.branches/
+supabase/.temp/
+
+# test artifacts
+coverage/
+playwright-report/
+test-results/
+
+# misc
+.DS_Store
+.vercel
+.claude/
