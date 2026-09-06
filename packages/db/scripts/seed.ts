@@ -142,7 +142,68 @@ export async function seed() {
       on conflict (organization_id, user_id) where user_id is not null
       do update set role_id = excluded.role_id, status = 'active'`;
 
-    console.log(`seeded org ${DEMO_ORG.name} (${orgId}) with ${DEMO_USERS.length} users`);
+    // 3. registries for the demo org — dates relative to today so expiry alerts
+    //    demo correctly no matter when the seed runs.
+    const day = (offset: number) => {
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() + offset);
+      return d.toISOString().slice(0, 10);
+    };
+
+    await sql`
+      insert into public.drivers (organization_id, first_name, last_name, license_number, license_jurisdiction,
+        license_expiry, fast_card_number, fast_card_expiry, medical_cert_expiry, citizenship, phone, email)
+      values
+        (${orgId}, 'Gurpreet', 'Singh',   'S1234-56789-01234', 'ON', ${day(400)}, 'FAST-88123', ${day(45)},  ${day(200)}, 'CA', '+1 905 555 0101', 'gurpreet@pathfinder.demo'),
+        (${orgId}, 'Marcus',   'Reyes',   'R7788-11223-33445', 'MI', ${day(9)},   null,         null,        ${day(300)}, 'US', '+1 313 555 0102', 'marcus@pathfinder.demo'),
+        (${orgId}, 'Amrit',    'Kaur',    'K5566-99887-77665', 'BC', ${day(-12)}, 'FAST-90455', ${day(500)}, null,        'CA', '+1 604 555 0103', 'amrit@pathfinder.demo'),
+        (${orgId}, 'Dale',     'Thompson','T1010-20203-30304', 'NY', ${day(700)}, null,         null,        ${day(650)}, 'US', '+1 716 555 0104', 'dale@pathfinder.demo')
+      on conflict do nothing`;
+
+    await sql`
+      insert into public.trucks (organization_id, unit_number, vin, make, model, model_year, plate_number, plate_jurisdiction,
+        registration_expiry, insurance_policy_number, insurance_expiry, annual_inspection_expiry, transponder_number)
+      values
+        (${orgId}, 'T-101', '1FUJGLDR5CSBP8834', 'Freightliner', 'Cascadia', 2022, 'AB12345', 'ON', ${day(300)}, 'POL-77812', ${day(20)},  ${day(90)},  'TX-100001'),
+        (${orgId}, 'T-102', '1XKYDP9X5PJ456789', 'Kenworth',     'T680',     2023, 'CD67890', 'ON', ${day(-3)},  'POL-77812', ${day(250)}, ${day(-40)}, 'TX-100002'),
+        (${orgId}, 'T-103', '3AKJHHDR8LSMD1234', 'Freightliner', 'Cascadia', 2020, 'EF11223', 'MI', ${day(500)}, 'POL-77813', ${day(400)}, ${day(30)},  null)
+      on conflict do nothing`;
+
+    await sql`
+      insert into public.trailers (organization_id, unit_number, vin, trailer_type, plate_number, plate_jurisdiction,
+        registration_expiry, insurance_expiry, annual_inspection_expiry, length_ft)
+      values
+        (${orgId}, 'TR-501', '1UYVS2538PU123456', 'dry_van', 'TRL5011', 'ON', ${day(180)}, ${day(180)}, ${day(55)},  53),
+        (${orgId}, 'TR-502', '1UYVS2538PU654321', 'reefer',  'TRL5022', 'ON', ${day(10)},  ${day(365)}, ${day(365)}, 53),
+        (${orgId}, 'TR-503', null,                'flatbed', 'TRL5033', 'MI', ${day(600)}, ${day(600)}, null,        48)
+      on conflict do nothing`;
+
+    await sql`
+      insert into public.partners (organization_id, name, type, address, tax_id, contact_name, contact_email, contact_phone)
+      values
+        (${orgId}, 'Maple Ridge Steel Ltd', 'shipper',
+          ${sql.json({ line1: "400 Industrial Pkwy", city: "Hamilton", region: "ON", postalCode: "L8E 2W1", country: "CA" })},
+          '123456789RT0001', 'Lena Park', 'lpark@mapleridgesteel.example', '+1 905 555 0201'),
+        (${orgId}, 'Great Lakes Fabrication Inc', 'consignee',
+          ${sql.json({ line1: "1200 Ford Rd", city: "Dearborn", region: "MI", postalCode: "48126", country: "US" })},
+          '38-1234567', 'Omar Haddad', 'ohaddad@glfab.example', '+1 313 555 0202'),
+        (${orgId}, 'Northgate Customs Brokers', 'broker',
+          ${sql.json({ line1: "55 Bridge St", city: "Fort Erie", region: "ON", postalCode: "L2A 1T2", country: "CA" })},
+          null, 'Priya Nair', 'pnair@northgatecb.example', '+1 905 555 0203'),
+        (${orgId}, 'Erie Produce Co', 'both',
+          ${sql.json({ line1: "88 Market Ave", city: "Buffalo", region: "NY", postalCode: "14203", country: "US" })},
+          '16-7654321', 'Sam Okafor', 'sam@erieproduce.example', '+1 716 555 0204')
+      on conflict do nothing`;
+
+    // The other org gets one driver so cross-tenant tests have a row to *not* see.
+    await sql`
+      insert into public.drivers (organization_id, first_name, last_name, license_number, license_jurisdiction, license_expiry)
+      values (${otherOrgId}, 'Nora', 'Bergstrom', 'B9999-00000-11111', 'BC', ${day(365)})
+      on conflict do nothing`;
+
+    console.log(
+      `seeded org ${DEMO_ORG.name} (${orgId}) with ${DEMO_USERS.length} users + registries`,
+    );
     console.log(`seeded org ${OTHER_ORG.name} (${otherOrgId}) with 1 user`);
     return { orgId, otherOrgId };
   } finally {

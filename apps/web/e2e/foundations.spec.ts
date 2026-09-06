@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 /**
  * Phase 0 end-to-end coverage — requires local Supabase + `pnpm db:seed`.
@@ -30,12 +30,13 @@ test.describe("auth + onboarding", () => {
 
     await expect(page).toHaveURL(/\/dashboard/);
     await expect(page.getByText("EECX")).toBeVisible(); // SCAC upper-cased by schema + RPC
-    await expect(page.getByText("movement.transmit_to_customs")).toBeVisible(); // owner grant
+    await expect(page.getByText("All clear")).toBeVisible(); // fresh org: no alerts
+    await expect(page.getByRole("link", { name: "Users" })).toBeVisible(); // owner grant
   });
 });
 
 test.describe("seeded roles", () => {
-  async function login(page: import("@playwright/test").Page, email: string) {
+  async function login(page: Page, email: string) {
     await page.goto("/login");
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password").fill("corridor-demo");

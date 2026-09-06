@@ -38,13 +38,15 @@ export async function proxy(request: NextRequest) {
   );
 
   // IMPORTANT: getUser() (not getSession()) — validates the JWT with Supabase Auth.
+  // /api/* routes are never redirected: tRPC returns UNAUTHORIZED and cron
+  // routes check CRON_SECRET themselves.
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
 
-  if (!user && !isPublic(pathname) && !pathname.startsWith("/api/trpc")) {
+  if (!user && !isPublic(pathname) && !pathname.startsWith("/api/")) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname);
