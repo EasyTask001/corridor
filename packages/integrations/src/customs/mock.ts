@@ -14,15 +14,22 @@
 import type {
   CustomsClient,
   CustomsClientSettings,
+  CustomsCredentials,
   CustomsDecisionMessage,
   ManifestPayload,
   TransmitAck,
 } from "./types";
-import { CustomsTransportError } from "./types";
+import { CustomsTransportError, hasCustomsCredentials } from "./types";
 
 export interface MockCustomsOptions extends CustomsClientSettings {
   provider: "cbp_ace" | "cbsa_aci";
   environment?: "sandbox" | "production";
+  /**
+   * Vault-backed gateway credentials. The mock never authenticates, so it only
+   * records whether they were supplied — the values themselves are never read,
+   * logged or echoed into the persisted response.
+   */
+  credentials?: CustomsCredentials;
   /** injectable for tests */
   random?: () => number;
   now?: () => Date;
@@ -43,6 +50,7 @@ export function createMockCustomsClient(opts: MockCustomsOptions): CustomsClient
   const delay = Math.max(0, opts.mockDelayMs ?? 4000);
   const failureRate = Math.min(1, Math.max(0, opts.mockFailureRate ?? 0));
   const prefix = opts.provider === "cbp_ace" ? "ACE" : "ACI";
+  const credentialsPresent = hasCustomsCredentials(opts.credentials);
 
   const hook = (m: ManifestPayload) => (m.trip.tripNumber ?? "").toUpperCase();
 
@@ -74,6 +82,7 @@ export function createMockCustomsClient(opts: MockCustomsOptions): CustomsClient
           environment: opts.environment ?? "sandbox",
           correlationId: o?.correlationId ?? null,
           acknowledged: true,
+          credentialsPresent,
           manifestLines: manifest.shipments.length,
           crew: manifest.crew.length,
         },
@@ -108,7 +117,7 @@ export function createMockCustomsClient(opts: MockCustomsOptions): CustomsClient
         referenceNumber,
         decision,
         message,
-        raw: { mock: true, decidedAt: now().toISOString() },
+        raw: { mock: true, credentialsPresent, decidedAt: now().toISOString() },
       };
     },
   };

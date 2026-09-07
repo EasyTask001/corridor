@@ -21,8 +21,9 @@ export default async function IntegrationsPage() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Integrations</h1>
         <p className="text-sm text-ink-500">
-          Customs gateways, reference data and billing. Credentials are stored in Supabase Vault and
-          never displayed here — only environment and behaviour settings are editable.
+          Customs gateways, reference data and billing. Gateway credentials are encrypted into
+          Supabase Vault on save: the fields below are write-only, the stored values are never
+          returned to this page, and only the server reads them — at transmit time, in production.
         </p>
       </header>
       <IntegrationsPanel

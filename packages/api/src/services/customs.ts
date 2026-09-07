@@ -4,15 +4,19 @@
  * the manifest to `sent` and enqueue the asynchronous decision job.
  */
 import { randomUUID } from "node:crypto";
+import { createClient } from "@supabase/supabase-js";
 import { TRPCError } from "@trpc/server";
+import { z } from "zod";
 import { and, eq, schema, type RlsTransaction } from "@corridor/db";
 import { hasBlockingIssues } from "@corridor/domain";
 import {
   CustomsTransportError,
   buildManifest,
   createCustomsClient,
+  hasCustomsCredentials,
   providerForRegime,
   type CustomsClientSettings,
+  type CustomsCredentials,
   type ManifestPayload,
 } from "@corridor/integrations";
 import { enqueueJob } from "./jobs";
@@ -26,6 +30,80 @@ import {
 } from "./movements";
 
 const { integrationConfigs, integrationEvents } = schema;
+
+/** Shape of the JSON document held in the Vault secret for a customs provider. */
+const customsCredentialsSchema = z
+  .object({
+    apiKey: z.string().min(1).optional(),
+    apiSecret: z.string().min(1).optional(),
+    accountId: z.string().min(1).optional(),
+  })
+  .strip();
+
+/**
+ * Parse what the Vault handed back. Anything unexpected — malformed JSON, an
+ * unknown shape, an all-blank document — degrades to "no credentials" rather
+ * than throwing, so a bad secret cannot take transmit down. The plaintext is
+ * never included in the warning.
+ */
+export function parseCustomsCredentials(
+  raw: unknown,
+  onWarn: (reason: string) => void = () => {},
+): CustomsCredentials | undefined {
+  if (typeof raw !== "string" || raw.length === 0) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    onWarn("stored credentials are not valid JSON");
+    return undefined;
+  }
+  const result = customsCredentialsSchema.safeParse(parsed);
+  if (!result.success) {
+    onWarn("stored credentials do not match the expected shape");
+    return undefined;
+  }
+  return hasCustomsCredentials(result.data) ? result.data : undefined;
+}
+
+/**
+ * Pull the org's decrypted gateway credentials.
+ *
+ * `read_integration_secret` is EXECUTE-revoked from `anon`/`authenticated`
+ * (migration 0012), so this deliberately builds its own service-role client
+ * rather than reusing the caller's — the plaintext must never be reachable
+ * from a browser session. Failures are non-fatal: the mock gateway (and, later,
+ * a real one returning 401) works the same either way, and a hard throw here
+ * would take down transmit for a credential problem the dispatcher cannot fix.
+ * Nothing from `data` is ever logged.
+ */
+async function credentialsFor(
+  orgId: string,
+  provider: "cbp_ace" | "cbsa_aci",
+): Promise<CustomsCredentials | undefined> {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) {
+    console.warn(
+      `[customs] ${provider}: no service-role client configured — transmitting without credentials`,
+    );
+    return undefined;
+  }
+  const admin = createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { data, error } = await admin.rpc("read_integration_secret", {
+    p_org: orgId,
+    p_provider: provider,
+  });
+  if (error) {
+    console.warn(`[customs] ${provider}: credential read failed (${error.code ?? error.message})`);
+    return undefined;
+  }
+  return parseCustomsCredentials(data, (reason) =>
+    console.warn(`[customs] ${provider}: ${reason} — transmitting without credentials`),
+  );
+}
 
 export async function customsClientFor(tx: RlsTransaction, orgId: string, regime: "ACE" | "ACI") {
   const provider = providerForRegime(regime);
@@ -43,8 +121,15 @@ export async function customsClientFor(tx: RlsTransaction, orgId: string, regime
     });
   }
   const settings = (cfg?.settings ?? {}) as CustomsClientSettings;
+  const environment = cfg?.environment ?? "sandbox";
+  // Sandbox always runs against the mock gateway, so it never needs (and never
+  // decrypts) the org's real credentials.
+  const credentials =
+    environment === "production" && cfg?.credentialsRef
+      ? await credentialsFor(orgId, provider)
+      : undefined;
   return {
-    client: createCustomsClient({ regime, environment: cfg?.environment ?? "sandbox", settings }),
+    client: createCustomsClient({ regime, environment, settings, credentials }),
     config: cfg ?? null,
   };
 }

@@ -96,3 +96,19 @@ export interface CustomsClientSettings {
   /** 0..1 probability of a transport failure on transmit (mock) */
   mockFailureRate?: number;
 }
+
+/**
+ * Gateway credentials, decrypted from Supabase Vault immediately before a call
+ * (see `read_integration_secret` / services/customs.ts). These values must
+ * never reach `integration_events`, `audit_log`, a log line or the browser —
+ * clients may only report *whether* they were present.
+ */
+export interface CustomsCredentials {
+  apiKey?: string;
+  apiSecret?: string;
+  accountId?: string;
+}
+
+/** True when at least one credential field carries a non-empty value. */
+export const hasCustomsCredentials = (credentials?: CustomsCredentials): boolean =>
+  Object.values(credentials ?? {}).some((v) => typeof v === "string" && v.length > 0);

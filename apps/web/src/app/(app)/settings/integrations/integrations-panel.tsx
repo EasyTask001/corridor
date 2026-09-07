@@ -18,30 +18,35 @@ const PROVIDERS = [
     name: "CBP ACE (US)",
     desc: "Automated Commercial Environment — southbound e-manifests",
     mock: true,
+    credentials: true,
   },
   {
     key: "cbsa_aci",
     name: "CBSA ACI (Canada)",
     desc: "Advance Commercial Information — northbound e-manifests",
     mock: true,
+    credentials: true,
   },
   {
     key: "border_wait_time",
     name: "Border wait times",
     desc: "CBP BWT / CBSA border times feed (stub)",
     mock: false,
+    credentials: false,
   },
   {
     key: "hts_tariff",
     name: "HS / HTS tariff",
     desc: "Tariff classification lookup (stub)",
     mock: false,
+    credentials: false,
   },
   {
     key: "stripe",
     name: "Stripe",
     desc: "Subscription billing — managed on the Billing page",
     mock: false,
+    credentials: false,
   },
 ] as const;
 
@@ -84,6 +89,9 @@ export function IntegrationsPanel({
   const runNow = useMutation(
     trpc.integrations.jobs.runNow.mutationOptions({ onSuccess: invalidate }),
   );
+  const clearCredentials = useMutation(
+    trpc.integrations.configs.clearCredentials.mutationOptions({ onSuccess: invalidate }),
+  );
   const [saved, setSaved] = useState<string | null>(null);
 
   const cfgFor = (p: string) => configsQ.data.find((c) => c.provider === p);
@@ -103,7 +111,12 @@ export function IntegrationsPanel({
               className="panel space-y-3 p-5"
               onSubmit={(e: FormEvent<HTMLFormElement>) => {
                 e.preventDefault();
-                const fd = new FormData(e.currentTarget);
+                const form = e.currentTarget;
+                const fd = new FormData(form);
+                const secret = (name: string) => {
+                  const value = String(fd.get(name) ?? "").trim();
+                  return value.length > 0 ? value : undefined;
+                };
                 upsert.mutate(
                   {
                     provider: p.key,
@@ -115,8 +128,23 @@ export function IntegrationsPanel({
                           mockFailureRate: Number(fd.get("mockFailureRate") ?? 0) / 100,
                         }
                       : {},
+                    credentials: p.credentials
+                      ? {
+                          apiKey: secret("apiKey"),
+                          apiSecret: secret("apiSecret"),
+                          accountId: secret("accountId"),
+                        }
+                      : undefined,
                   },
-                  { onSuccess: () => setSaved(p.key) },
+                  {
+                    onSuccess: () => {
+                      setSaved(p.key);
+                      // Never leave a secret sitting in the DOM after the write.
+                      form
+                        .querySelectorAll<HTMLInputElement>("input[data-secret]")
+                        .forEach((el) => (el.value = ""));
+                    },
+                  },
                 );
               }}
             >
@@ -125,15 +153,22 @@ export function IntegrationsPanel({
                   <h2 className="font-medium">{p.name}</h2>
                   <p className="text-xs text-ink-500">{p.desc}</p>
                 </div>
-                <span
-                  className={`rounded px-2 py-0.5 text-xs font-semibold uppercase ${
-                    cfg?.status === "disabled"
-                      ? "bg-ink-100 text-ink-500"
-                      : "bg-ok-500/10 text-ok-500"
-                  }`}
-                >
-                  {cfg?.status ?? "default"}
-                </span>
+                <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                  {p.credentials && cfg?.hasCredentials && (
+                    <span className="rounded bg-ok-500/10 px-2 py-0.5 text-xs font-semibold uppercase text-ok-500">
+                      Credentials stored
+                    </span>
+                  )}
+                  <span
+                    className={`rounded px-2 py-0.5 text-xs font-semibold uppercase ${
+                      cfg?.status === "disabled"
+                        ? "bg-ink-100 text-ink-500"
+                        : "bg-ok-500/10 text-ok-500"
+                    }`}
+                  >
+                    {cfg?.status ?? "default"}
+                  </span>
+                </div>
               </div>
               {p.key === "stripe" ? (
                 <p className="text-sm">
@@ -196,6 +231,74 @@ export function IntegrationsPanel({
                         />
                       </div>
                     </>
+                  )}
+                  {p.credentials && (
+                    <fieldset className="col-span-2 space-y-2 rounded border border-ink-100 p-3">
+                      <legend className="px-1 text-xs font-medium uppercase tracking-wide text-ink-500">
+                        Gateway credentials
+                      </legend>
+                      <p className="text-xs text-ink-500">
+                        Encrypted into Supabase Vault on save and never sent back to this page.
+                        Leave blank to keep the stored values; fill any field to rotate.
+                      </p>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <div>
+                          <label className="label" htmlFor={`${p.key}-api-key`}>
+                            API key
+                          </label>
+                          <input
+                            id={`${p.key}-api-key`}
+                            name="apiKey"
+                            type="password"
+                            data-secret
+                            autoComplete="new-password"
+                            defaultValue=""
+                            placeholder={cfg?.hasCredentials ? "••••••••" : ""}
+                            className="input"
+                          />
+                        </div>
+                        <div>
+                          <label className="label" htmlFor={`${p.key}-api-secret`}>
+                            API secret
+                          </label>
+                          <input
+                            id={`${p.key}-api-secret`}
+                            name="apiSecret"
+                            type="password"
+                            data-secret
+                            autoComplete="new-password"
+                            defaultValue=""
+                            placeholder={cfg?.hasCredentials ? "••••••••" : ""}
+                            className="input"
+                          />
+                        </div>
+                        <div>
+                          <label className="label" htmlFor={`${p.key}-account-id`}>
+                            Account ID
+                          </label>
+                          <input
+                            id={`${p.key}-account-id`}
+                            name="accountId"
+                            type="password"
+                            data-secret
+                            autoComplete="new-password"
+                            defaultValue=""
+                            placeholder={cfg?.hasCredentials ? "••••••••" : ""}
+                            className="input"
+                          />
+                        </div>
+                      </div>
+                      {cfg?.hasCredentials && (
+                        <button
+                          type="button"
+                          className="btn-secondary px-2.5 py-1 text-xs"
+                          disabled={clearCredentials.isPending}
+                          onClick={() => clearCredentials.mutate({ provider: p.key })}
+                        >
+                          Clear credentials
+                        </button>
+                      )}
+                    </fieldset>
                   )}
                   <div className="col-span-2 flex items-center gap-3">
                     <button className="btn-primary" disabled={upsert.isPending}>

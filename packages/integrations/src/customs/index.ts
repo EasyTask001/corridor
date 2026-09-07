@@ -1,6 +1,6 @@
 import type { Regime } from "@corridor/domain";
 import { createMockCustomsClient } from "./mock";
-import type { CustomsClient, CustomsClientSettings } from "./types";
+import type { CustomsClient, CustomsClientSettings, CustomsCredentials } from "./types";
 
 export * from "./types";
 export * from "./manifest";
@@ -17,10 +17,13 @@ export function createCustomsClient(input: {
   regime: Regime;
   environment?: "sandbox" | "production";
   settings?: CustomsClientSettings;
+  /** Vault-decrypted gateway credentials, when the org has stored any. */
+  credentials?: CustomsCredentials;
 }): CustomsClient {
   return createMockCustomsClient({
     provider: providerForRegime(input.regime),
     environment: input.environment ?? "sandbox",
     ...input.settings,
+    credentials: input.credentials,
   });
 }

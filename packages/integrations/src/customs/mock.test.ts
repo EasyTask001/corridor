@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { createCustomsClient } from "./index";
 import { buildManifest, type ManifestSource } from "./manifest";
 import { createMockCustomsClient } from "./mock";
-import { CustomsTransportError } from "./types";
+import { CustomsTransportError, hasCustomsCredentials } from "./types";
 
 const src: ManifestSource = {
   organization: {
@@ -122,5 +123,51 @@ describe("mock customs client", () => {
     expect((await c.fetchDecision("R", hold, { currentStatus: "sent" })).decision).toBe("accepted");
     expect((await c.fetchDecision("R", hold, { currentStatus: "accepted" })).decision).toBe("held");
     expect((await c.fetchDecision("R", hold, { currentStatus: "held" })).decision).toBe("released");
+  });
+});
+
+describe("vault-backed credentials", () => {
+  it("hasCustomsCredentials ignores absent and blank fields", () => {
+    expect(hasCustomsCredentials()).toBe(false);
+    expect(hasCustomsCredentials({})).toBe(false);
+    expect(hasCustomsCredentials({ apiKey: "" })).toBe(false);
+    expect(hasCustomsCredentials({ accountId: "acct-1" })).toBe(true);
+  });
+
+  it("records only whether credentials were supplied — never their values", async () => {
+    const withCreds = createMockCustomsClient({
+      provider: "cbp_ace",
+      random: () => 0.99,
+      credentials: { apiKey: "super-secret", apiSecret: "also-secret" },
+    });
+    const ack = await withCreds.transmit(withTrip("TRIP-1"));
+    expect(ack.raw.credentialsPresent).toBe(true);
+    expect(JSON.stringify(ack.raw)).not.toContain("secret");
+
+    const decision = await withCreds.fetchDecision("R", withTrip("TRIP-1"), {
+      currentStatus: "sent",
+    });
+    expect(decision.raw.credentialsPresent).toBe(true);
+    expect(JSON.stringify(decision.raw)).not.toContain("secret");
+  });
+
+  it("works unchanged when the org has stored no credentials", async () => {
+    const bare = createMockCustomsClient({ provider: "cbp_ace", random: () => 0.99 });
+    const ack = await bare.transmit(withTrip("TRIP-1"));
+    expect(ack.raw.credentialsPresent).toBe(false);
+    expect(ack.referenceNumber).toMatch(/^ACE-/);
+  });
+
+  it("createCustomsClient forwards credentials alongside settings", async () => {
+    const client = createCustomsClient({
+      regime: "ACI",
+      environment: "production",
+      settings: { mockDelayMs: 10, mockFailureRate: 0 },
+      credentials: { accountId: "acct-1" },
+    });
+    const ack = await client.transmit(withTrip("TRIP-1"));
+    expect(client.environment).toBe("production");
+    expect(ack.decisionEtaMs).toBe(10);
+    expect(ack.raw.credentialsPresent).toBe(true);
   });
 });

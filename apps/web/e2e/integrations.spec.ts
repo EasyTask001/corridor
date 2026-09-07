@@ -154,6 +154,29 @@ test.describe("integrations settings", () => {
       .click();
   });
 
+  test("gateway credentials go into Vault write-only and can be cleared", async ({ page }) => {
+    await login(page, "owner@pathfinder.demo");
+    await page.goto("/settings/integrations");
+    const card = () => page.locator("form", { hasText: "CBSA ACI (Canada)" });
+    await card().getByLabel("API key").fill("e2e-api-key");
+    await card().getByLabel("API secret").fill("e2e-api-secret");
+    await card().getByRole("button", { name: "Save" }).click();
+    await expect(card().getByText("Credentials stored")).toBeVisible();
+    // the inputs are wiped on save — nothing is left sitting in the DOM
+    await expect(card().getByLabel("API key")).toHaveValue("");
+
+    await page.reload();
+    await expect(card().getByText("Credentials stored")).toBeVisible();
+    await expect(card().getByLabel("API key")).toHaveValue("");
+    // and the server never sends the stored values back
+    expect(await page.content()).not.toContain("e2e-api-key");
+
+    await card().getByRole("button", { name: "Clear credentials" }).click();
+    await expect(card().getByText("Credentials stored")).toBeHidden();
+    await page.reload();
+    await expect(card().getByText("Credentials stored")).toBeHidden();
+  });
+
   test("read-only cannot reach integrations", async ({ page }) => {
     await login(page, "readonly@pathfinder.demo");
     await page.goto("/settings/integrations");

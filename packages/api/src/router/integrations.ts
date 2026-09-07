@@ -11,12 +11,45 @@ const { integrationConfigs, integrationEvents, backgroundJobs, movements } = sch
 
 const provider = z.enum(["cbp_ace", "cbsa_aci", "border_wait_time", "hts_tariff", "stripe"]);
 
+/**
+ * Everything about a config a client may see. `credentials_ref` (the Vault
+ * pointer) is deliberately absent — callers get only `hasCredentials`, and the
+ * plaintext is unreachable from an `authenticated` session by construction
+ * (see migration 0012's grants on `read_integration_secret`).
+ */
+const publicConfigColumns = {
+  id: integrationConfigs.id,
+  organizationId: integrationConfigs.organizationId,
+  provider: integrationConfigs.provider,
+  environment: integrationConfigs.environment,
+  settings: integrationConfigs.settings,
+  status: integrationConfigs.status,
+  lastError: integrationConfigs.lastError,
+  createdAt: integrationConfigs.createdAt,
+  updatedAt: integrationConfigs.updatedAt,
+  hasCredentials: sql<boolean>`${integrationConfigs.credentialsRef} is not null`,
+};
+
+/** Write-only credential fields. Never echoed back, never audited by value. */
+const credentialsInput = z.object({
+  apiKey: z.string().trim().max(500).optional(),
+  apiSecret: z.string().trim().max(500).optional(),
+  accountId: z.string().trim().max(200).optional(),
+});
+
+/** Drop blank fields; `undefined` means "the caller sent no credentials". */
+function cleanCredentials(input?: z.infer<typeof credentialsInput>) {
+  if (!input) return undefined;
+  const entries = Object.entries(input).filter(([, v]) => typeof v === "string" && v.length > 0);
+  return entries.length > 0 ? (Object.fromEntries(entries) as Record<string, string>) : undefined;
+}
+
 export const integrationsRouter = router({
   configs: router({
     list: permissionProcedure("integrations.manage").query(({ ctx }) =>
       ctx.rls((tx) =>
         tx
-          .select()
+          .select(publicConfigColumns)
           .from(integrationConfigs)
           .where(eq(integrationConfigs.organizationId, ctx.orgId))
           .orderBy(integrationConfigs.provider),
@@ -34,17 +67,27 @@ export const integrationsRouter = router({
               mockFailureRate: z.number().min(0).max(1).optional(),
             })
             .default({}),
+          credentials: credentialsInput.optional(),
         }),
       )
-      .mutation(({ ctx, input }) =>
-        ctx.rls(async (tx) => {
-          const before = await tx.query.integrationConfigs.findFirst({
-            where: and(
-              eq(integrationConfigs.organizationId, ctx.orgId),
-              eq(integrationConfigs.provider, input.provider),
-            ),
-          });
-          const [row] = await tx
+      .mutation(async ({ ctx, input }) => {
+        const credentials = cleanCredentials(input.credentials);
+
+        // The config row must exist before store_integration_secret can hang a
+        // credentials_ref on it, and the RPC runs on its own connection — so
+        // the settings write commits first.
+        const { before, row } = await ctx.rls(async (tx) => {
+          const [existing] = await tx
+            .select(publicConfigColumns)
+            .from(integrationConfigs)
+            .where(
+              and(
+                eq(integrationConfigs.organizationId, ctx.orgId),
+                eq(integrationConfigs.provider, input.provider),
+              ),
+            )
+            .limit(1);
+          const [updated] = await tx
             .insert(integrationConfigs)
             .values({
               organizationId: ctx.orgId,
@@ -62,19 +105,75 @@ export const integrationsRouter = router({
                 lastError: null,
               },
             })
-            .returning();
-          await writeAudit(
+            .returning(publicConfigColumns);
+          return { before: existing ?? null, row: updated! };
+        });
+
+        let rotated = false;
+        if (credentials) {
+          // Vault write goes through the SECURITY DEFINER RPC — never a direct
+          // insert into vault.* — so the permission check lives in the database.
+          const { error } = await ctx.supabase.rpc("store_integration_secret", {
+            p_org: ctx.orgId,
+            p_provider: input.provider,
+            p_secret: JSON.stringify(credentials),
+          });
+          rotated = !error;
+        }
+
+        // Audited either way: the settings write above is already committed, so
+        // a failed rotation must still leave an honest trail (and never the
+        // credential values themselves).
+        const after = { ...row, hasCredentials: row.hasCredentials || rotated };
+        await ctx.rls((tx) =>
+          writeAudit(
             tx,
             ctx.orgId,
             "integration.configure",
             "integration_config",
             input.provider,
             before,
-            row,
+            rotated ? { ...after, credentials_rotated: true } : after,
+          ),
+        );
+        if (credentials && !rotated) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: `Settings saved, but the credentials for ${input.provider} could not be stored`,
+          });
+        }
+        return after;
+      }),
+    /** Remove the stored credentials (and the Vault secret itself). */
+    clearCredentials: permissionProcedure("integrations.manage")
+      .input(z.object({ provider }))
+      .mutation(async ({ ctx, input }) => {
+        const { data, error } = await ctx.supabase.rpc("delete_integration_secret", {
+          p_org: ctx.orgId,
+          p_provider: input.provider,
+        });
+        if (error) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: `Could not clear credentials for ${input.provider}`,
+          });
+        }
+        const cleared = data === true;
+        if (cleared) {
+          await ctx.rls((tx) =>
+            writeAudit(
+              tx,
+              ctx.orgId,
+              "integration.credentials_clear",
+              "integration_config",
+              input.provider,
+              { hasCredentials: true },
+              { hasCredentials: false },
+            ),
           );
-          return row!;
-        }),
-      ),
+        }
+        return { cleared };
+      }),
   }),
 
   events: router({
