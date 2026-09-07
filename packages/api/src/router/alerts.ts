@@ -148,6 +148,10 @@ export const alertsRouter = router({
 
   /** Manual re-scan for the active org (the nightly cron does this for every org). */
   rescan: permissionProcedure("alert.manage").mutation(({ ctx }) =>
-    ctx.rls((tx) => scanOrganization(tx, ctx.orgId)),
+    ctx.rls(async (tx) => {
+      const result = await scanOrganization(tx, ctx.orgId);
+      await writeAudit(tx, ctx.orgId, "alert.rescan", "organization", ctx.orgId, null, result);
+      return result;
+    }),
   ),
 });

@@ -50,6 +50,20 @@ export const documentsRouter = router({
             uploadedBy: ctx.session.user.id,
           })
           .returning({ id: sourceDocuments.id, storagePath: sourceDocuments.storagePath });
+        await writeAudit(
+          tx,
+          ctx.orgId,
+          "document.upload_reserved",
+          "source_document",
+          r!.id,
+          null,
+          {
+            filename: input.filename,
+            documentType: input.documentType,
+            movementId: input.movementId ?? null,
+            sizeBytes: input.sizeBytes,
+          },
+        );
         return r!;
       });
       // Signed URL is minted with the caller's session, so Storage RLS applies.

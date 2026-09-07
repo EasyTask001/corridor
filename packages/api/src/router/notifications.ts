@@ -7,6 +7,7 @@ import {
   uuid,
 } from "@corridor/domain";
 import { authedProcedure, orgProcedure, router } from "../trpc";
+import { writeAudit } from "../services/audit";
 
 const { notifications, notificationRules } = schema;
 
@@ -118,6 +119,17 @@ export const notificationsRouter = router({
 
     upsert: orgProcedure.input(notificationRuleInput).mutation(({ ctx, input }) =>
       ctx.rls(async (tx) => {
+        const [before] = await tx
+          .select()
+          .from(notificationRules)
+          .where(
+            and(
+              eq(notificationRules.organizationId, ctx.orgId),
+              eq(notificationRules.userId, ctx.session.user.id),
+              eq(notificationRules.eventType, input.eventType),
+            ),
+          )
+          .limit(1);
         const [row] = await tx
           .insert(notificationRules)
           .values({
@@ -137,6 +149,15 @@ export const notificationsRouter = router({
             set: { enabled: input.enabled, channel: input.channel, filters: input.filters },
           })
           .returning();
+        await writeAudit(
+          tx,
+          ctx.orgId,
+          "notification.rule_update",
+          "notification_rule",
+          row!.id,
+          before ?? null,
+          row!,
+        );
         return row!;
       }),
     ),

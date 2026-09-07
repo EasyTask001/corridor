@@ -11,6 +11,7 @@ import {
 import { permissionProcedure, router } from "../trpc";
 import { logIntegrationEvent } from "../services/customs";
 import { writeAudit } from "../services/audit";
+import { usageForPlan } from "../services/usage";
 
 const { organizations, subscriptions } = schema;
 
@@ -76,7 +77,13 @@ export const billingRouter = router({
         .select()
         .from(subscriptions)
         .where(eq(subscriptions.organizationId, ctx.orgId));
-      return { ...org!, subscription: sub ?? null, mode: billingMode() };
+      // usage_records is readable under `billing.manage` (migration 0013), the
+      // same permission that may change the plan it is billed against. Return
+      // null rather than a silently-empty meter for a billing.read-only caller.
+      const usage = ctx.session.permissions.has("billing.manage")
+        ? await usageForPlan(tx, ctx.orgId, org!.plan)
+        : null;
+      return { ...org!, subscription: sub ?? null, mode: billingMode(), usage };
     }),
   ),
 
@@ -101,8 +108,8 @@ export const billingRouter = router({
         successUrl: `${base}${input.returnPath}?checkout=success`,
         cancelUrl: `${base}${input.returnPath}?checkout=cancelled`,
       });
-      await ctx.rls((tx) =>
-        logIntegrationEvent(tx, {
+      await ctx.rls(async (tx) => {
+        await logIntegrationEvent(tx, {
           orgId: ctx.orgId,
           provider: "stripe",
           direction: "outbound",
@@ -110,8 +117,13 @@ export const billingRouter = router({
           request: { plan: input.plan, mode: res.mode },
           response: { url: res.url },
           success: true,
-        }),
-      );
+        });
+        await writeAudit(tx, ctx.orgId, "billing.session_opened", "subscription", ctx.orgId, null, {
+          session: "checkout",
+          plan: input.plan,
+          mode: res.mode,
+        });
+      });
       return res;
     }),
 
@@ -127,7 +139,14 @@ export const billingRouter = router({
         message: "No Stripe customer yet — start a subscription first",
       });
     }
-    return createPortal(org.stripeCustomerId ?? "mock", `${base}/settings/billing`);
+    const res = await createPortal(org.stripeCustomerId ?? "mock", `${base}/settings/billing`);
+    await ctx.rls((tx) =>
+      writeAudit(tx, ctx.orgId, "billing.session_opened", "subscription", ctx.orgId, null, {
+        session: "portal",
+        mode: res.mode,
+      }),
+    );
+    return res;
   }),
 
   /** Mock-mode only: complete a "checkout" without Stripe. */

@@ -13,6 +13,7 @@ import {
   createContext,
   copilotTools,
   rateLimitFor,
+  recordUsage,
   retrieveContext,
 } from "@corridor/api";
 import { COPILOT_SYSTEM_PROMPT, buildContextBlock, languageModel } from "@corridor/ai";
@@ -62,6 +63,19 @@ export async function POST(req: Request) {
     ? await ctx.rls((tx) => retrieveContext(tx, orgId, lastUserText))
     : { regulations: [], orgKnowledge: [] };
 
+  /**
+   * Meter one assistant message. Never allowed to fail the answer the user is
+   * already reading: a lost meter row is a billing rounding error, a 500 is an
+   * outage.
+   */
+  const meterMessage = async (mode: "model" | "mock") => {
+    try {
+      await ctx.rls((tx) => recordUsage(tx, orgId, "copilot_messages", 1, { mode }));
+    } catch (e) {
+      console.error("[copilot] usage metering failed", e);
+    }
+  };
+
   const resolved = languageModel("copilot");
   if (!resolved) {
     // Mock mode: no model configured. Retrieval still runs so citations can
@@ -78,6 +92,7 @@ export async function POST(req: Request) {
         writer.write({ type: "text-end", id: "mock" });
       },
     });
+    await meterMessage("mock");
     return createUIMessageStreamResponse({ stream });
   }
   const contextBlock = buildContextBlock(
@@ -97,6 +112,9 @@ export async function POST(req: Request) {
     tools: copilotTools(ctx.rls, orgId),
     stopWhen: stepCountIs(4),
     onError: ({ error }) => console.error("[copilot]", error),
+    // Fires once the assistant message is complete (after any tool steps), so
+    // the meter counts delivered answers, not model round-trips.
+    onFinish: () => meterMessage("model"),
   });
 
   // Citations travel as a UI message data-part (not a response header) so

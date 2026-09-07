@@ -1,13 +1,14 @@
 import { timingSafeEqual } from "node:crypto";
 import { getDb, schema, withServiceRole } from "@corridor/db";
-import { scanOrganization } from "@corridor/api";
+import { enqueueJob, scanOrganization } from "@corridor/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * Nightly document-expiry scan across every organization.
+ * Nightly document-expiry scan across every organization, plus the daily
+ * hand-off of metered usage to Stripe.
  * Triggered by Vercel Cron (see vercel.json); authenticated with CRON_SECRET.
  * Runs under the service role and filters by organization_id per org.
  */
@@ -29,5 +30,16 @@ export async function GET(req: Request) {
     results[org.id] = await withServiceRole(db, (tx) => scanOrganization(tx, org.id));
   }
 
-  return Response.json({ ok: true, organizations: orgs.length, results });
+  // Queue-wide, so no organization_id. The /api/jobs/process worker picks it
+  // up on its next minute and settles every org's unreported usage.
+  const usageJob = await withServiceRole(db, (tx) =>
+    enqueueJob(tx, { orgId: null, jobType: "billing.report_usage", payload: {} }),
+  );
+
+  return Response.json({
+    ok: true,
+    organizations: orgs.length,
+    results,
+    usageReportJobId: usageJob.id,
+  });
 }

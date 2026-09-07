@@ -15,7 +15,30 @@ export {
 export { getKv, getRedis, MemoryKv, resetKvForTests, type KvStore } from "./infra/redis";
 export { invalidatePermissionCache } from "./infra/permission-cache";
 export { scanOrganization } from "./services/compliance";
-export { processDueJobs, hasDueJobs, nextJobDueInMs, type ProcessResult } from "./services/jobs";
+export {
+  enqueueJob,
+  processDueJobs,
+  hasDueJobs,
+  nextJobDueInMs,
+  type JobType,
+  type ProcessResult,
+} from "./services/jobs";
+export {
+  writeAudit,
+  writeSystemAudit,
+  AUDITED_MUTATIONS,
+  AUDIT_EXEMPT_MUTATIONS,
+} from "./services/audit";
+export {
+  recordUsage,
+  usageTotals,
+  usageForPlan,
+  projectUsage,
+  periodStartOf,
+  type UsageTotals,
+  type UsageProjection,
+  type MetricOverage,
+} from "./services/usage";
 export { upsertSubscription } from "./router/billing";
 export {
   copilotTools,

@@ -5,22 +5,33 @@
  */
 import {
   and,
+  asc,
   eq,
   inArray,
+  isNull,
+  lt,
   schema,
   sql,
   withServiceRole,
   type DatabaseClient,
   type RlsTransaction,
 } from "@corridor/db";
-import type { ManifestPayload } from "@corridor/integrations";
+import { reportUsage, type ManifestPayload, type UsageMeterRecord } from "@corridor/integrations";
 import { customsClientFor, logIntegrationEvent, manifestFor } from "./customs";
 import { applyCustomsDecision, loadFull, loadOrganization, requireMovement } from "./movements";
+import { recordUsage } from "./usage";
 
-const { backgroundJobs, movements } = schema;
+const { backgroundJobs, movements, organizations, usageRecords } = schema;
 
 export type JobType =
-  "customs.decide" | "compliance.scan" | "document.extract" | "copilot.embed_knowledge";
+  | "customs.decide"
+  | "compliance.scan"
+  | "document.extract"
+  | "copilot.embed_knowledge"
+  | "billing.report_usage";
+
+/** How many usage records one `billing.report_usage` run settles. */
+const USAGE_REPORT_BATCH = 500;
 
 export async function enqueueJob(
   tx: RlsTransaction,
@@ -113,7 +124,14 @@ const handlers: Record<JobType, Handler> = {
   "document.extract": async (tx, job) => {
     const { extractDocumentJob } = await import("./documents");
     if (!job.organizationId) throw new Error("document.extract requires organization_id");
-    return extractDocumentJob(tx, job.organizationId, String(job.payload.documentId));
+    const documentId = String(job.payload.documentId);
+    const result = await extractDocumentJob(tx, job.organizationId, documentId);
+    // Only a completed extraction is billable: a skipped or failed one cost the
+    // tenant nothing they should pay for.
+    if ("ok" in result && result.ok) {
+      await recordUsage(tx, job.organizationId, "documents_extracted", 1, { documentId });
+    }
+    return result;
   },
 
   "compliance.scan": async (tx, job) => {
@@ -143,6 +161,62 @@ const handlers: Record<JobType, Handler> = {
     await invalidateOrgKnowledgeCache(job.organizationId);
     return { sourceType, sourceId };
   },
+
+  /**
+   * Push metered usage to Stripe. Queue-wide (organization_id is null): it
+   * reports every organization's unreported records in one pass, batched per
+   * org so one tenant's Stripe failure cannot strand another's.
+   *
+   * The one-hour settling window keeps a record out of the meter until the
+   * transaction that wrote it is long committed and any same-request retry has
+   * played out; `reported_at` is the idempotency marker on our side and the
+   * record id is the one Stripe sees.
+   */
+  "billing.report_usage": async (tx) => {
+    const cutoff = new Date(Date.now() - 60 * 60 * 1000);
+    const pending = await tx
+      .select({
+        id: usageRecords.id,
+        organizationId: usageRecords.organizationId,
+        metric: usageRecords.metric,
+        quantity: usageRecords.quantity,
+        occurredAt: usageRecords.occurredAt,
+        stripeCustomerId: organizations.stripeCustomerId,
+      })
+      .from(usageRecords)
+      .innerJoin(organizations, eq(organizations.id, usageRecords.organizationId))
+      .where(and(isNull(usageRecords.reportedAt), lt(usageRecords.occurredAt, cutoff)))
+      .orderBy(asc(usageRecords.occurredAt), asc(usageRecords.id))
+      .limit(USAGE_REPORT_BATCH);
+    if (pending.length === 0) return { reported: 0, organizations: 0 };
+
+    const byOrg = new Map<string, UsageMeterRecord[]>();
+    for (const row of pending) {
+      const list = byOrg.get(row.organizationId) ?? [];
+      list.push(row);
+      byOrg.set(row.organizationId, list);
+    }
+
+    let reported = 0;
+    const failures: Array<{ organizationId: string; error: string }> = [];
+    for (const [organizationId, records] of byOrg) {
+      try {
+        const results = await reportUsage(records);
+        for (const result of results) {
+          await tx
+            .update(usageRecords)
+            .set({ reportedAt: new Date(), stripeMeterEventId: result.eventId })
+            .where(eq(usageRecords.id, result.id));
+          reported++;
+        }
+      } catch (e) {
+        // One tenant's Stripe outage must not strand the rest of the batch;
+        // its records stay unreported and are picked up on the next run.
+        failures.push({ organizationId, error: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    return { reported, organizations: byOrg.size, failures };
+  },
 };
 
 export interface ProcessResult {
@@ -161,6 +235,18 @@ function jobOrgCap(): number {
   return Number.isInteger(configured) && configured > 0 ? configured : 2;
 }
 
+/**
+ * How long a claimed job may stay `running` before another worker may take it
+ * over. A worker that dies mid-job would otherwise hold one of its
+ * organization's cap slots forever (see claim_jobs, migration 0013). Must
+ * comfortably exceed the longest handler run — the cron route's maxDuration is
+ * 300s, so the default is double that.
+ */
+function jobLeaseSeconds(): number {
+  const configured = Number(process.env.CORRIDOR_JOB_LEASE_SECONDS);
+  return Number.isInteger(configured) && configured > 0 ? configured : 600;
+}
+
 /** Claim and run due jobs. Safe to call concurrently from multiple workers. */
 export async function processDueJobs(
   db: DatabaseClient,
@@ -169,8 +255,9 @@ export async function processDueJobs(
   const limit = opts.limit ?? 10;
   const worker = opts.worker ?? `worker-${process.pid}`;
   const orgCap = jobOrgCap();
+  const lease = jobLeaseSeconds();
   const claimed = await withServiceRole(db, (tx) =>
-    tx.execute<Job>(sql`select * from public.claim_jobs(${limit}, ${worker}, ${orgCap})`),
+    tx.execute<Job>(sql`select * from public.claim_jobs(${limit}, ${worker}, ${orgCap}, ${lease})`),
   );
   const out: ProcessResult = { claimed: claimed.length, succeeded: 0, failed: 0, results: [] };
 

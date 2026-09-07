@@ -257,9 +257,21 @@ export const integrationsRouter = router({
         ),
       ),
     /** Run due jobs now (dev / ops convenience; the cron does this in prod). */
-    runNow: permissionProcedure("integrations.manage").mutation(({ ctx }) =>
-      processDueJobs(ctx.db, { worker: `manual-${ctx.session.user.id.slice(0, 8)}` }),
-    ),
+    runNow: permissionProcedure("integrations.manage").mutation(async ({ ctx }) => {
+      const result = await processDueJobs(ctx.db, {
+        worker: `manual-${ctx.session.user.id.slice(0, 8)}`,
+      });
+      // The worker runs queue-wide under the service role, so the audit row
+      // records who pressed the button, not which org's jobs ran.
+      await ctx.rls((tx) =>
+        writeAudit(tx, ctx.orgId, "job.run_now", "background_jobs", ctx.orgId, null, {
+          claimed: result.claimed,
+          succeeded: result.succeeded,
+          failed: result.failed,
+        }),
+      );
+      return result;
+    }),
     stats: permissionProcedure("integrations.manage").query(({ ctx }) =>
       ctx.rls(async (tx) => {
         const rows = await tx

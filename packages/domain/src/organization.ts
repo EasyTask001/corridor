@@ -80,3 +80,17 @@ export const inviteMemberInput = z.object({
   roleId: uuid,
 });
 export type InviteMemberInput = z.infer<typeof inviteMemberInput>;
+
+/**
+ * Billable events Corridor meters. The list is mirrored by the
+ * `usage_records.metric` CHECK constraint (migration 0013) — add to both or
+ * neither.
+ */
+export const USAGE_METRICS = [
+  "documents_extracted",
+  "copilot_messages",
+  "movements_transmitted",
+  "ai_suggestions",
+] as const;
+export const usageMetric = z.enum(USAGE_METRICS);
+export type UsageMetric = (typeof USAGE_METRICS)[number];

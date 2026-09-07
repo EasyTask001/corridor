@@ -4,6 +4,7 @@ import { and, desc, eq, gte, schema, sql, type RlsTransaction, type SQL } from "
 import { reportQuery, type ReportQuery } from "@corridor/domain";
 import { translateReportQuestion, UnsupportedReportQuestionError } from "@corridor/ai";
 import { permissionProcedure, router } from "../trpc";
+import { writeAudit } from "../services/audit";
 
 const { movements, cargo } = schema;
 
@@ -138,6 +139,13 @@ export const reportingRouter = router({
         const query = reportQuery.parse(translated.query);
         const rows = await executeReport(tx, ctx.orgId, query);
         const unit = unitFor(query);
+        // A report reads across the whole tenant's movement data, so who asked
+        // what belongs in the compliance record even though nothing changed.
+        await writeAudit(tx, ctx.orgId, "report.run", "organization", ctx.orgId, null, {
+          question: input.question,
+          query,
+          rowCount: rows.length,
+        });
         return {
           ...translated,
           query,

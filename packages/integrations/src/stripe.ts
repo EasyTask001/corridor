@@ -6,10 +6,23 @@
  * "mock" mode: checkout returns an internal URL that activates the plan
  * immediately, so the billing UI and DB sync are still exercised end-to-end.
  */
+import { randomUUID } from "node:crypto";
 import Stripe from "stripe";
 import type { SubscriptionPlan } from "@corridor/domain";
 
 export type BillingMode = "stripe" | "mock";
+
+/**
+ * Metered allowance for a plan. `null` included = unlimited (enterprise), in
+ * which case there is never an overage. Prices are USD per unit beyond the
+ * included allowance.
+ */
+export interface PlanUsage {
+  includedDocuments: number | null;
+  includedCopilotMessages: number | null;
+  overageUsdPerDocument: number;
+  overageUsdPerMessage: number;
+}
 
 export interface BillingPlan {
   plan: Exclude<SubscriptionPlan, "trial">;
@@ -17,6 +30,7 @@ export interface BillingPlan {
   monthlyUsd: number;
   seats: number;
   features: string[];
+  usage: PlanUsage;
 }
 
 export const BILLING_PLANS: BillingPlan[] = [
@@ -26,6 +40,12 @@ export const BILLING_PLANS: BillingPlan[] = [
     monthlyUsd: 149,
     seats: 3,
     features: ["ACE + ACI e-manifests", "Registries & expiry alerts", "3 users"],
+    usage: {
+      includedDocuments: 50,
+      includedCopilotMessages: 200,
+      overageUsdPerDocument: 1.5,
+      overageUsdPerMessage: 0.1,
+    },
   },
   {
     plan: "professional",
@@ -38,6 +58,12 @@ export const BILLING_PLANS: BillingPlan[] = [
       "Compliance copilot",
       "10 users",
     ],
+    usage: {
+      includedDocuments: 500,
+      includedCopilotMessages: 2000,
+      overageUsdPerDocument: 1.0,
+      overageUsdPerMessage: 0.05,
+    },
   },
   {
     plan: "enterprise",
@@ -50,17 +76,47 @@ export const BILLING_PLANS: BillingPlan[] = [
       "Usage-based billing",
       "Priority support",
     ],
+    // Unlimited: an enterprise agreement prices volume up front, so the meter
+    // is informational and never produces an overage line.
+    usage: {
+      includedDocuments: null,
+      includedCopilotMessages: null,
+      overageUsdPerDocument: 0,
+      overageUsdPerMessage: 0,
+    },
   },
 ];
+
+/**
+ * The allowance a plan is metered against. `trial` has no plan row of its own —
+ * it is metered against Starter, the plan a trial converts into.
+ */
+export function planUsageFor(plan: SubscriptionPlan): PlanUsage {
+  return (BILLING_PLANS.find((p) => p.plan === plan) ?? BILLING_PLANS[0]!).usage;
+}
+
+const METER_ENV_PREFIX = "STRIPE_METER_";
 
 export interface StripeEnv {
   secretKey?: string;
   webhookSecret?: string;
   /** Stripe Price IDs per plan, e.g. STRIPE_PRICE_STARTER */
   prices?: Partial<Record<BillingPlan["plan"], string>>;
+  /**
+   * Stripe meter `event_name` per metric, keyed by the lower-cased metric.
+   * Read from `STRIPE_METER_<METRIC>` (e.g. STRIPE_METER_DOCUMENTS_EXTRACTED);
+   * a metric with no override meters under its own name.
+   */
+  meters?: Record<string, string>;
 }
 
 export function readStripeEnv(env: NodeJS.ProcessEnv = process.env): StripeEnv {
+  const meters: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (key.startsWith(METER_ENV_PREFIX) && value) {
+      meters[key.slice(METER_ENV_PREFIX.length).toLowerCase()] = value;
+    }
+  }
   return {
     secretKey: env.STRIPE_SECRET_KEY,
     webhookSecret: env.STRIPE_WEBHOOK_SECRET,
@@ -69,7 +125,13 @@ export function readStripeEnv(env: NodeJS.ProcessEnv = process.env): StripeEnv {
       professional: env.STRIPE_PRICE_PROFESSIONAL,
       enterprise: env.STRIPE_PRICE_ENTERPRISE,
     },
+    meters,
   };
+}
+
+/** Stripe meter `event_name` for a metric — the env override, else the metric. */
+export function meterEventNameFor(metric: string, env: StripeEnv = readStripeEnv()): string {
+  return env.meters?.[metric.toLowerCase()] ?? metric;
 }
 
 export function billingMode(env: StripeEnv = readStripeEnv()): BillingMode {
@@ -126,6 +188,68 @@ export async function createPortal(
     return_url: returnUrl,
   });
   return { mode: "stripe" as const, url: session.url };
+}
+
+/** One metered event to push to Stripe. */
+export interface UsageMeterRecord {
+  /** usage_records.id — also the Stripe idempotency identifier. */
+  id: number;
+  organizationId: string;
+  metric: string;
+  quantity: number;
+  occurredAt: Date;
+  /** The organization's Stripe customer, when it has one. */
+  stripeCustomerId: string | null;
+}
+
+export interface UsageMeterResult {
+  id: number;
+  eventId: string;
+  /**
+   * `stripe`   — accepted by a Stripe meter.
+   * `mock`     — no STRIPE_SECRET_KEY; synthetic id so the record still settles.
+   * `unbilled` — Stripe is configured but the organization has no customer to
+   *              bill (it never checked out). Stamped and settled rather than
+   *              retried forever; the local meter keeps the number for the UI.
+   */
+  mode: "stripe" | "mock" | "unbilled";
+}
+
+/**
+ * Push metered events to Stripe. Degrades gracefully: with no secret key every
+ * record comes back with a synthetic `mock_<uuid>` id so the reporter job can
+ * still stamp and settle it.
+ *
+ * `identifier` is the local record id, which makes the call idempotent — a
+ * retried job cannot double-bill an event Stripe already accepted.
+ */
+export async function reportUsage(
+  records: UsageMeterRecord[],
+  env: StripeEnv = readStripeEnv(),
+): Promise<UsageMeterResult[]> {
+  const stripe = stripeClient(env);
+  if (!stripe) {
+    return records.map((r) => ({ id: r.id, eventId: `mock_${randomUUID()}`, mode: "mock" }));
+  }
+  const out: UsageMeterResult[] = [];
+  for (const record of records) {
+    if (!record.stripeCustomerId) {
+      out.push({ id: record.id, eventId: `unbilled_${randomUUID()}`, mode: "unbilled" });
+      continue;
+    }
+    const identifier = `corridor_usage_${record.id}`;
+    await stripe.billing.meterEvents.create({
+      event_name: meterEventNameFor(record.metric, env),
+      identifier,
+      timestamp: Math.floor(record.occurredAt.getTime() / 1000),
+      payload: {
+        value: String(record.quantity),
+        stripe_customer_id: record.stripeCustomerId,
+      },
+    });
+    out.push({ id: record.id, eventId: identifier, mode: "stripe" });
+  }
+  return out;
 }
 
 /** Verify + parse a webhook. Returns null when signature is invalid. */

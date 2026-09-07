@@ -45,6 +45,8 @@ import {
   requireMovement,
   validationFor,
 } from "../services/movements";
+import { writeAudit } from "../services/audit";
+import { recordUsage } from "../services/usage";
 
 const {
   movements,
@@ -180,6 +182,7 @@ export const movementRouter = router({
           actorType: "user",
           payload: { movementNumber },
         });
+        await writeAudit(tx, ctx.orgId, "movement.create", "movement", m!.id, null, m!);
         return m!;
       }),
     ),
@@ -208,6 +211,7 @@ export const movementRouter = router({
           })
           .where(eq(movements.id, id))
           .returning();
+        await writeAudit(tx, ctx.orgId, "movement.update", "movement", id, m, row!);
         return row!;
       }),
     ),
@@ -221,6 +225,11 @@ export const movementRouter = router({
           const m = await requireMovement(tx, ctx.orgId, movementId);
           requireEditable(m.status);
           if (id) {
+            const [before] = await tx
+              .select()
+              .from(cargo)
+              .where(and(eq(cargo.id, id), eq(cargo.movementId, movementId)))
+              .limit(1);
             const [row] = await tx
               .update(cargo)
               .set(fields)
@@ -228,6 +237,15 @@ export const movementRouter = router({
               .returning();
             if (!row) throw new TRPCError({ code: "NOT_FOUND" });
             await syncMovementRiskAlerts(tx, ctx.orgId, movementId);
+            await writeAudit(
+              tx,
+              ctx.orgId,
+              "movement.cargo_upsert",
+              "cargo",
+              row.id,
+              before ?? null,
+              row,
+            );
             return row;
           }
           const nextRows = await tx
@@ -240,6 +258,7 @@ export const movementRouter = router({
             .values({ ...fields, movementId, organizationId: ctx.orgId, lineNumber: next })
             .returning();
           await syncMovementRiskAlerts(tx, ctx.orgId, movementId);
+          await writeAudit(tx, ctx.orgId, "movement.cargo_upsert", "cargo", row!.id, null, row!);
           return row!;
         }),
       ),
@@ -249,9 +268,19 @@ export const movementRouter = router({
         ctx.rls(async (tx) => {
           const m = await requireMovement(tx, ctx.orgId, input.movementId);
           requireEditable(m.status);
-          await tx
+          const [removed] = await tx
             .delete(cargo)
-            .where(and(eq(cargo.id, input.id), eq(cargo.movementId, input.movementId)));
+            .where(and(eq(cargo.id, input.id), eq(cargo.movementId, input.movementId)))
+            .returning();
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "movement.cargo_remove",
+            "cargo",
+            input.id,
+            removed ?? { movementId: input.movementId },
+            null,
+          );
           return { id: input.id };
         }),
       ),
@@ -286,6 +315,7 @@ export const movementRouter = router({
                 });
               throw e;
             });
+          await writeAudit(tx, ctx.orgId, "movement.seal_add", "seal", row!.id, null, row!);
           return row!;
         }),
       ),
@@ -295,9 +325,19 @@ export const movementRouter = router({
         ctx.rls(async (tx) => {
           const m = await requireMovement(tx, ctx.orgId, input.movementId);
           requireEditable(m.status);
-          await tx
+          const [removed] = await tx
             .delete(seals)
-            .where(and(eq(seals.id, input.id), eq(seals.movementId, input.movementId)));
+            .where(and(eq(seals.id, input.id), eq(seals.movementId, input.movementId)))
+            .returning();
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "movement.seal_remove",
+            "seal",
+            input.id,
+            removed ?? { movementId: input.movementId },
+            null,
+          );
           return { id: input.id };
         }),
       ),
@@ -324,6 +364,10 @@ export const movementRouter = router({
             content: `Movement ${m.movementNumber}: ${input.body}`,
           },
         });
+        await writeAudit(tx, ctx.orgId, "movement.note_add", "movement", input.movementId, null, {
+          movementNumber: m.movementNumber,
+          body: input.body,
+        });
         return { ok: true };
       }),
     ),
@@ -337,7 +381,34 @@ export const movementRouter = router({
   submit: permissionProcedure("movement.transmit_to_customs")
     .input(z.object({ id: uuid }))
     .mutation(async ({ ctx, input }) => {
-      const result = await ctx.rls((tx) => transmitMovement(tx, actorOf(ctx), input.id));
+      const result = await ctx.rls(async (tx) => {
+        const before = await requireMovement(tx, ctx.orgId, input.id);
+        const r = await transmitMovement(tx, actorOf(ctx), input.id);
+        if ("transportError" in r && r.transportError) {
+          // The transaction still commits (the integration_events failure row
+          // is the point), so the failed attempt belongs in the log too.
+          await writeAudit(tx, ctx.orgId, "movement.submit_failed", "movement", input.id, null, {
+            statusCode: r.transportError.statusCode,
+            retryable: r.transportError.retryable,
+            error: r.transportError.message,
+          });
+          return r;
+        }
+        await writeAudit(
+          tx,
+          ctx.orgId,
+          "movement.submit",
+          "movement",
+          input.id,
+          { status: before.status },
+          { status: r.movement.status, referenceNumber: r.referenceNumber },
+        );
+        await recordUsage(tx, ctx.orgId, "movements_transmitted", 1, {
+          movementId: input.id,
+          regime: r.movement.regime,
+        });
+        return r;
+      });
       if ("transportError" in result && result.transportError) {
         const e = result.transportError;
         throw new TRPCError({
@@ -355,7 +426,7 @@ export const movementRouter = router({
     .mutation(({ ctx, input }) =>
       ctx.rls(async (tx) => {
         const m = await requireMovement(tx, ctx.orgId, input.id);
-        return applyTransition(
+        const row = await applyTransition(
           tx,
           actorOf(ctx),
           m,
@@ -364,6 +435,16 @@ export const movementRouter = router({
           {},
           { reason: input.reason ?? null },
         );
+        await writeAudit(
+          tx,
+          ctx.orgId,
+          "movement.cancel",
+          "movement",
+          m.id,
+          { status: m.status },
+          { status: row.status, reason: input.reason ?? null },
+        );
+        return row;
       }),
     ),
 
@@ -373,7 +454,17 @@ export const movementRouter = router({
     .mutation(({ ctx, input }) =>
       ctx.rls(async (tx) => {
         const m = await requireMovement(tx, ctx.orgId, input.id);
-        return applyTransition(tx, actorOf(ctx), m, "arrived", "user");
+        const row = await applyTransition(tx, actorOf(ctx), m, "arrived", "user");
+        await writeAudit(
+          tx,
+          ctx.orgId,
+          "movement.mark_arrived",
+          "movement",
+          m.id,
+          { status: m.status },
+          { status: row.status },
+        );
+        return row;
       }),
     ),
 
@@ -445,6 +536,20 @@ export const movementRouter = router({
         const updated = await applyTransition(tx, actorOf(ctx), m, "sent", "user", set, {
           amendmentNumber: next,
         });
+        await writeAudit(
+          tx,
+          ctx.orgId,
+          "movement.amend",
+          "movement",
+          m.id,
+          { status: m.status },
+          {
+            status: updated.status,
+            amendmentNumber: next,
+            reason: input.reason,
+            diff,
+          },
+        );
         return { movement: updated, amendment: amendment! };
       }),
     ),
@@ -462,7 +567,7 @@ export const movementRouter = router({
           throw new TRPCError({ code: "FORBIDDEN", message: "Customs simulation is disabled" });
         }
         const m = await requireMovement(tx, ctx.orgId, input.movementId);
-        return applyCustomsDecision(tx, actorOf(ctx), m, {
+        const row = await applyCustomsDecision(tx, actorOf(ctx), m, {
           decision: input.decision,
           referenceNumber:
             input.referenceNumber ??
@@ -471,6 +576,21 @@ export const movementRouter = router({
           message: input.message ?? null,
           simulated: true,
         });
+        await writeAudit(
+          tx,
+          ctx.orgId,
+          "movement.customs_response",
+          "movement",
+          m.id,
+          { status: m.status },
+          {
+            status: row.status,
+            decision: input.decision,
+            message: input.message ?? null,
+            simulated: true,
+          },
+        );
+        return row;
       }),
     ),
 
@@ -478,19 +598,69 @@ export const movementRouter = router({
     generate: aiProcedure("movement.write")
       .input(z.object({ movementId: uuid }))
       .mutation(({ ctx, input }) =>
-        ctx.rls((tx) =>
-          generateMovementSuggestion(tx, ctx.orgId, ctx.session.user.id, input.movementId),
-        ),
+        ctx.rls(async (tx) => {
+          const suggestion = await generateMovementSuggestion(
+            tx,
+            ctx.orgId,
+            ctx.session.user.id,
+            input.movementId,
+          );
+          // null = nothing close enough in the history to suggest. Nothing was
+          // produced, so there is nothing to audit or to bill for.
+          if (!suggestion) return suggestion;
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "movement.suggestion_generate",
+            "movement_suggestion",
+            suggestion.id,
+            null,
+            {
+              movementId: input.movementId,
+              sourceMovementId: suggestion.sourceMovementId,
+              score: suggestion.score,
+            },
+          );
+          await recordUsage(tx, ctx.orgId, "ai_suggestions", 1, {
+            movementId: input.movementId,
+            suggestionId: suggestion.id,
+          });
+          return suggestion;
+        }),
       ),
     accept: permissionProcedure("movement.write")
       .input(z.object({ suggestionId: uuid }))
       .mutation(({ ctx, input }) =>
-        ctx.rls((tx) => acceptMovementSuggestion(tx, ctx.orgId, input.suggestionId)),
+        ctx.rls(async (tx) => {
+          const decided = await acceptMovementSuggestion(tx, ctx.orgId, input.suggestionId);
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "movement.suggestion_accept",
+            "movement_suggestion",
+            decided.id,
+            { status: "offered" },
+            { status: decided.status, movementId: decided.movementId },
+          );
+          return decided;
+        }),
       ),
     dismiss: permissionProcedure("movement.write")
       .input(z.object({ suggestionId: uuid }))
       .mutation(({ ctx, input }) =>
-        ctx.rls((tx) => dismissMovementSuggestion(tx, ctx.orgId, input.suggestionId)),
+        ctx.rls(async (tx) => {
+          const decided = await dismissMovementSuggestion(tx, ctx.orgId, input.suggestionId);
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "movement.suggestion_dismiss",
+            "movement_suggestion",
+            decided.id,
+            { status: "offered" },
+            { status: decided.status, movementId: decided.movementId },
+          );
+          return decided;
+        }),
       ),
     stats: permissionProcedure("movement.read").query(({ ctx }) =>
       ctx.rls(async (tx) => {

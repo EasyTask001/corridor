@@ -284,6 +284,138 @@ describe("background_jobs queue", () => {
       );
     }
   });
+
+  it("reclaims a job whose worker died, but not one still inside its lease", async () => {
+    // Own org so the per-org cap arithmetic cannot be perturbed by seeded jobs.
+    const [org] = await db
+      .insert(organizations)
+      .values({ name: `Job Lease ${Date.now()}` })
+      .returning({ id: organizations.id });
+    try {
+      const [stale, fresh] = await withServiceRole(db, (tx) =>
+        tx
+          .insert(backgroundJobs)
+          .values([
+            // Claimed 20 minutes ago and never finished — its worker is gone.
+            {
+              organizationId: org!.id,
+              jobType: "noop.test",
+              status: "running" as const,
+              attempts: 1,
+              lockedBy: "dead-worker",
+              lockedAt: new Date(Date.now() - 20 * 60_000),
+              startedAt: new Date(Date.now() - 20 * 60_000),
+            },
+            // Claimed a minute ago — still working.
+            {
+              organizationId: org!.id,
+              jobType: "noop.test",
+              status: "running" as const,
+              attempts: 1,
+              lockedBy: "live-worker",
+              lockedAt: new Date(Date.now() - 60_000),
+              startedAt: new Date(Date.now() - 60_000),
+            },
+          ])
+          .returning({ id: backgroundJobs.id }),
+      );
+
+      // 600s lease: the 20-minute-old claim is expired, the 1-minute-old is not.
+      const claimed = await withServiceRole(db, (tx) =>
+        tx.execute<{ id: number; locked_by: string; attempts: number }>(
+          sql`select id, locked_by, attempts from public.claim_jobs(10, 'reaper', 5, 600)`,
+        ),
+      );
+      const ids = claimed.map((r) => Number(r.id));
+      expect(ids).toContain(stale!.id);
+      expect(ids).not.toContain(fresh!.id);
+
+      const rows = await withServiceRole(db, (tx) =>
+        tx
+          .select({
+            id: backgroundJobs.id,
+            status: backgroundJobs.status,
+            attempts: backgroundJobs.attempts,
+            lockedBy: backgroundJobs.lockedBy,
+          })
+          .from(backgroundJobs)
+          .where(inArray(backgroundJobs.id, [stale!.id, fresh!.id])),
+      );
+      const reclaimed = rows.find((r) => r.id === stale!.id)!;
+      const untouched = rows.find((r) => r.id === fresh!.id)!;
+      // Reclaimed like any other claim: re-locked, attempts incremented.
+      expect(reclaimed).toMatchObject({ status: "running", attempts: 2, lockedBy: "reaper" });
+      // Still held by the worker that is presumed alive.
+      expect(untouched).toMatchObject({ status: "running", attempts: 1, lockedBy: "live-worker" });
+    } finally {
+      await db.delete(organizations).where(eq(organizations.id, org!.id));
+    }
+  });
+
+  it("stops reclaiming once a stale job has used up max_attempts", async () => {
+    const [org] = await db
+      .insert(organizations)
+      .values({ name: `Job Lease Max ${Date.now()}` })
+      .returning({ id: organizations.id });
+    try {
+      const [exhausted] = await withServiceRole(db, (tx) =>
+        tx
+          .insert(backgroundJobs)
+          .values({
+            organizationId: org!.id,
+            jobType: "noop.test",
+            status: "running" as const,
+            attempts: 3,
+            maxAttempts: 3,
+            lockedBy: "dead-worker",
+            lockedAt: new Date(Date.now() - 60 * 60_000),
+          })
+          .returning({ id: backgroundJobs.id }),
+      );
+      const claimed = await withServiceRole(db, (tx) =>
+        tx.execute<{ id: number }>(sql`select id from public.claim_jobs(10, 'reaper2', 5, 600)`),
+      );
+      expect(claimed.map((r) => Number(r.id))).not.toContain(exhausted!.id);
+    } finally {
+      await db.delete(organizations).where(eq(organizations.id, org!.id));
+    }
+  });
+
+  it("a stale job does not consume one of its organization's cap slots", async () => {
+    const [org] = await db
+      .insert(organizations)
+      .values({ name: `Job Lease Cap ${Date.now()}` })
+      .returning({ id: organizations.id });
+    try {
+      const runAt = new Date(Date.now() - 2 * 3600_000);
+      await withServiceRole(db, (tx) =>
+        tx.insert(backgroundJobs).values([
+          {
+            organizationId: org!.id,
+            jobType: "noop.test",
+            status: "running" as const,
+            attempts: 1,
+            maxAttempts: 5,
+            lockedBy: "dead-worker",
+            lockedAt: new Date(Date.now() - 30 * 60_000),
+          },
+          { organizationId: org!.id, jobType: "noop.test", runAt },
+          { organizationId: org!.id, jobType: "noop.test", runAt },
+        ]),
+      );
+      // Cap of 2. Were the dead worker's job still counted as running, only one
+      // pending job could be claimed; with the reclaim it is 2 (the stale one
+      // plus the older pending one).
+      const claimed = await withServiceRole(db, (tx) =>
+        tx.execute<{ id: number; organization_id: string }>(
+          sql`select id, organization_id from public.claim_jobs(10, 'cap-lease', 2, 600)`,
+        ),
+      );
+      expect(claimed.filter((r) => r.organization_id === org!.id)).toHaveLength(2);
+    } finally {
+      await db.delete(organizations).where(eq(organizations.id, org!.id));
+    }
+  });
 });
 
 describe("integration tables RLS", () => {
