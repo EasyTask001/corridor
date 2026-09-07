@@ -101,6 +101,22 @@ test.describe("movement builder", () => {
     await expect(page.getByRole("cell", { name: "DRAFT" })).toHaveCount(0);
   });
 
+  test("suggests a historical trip and applies it only after confirmation", async ({ page }) => {
+    await login(page, "dispatch@pathfinder.demo");
+    await page.goto("/movements");
+    await page.getByRole("button", { name: "New ACE movement" }).click();
+    await page.getByRole("button", { name: "Suggest from history" }).click();
+
+    await expect(page.getByText("AI suggested · not applied")).toBeVisible();
+    await expect(page.getByText(/Reuse the lane from ACE-/)).toBeVisible();
+    await page.getByRole("button", { name: "Apply suggestion" }).click();
+    await expect(page.getByText("AI suggested · not applied")).toHaveCount(0);
+    await expect(page.getByText(/No crossing selected/)).toHaveCount(0);
+
+    await page.getByRole("button", { name: /^Shipment/ }).click();
+    await expect(page.getByText("No shipment lines yet.")).toHaveCount(0);
+  });
+
   test("walk a movement through every transition with attributed timeline rows", async ({
     page,
   }) => {

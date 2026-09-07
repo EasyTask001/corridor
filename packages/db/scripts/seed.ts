@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import postgres from "postgres";
 import { SYSTEM_ROLES } from "@corridor/domain";
+import { ingestRegulations } from "@corridor/ai";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -59,6 +60,12 @@ export const DEMO_USERS = [
     password: "corridor-demo",
     role: SYSTEM_ROLES.read_only,
     name: "Riley Readonly",
+  },
+  {
+    email: "driver@pathfinder.demo",
+    password: "corridor-demo",
+    role: SYSTEM_ROLES.driver_portal,
+    name: "Gurpreet Singh",
   },
 ] as const;
 
@@ -127,8 +134,10 @@ export async function seed() {
     }
 
     const orgId = await ensureOrg(DEMO_ORG);
+    const demoUserIds = new Map<string, string>();
     for (const u of DEMO_USERS) {
       const userId = await ensureUser(admin, u);
+      demoUserIds.set(u.email, userId);
       await sql`
         insert into public.organization_members (organization_id, user_id, role_id, status)
         values (${orgId}, ${userId}, ${roleId(u.role)}, 'active')
@@ -204,6 +213,11 @@ export async function seed() {
             '16-7654321', 'Sam Okafor', 'sam@erieproduce.example', '+1 716 555 0204')
         on conflict do nothing`;
     }
+
+    await sql`
+      update public.drivers
+      set user_id = ${demoUserIds.get("driver@pathfinder.demo")!}
+      where organization_id = ${orgId} and email = 'gurpreet@pathfinder.demo'`;
 
     // The other org gets one driver so cross-tenant tests have a row to *not* see.
     await sql`
@@ -471,6 +485,40 @@ export async function seed() {
       `seeded org ${DEMO_ORG.name} (${orgId}) with ${DEMO_USERS.length} users + registries + movements`,
     );
     console.log(`seeded org ${OTHER_ORG.name} (${otherOrgId}) with 1 user`);
+
+    // 5. copilot regulation corpus — global, not tenant-scoped. Idempotent:
+    //    ingestRegulations upserts by (source, title) and replaces embeddings.
+    const ingestResult = await ingestRegulations({
+      async upsertDocument(doc) {
+        const [existing] = await sql<{ id: string }[]>`
+          select id from public.regulation_documents where source = ${doc.source} and title = ${doc.title} limit 1`;
+        if (existing) {
+          await sql`
+            update public.regulation_documents
+            set jurisdiction = ${doc.jurisdiction}, url = ${doc.url}, content = ${doc.content}
+            where id = ${existing.id}`;
+          return existing.id;
+        }
+        const [row] = await sql<{ id: string }[]>`
+          insert into public.regulation_documents (source, title, jurisdiction, url, content)
+          values (${doc.source}, ${doc.title}, ${doc.jurisdiction}, ${doc.url}, ${doc.content})
+          returning id`;
+        return row!.id;
+      },
+      async replaceEmbeddings(documentId, chunks) {
+        await sql`delete from public.regulation_embeddings where regulation_document_id = ${documentId}`;
+        for (const c of chunks) {
+          const vectorLiteral = `[${c.embedding.join(",")}]`;
+          await sql`
+            insert into public.regulation_embeddings (regulation_document_id, chunk_index, content, embedding)
+            values (${documentId}, ${c.chunkIndex}, ${c.content}, ${vectorLiteral}::vector)`;
+        }
+      },
+    });
+    console.log(
+      `ingested ${ingestResult.documents} regulation(s) / ${ingestResult.chunks} chunk(s) via ${ingestResult.embedder}`,
+    );
+
     return { orgId, otherOrgId };
   } finally {
     await sql.end();

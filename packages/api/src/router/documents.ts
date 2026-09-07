@@ -13,6 +13,7 @@ import { permissionProcedure, router } from "../trpc";
 import { DOCUMENTS_BUCKET, applyExtraction, storagePathFor } from "../services/documents";
 import { enqueueJob } from "../services/jobs";
 import { requireMovement } from "../services/movements";
+import { writeAudit } from "../services/audit";
 
 const { sourceDocuments, movements, userProfiles } = schema;
 
@@ -86,6 +87,11 @@ export const documentsRouter = router({
           payload: { documentId: doc.id },
           maxAttempts: 2,
         });
+        await writeAudit(tx, ctx.orgId, "document.upload", "source_document", doc.id, null, {
+          filename: doc.originalFilename,
+          documentType: doc.documentType,
+          movementId: doc.movementId,
+        });
         return { documentId: doc.id, status: doc.uploadStatus };
       }),
     ),
@@ -116,6 +122,7 @@ export const documentsRouter = router({
           payload: { documentId: doc.id },
           maxAttempts: 2,
         });
+        await writeAudit(tx, ctx.orgId, "document.retry", "source_document", doc.id);
         return doc;
       }),
     ),
@@ -198,6 +205,13 @@ export const documentsRouter = router({
     .input(z.object({ id: uuid }))
     .mutation(async ({ ctx, input }) => {
       const doc = await ctx.rls(async (tx) => {
+        const before = await tx.query.sourceDocuments.findFirst({
+          where: and(
+            eq(sourceDocuments.id, input.id),
+            eq(sourceDocuments.organizationId, ctx.orgId),
+          ),
+        });
+        if (!before) throw new TRPCError({ code: "NOT_FOUND" });
         const [d] = await tx
           .delete(sourceDocuments)
           .where(
@@ -205,6 +219,20 @@ export const documentsRouter = router({
           )
           .returning({ storagePath: sourceDocuments.storagePath });
         if (!d) throw new TRPCError({ code: "NOT_FOUND" });
+        await writeAudit(
+          tx,
+          ctx.orgId,
+          "document.remove",
+          "source_document",
+          input.id,
+          {
+            filename: before.originalFilename,
+            documentType: before.documentType,
+            movementId: before.movementId,
+            status: before.uploadStatus,
+          },
+          null,
+        );
         return d;
       });
       await ctx.supabase.storage.from(DOCUMENTS_BUCKET).remove([doc.storagePath]);

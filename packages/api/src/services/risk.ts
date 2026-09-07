@@ -6,7 +6,18 @@
  */
 import { evaluateMovementRisk, type RiskFinding } from "@corridor/ai";
 import { lookupHsCode } from "@corridor/integrations";
-import { and, desc, eq, inArray, ne, notInArray, or, schema, sql, type RlsTransaction } from "@corridor/db";
+import {
+  and,
+  desc,
+  eq,
+  inArray,
+  ne,
+  notInArray,
+  or,
+  schema,
+  sql,
+  type RlsTransaction,
+} from "@corridor/db";
 import { notifyOrganization } from "./notifications";
 
 const { movements, cargo, partners, complianceAlerts } = schema;
@@ -104,7 +115,7 @@ export async function computeMovementRisk(
     const [consignee] = await tx
       .select({ type: partners.type })
       .from(partners)
-      .where(eq(partners.type, "broker"))
+      .where(and(eq(partners.organizationId, orgId), eq(partners.type, "broker")))
       .limit(1);
     hasBroker = !!consignee; // org has at least one broker on file — used as a coarse signal
   }

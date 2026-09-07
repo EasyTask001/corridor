@@ -2,17 +2,74 @@ import { randomBytes } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
+  customRoleInput,
   createOrganizationInput,
   inviteMemberInput,
+  PERMISSIONS,
+  PERMISSION_KEYS,
   updateOrganizationInput,
+  updateCustomRoleInput,
   uuid,
   type PermissionKey,
 } from "@corridor/domain";
-import { and, eq, isNull, or, schema } from "@corridor/db";
-import { authedProcedure, orgProcedure, permissionProcedure, router } from "../trpc";
+import { and, eq, inArray, isNull, or, schema, type RlsTransaction } from "@corridor/db";
+import {
+  authedProcedure,
+  orgProcedure,
+  permissionProcedure,
+  router,
+  type OrgContext,
+} from "../trpc";
+import { writeAudit } from "../services/audit";
 
 const { organizations, organizationMembers, roles, rolePermissions, permissions, userProfiles } =
   schema;
+
+function assertCanGrant(ctx: OrgContext, requested: readonly PermissionKey[]) {
+  const missing = requested.filter((key) => !ctx.session.permissions.has(key));
+  if (missing.length > 0) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `Cannot grant permissions you do not hold: ${missing.join(", ")}`,
+    });
+  }
+}
+
+async function permissionKeysForRole(tx: RlsTransaction, roleId: string) {
+  const rows = await tx
+    .select({ key: permissions.key })
+    .from(rolePermissions)
+    .innerJoin(permissions, eq(permissions.id, rolePermissions.permissionId))
+    .where(eq(rolePermissions.roleId, roleId));
+  return rows.map((row) => row.key as PermissionKey);
+}
+
+async function assignableRole(tx: RlsTransaction, ctx: OrgContext, roleId: string) {
+  const role = await tx.query.roles.findFirst({
+    where: and(
+      eq(roles.id, roleId),
+      or(isNull(roles.organizationId), eq(roles.organizationId, ctx.orgId)),
+    ),
+  });
+  if (!role) throw new TRPCError({ code: "BAD_REQUEST", message: "Unknown role" });
+  assertCanGrant(ctx, await permissionKeysForRole(tx, role.id));
+  return role;
+}
+
+function mapRoleError(error: unknown): never {
+  let current: unknown = error;
+  while (current instanceof Error) {
+    const code = (current as Error & { code?: string }).code;
+    if (code === "23505") {
+      throw new TRPCError({ code: "CONFLICT", message: "A role with this name already exists" });
+    }
+    if (code === "23503") {
+      throw new TRPCError({ code: "CONFLICT", message: "This role is assigned to a member" });
+    }
+    current = current.cause;
+  }
+  throw error;
+}
 
 export const organizationRouter = router({
   /** Who am I, which orgs am I in, what can I do in the active one. */
@@ -51,6 +108,10 @@ export const organizationRouter = router({
     .input(updateOrganizationInput)
     .mutation(({ ctx, input }) =>
       ctx.rls(async (tx) => {
+        const before = await tx.query.organizations.findFirst({
+          where: eq(organizations.id, ctx.orgId),
+        });
+        if (!before) throw new TRPCError({ code: "NOT_FOUND" });
         const [row] = await tx
           .update(organizations)
           .set({
@@ -67,6 +128,15 @@ export const organizationRouter = router({
           .where(eq(organizations.id, ctx.orgId))
           .returning();
         if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+        await writeAudit(
+          tx,
+          ctx.orgId,
+          "organization.update",
+          "organization",
+          ctx.orgId,
+          before,
+          row,
+        );
         return row;
       }),
     ),
@@ -111,6 +181,118 @@ export const organizationRouter = router({
         return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
       }),
     ),
+
+    catalog: permissionProcedure("organization.roles.manage").query(({ ctx }) =>
+      PERMISSION_KEYS.map((key) => ({
+        key,
+        ...PERMISSIONS[key],
+        assignable: ctx.session.permissions.has(key),
+      })),
+    ),
+
+    create: permissionProcedure("organization.roles.manage")
+      .input(customRoleInput)
+      .mutation(({ ctx, input }) =>
+        ctx.rls(async (tx) => {
+          assertCanGrant(ctx, input.permissions);
+          try {
+            const grants = await tx
+              .select({ id: permissions.id, key: permissions.key })
+              .from(permissions)
+              .where(inArray(permissions.key, input.permissions));
+            if (grants.length !== input.permissions.length) {
+              throw new TRPCError({ code: "BAD_REQUEST", message: "Unknown permission" });
+            }
+            const [role] = await tx
+              .insert(roles)
+              .values({ organizationId: ctx.orgId, name: input.name, isSystem: false })
+              .returning();
+            await tx
+              .insert(rolePermissions)
+              .values(grants.map((grant) => ({ roleId: role!.id, permissionId: grant.id })));
+            const saved = {
+              ...role!,
+              permissions: grants.map((grant) => grant.key as PermissionKey),
+            };
+            await writeAudit(tx, ctx.orgId, "role.create", "role", role!.id, null, saved);
+            return saved;
+          } catch (error) {
+            mapRoleError(error);
+          }
+        }),
+      ),
+
+    update: permissionProcedure("organization.roles.manage")
+      .input(updateCustomRoleInput)
+      .mutation(({ ctx, input }) =>
+        ctx.rls(async (tx) => {
+          const before = await tx.query.roles.findFirst({
+            where: and(
+              eq(roles.id, input.id),
+              eq(roles.organizationId, ctx.orgId),
+              eq(roles.isSystem, false),
+            ),
+          });
+          if (!before) throw new TRPCError({ code: "NOT_FOUND" });
+          const previousPermissions = await permissionKeysForRole(tx, before.id);
+          const previous = { ...before, permissions: previousPermissions };
+          const previousSet = new Set(previousPermissions);
+          assertCanGrant(
+            ctx,
+            input.permissions.filter((key) => !previousSet.has(key)),
+          );
+
+          try {
+            const grants = await tx
+              .select({ id: permissions.id, key: permissions.key })
+              .from(permissions)
+              .where(inArray(permissions.key, input.permissions));
+            if (grants.length !== input.permissions.length) {
+              throw new TRPCError({ code: "BAD_REQUEST", message: "Unknown permission" });
+            }
+            const [role] = await tx
+              .update(roles)
+              .set({ name: input.name })
+              .where(eq(roles.id, input.id))
+              .returning();
+            await tx.delete(rolePermissions).where(eq(rolePermissions.roleId, input.id));
+            await tx
+              .insert(rolePermissions)
+              .values(grants.map((grant) => ({ roleId: input.id, permissionId: grant.id })));
+            const saved = {
+              ...role!,
+              permissions: grants.map((grant) => grant.key as PermissionKey),
+            };
+            await writeAudit(tx, ctx.orgId, "role.update", "role", input.id, previous, saved);
+            return saved;
+          } catch (error) {
+            mapRoleError(error);
+          }
+        }),
+      ),
+
+    delete: permissionProcedure("organization.roles.manage")
+      .input(z.object({ id: uuid }))
+      .mutation(({ ctx, input }) =>
+        ctx.rls(async (tx) => {
+          const role = await tx.query.roles.findFirst({
+            where: and(
+              eq(roles.id, input.id),
+              eq(roles.organizationId, ctx.orgId),
+              eq(roles.isSystem, false),
+            ),
+          });
+          if (!role) throw new TRPCError({ code: "NOT_FOUND" });
+          const before = { ...role, permissions: await permissionKeysForRole(tx, role.id) };
+          try {
+            await tx.delete(roles).where(eq(roles.id, role.id));
+            await writeAudit(tx, ctx.orgId, "role.delete", "role", role.id, before, null);
+            return { id: role.id };
+          } catch (error) {
+            mapRoleError(error);
+          }
+        }),
+      ),
   }),
 
   members: router({
@@ -140,13 +322,7 @@ export const organizationRouter = router({
       .input(inviteMemberInput)
       .mutation(({ ctx, input }) =>
         ctx.rls(async (tx) => {
-          const role = await tx.query.roles.findFirst({
-            where: and(
-              eq(roles.id, input.roleId),
-              or(isNull(roles.organizationId), eq(roles.organizationId, ctx.orgId)),
-            ),
-          });
-          if (!role) throw new TRPCError({ code: "BAD_REQUEST", message: "Unknown role" });
+          await assignableRole(tx, ctx, input.roleId);
 
           const token = randomBytes(24).toString("base64url");
           const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -166,6 +342,11 @@ export const organizationRouter = router({
           if (!row) {
             throw new TRPCError({ code: "CONFLICT", message: "Already invited or a member" });
           }
+          await writeAudit(tx, ctx.orgId, "member.invite", "organization_member", row.id, null, {
+            email: input.email,
+            roleId: input.roleId,
+            status: "invited",
+          });
           // Email delivery is wired in Phase 5 (notifications). Until then the
           // inviter copies the link from the UI.
           return { memberId: row.id, invitePath: `/invite/${token}`, expiresAt: expires };
@@ -176,6 +357,19 @@ export const organizationRouter = router({
       .input(z.object({ memberId: uuid, roleId: uuid }))
       .mutation(({ ctx, input }) =>
         ctx.rls(async (tx) => {
+          const target = await tx.query.organizationMembers.findFirst({
+            where: and(
+              eq(organizationMembers.id, input.memberId),
+              eq(organizationMembers.organizationId, ctx.orgId),
+            ),
+          });
+          if (!target) throw new TRPCError({ code: "NOT_FOUND" });
+          if (target.userId === ctx.session.user.id) {
+            throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot change your own role" });
+          }
+          assertCanGrant(ctx, await permissionKeysForRole(tx, target.roleId));
+          await assignableRole(tx, ctx, input.roleId);
+
           const [row] = await tx
             .update(organizationMembers)
             .set({ roleId: input.roleId })
@@ -186,7 +380,15 @@ export const organizationRouter = router({
               ),
             )
             .returning({ id: organizationMembers.id });
-          if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "member.role_update",
+            "organization_member",
+            input.memberId,
+            { roleId: target.roleId },
+            { roleId: input.roleId },
+          );
           return row;
         }),
       ),
@@ -205,11 +407,21 @@ export const organizationRouter = router({
           if (target.userId === ctx.session.user.id) {
             throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot change your own status" });
           }
+          assertCanGrant(ctx, await permissionKeysForRole(tx, target.roleId));
           const [row] = await tx
             .update(organizationMembers)
             .set({ status: input.status })
             .where(eq(organizationMembers.id, input.memberId))
             .returning({ id: organizationMembers.id, status: organizationMembers.status });
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "member.status_update",
+            "organization_member",
+            input.memberId,
+            { status: target.status },
+            { status: input.status },
+          );
           return row!;
         }),
       ),
@@ -228,7 +440,22 @@ export const organizationRouter = router({
           if (target.userId === ctx.session.user.id) {
             throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot remove yourself" });
           }
+          assertCanGrant(ctx, await permissionKeysForRole(tx, target.roleId));
           await tx.delete(organizationMembers).where(eq(organizationMembers.id, input.memberId));
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "member.remove",
+            "organization_member",
+            input.memberId,
+            {
+              userId: target.userId,
+              invitedEmail: target.invitedEmail,
+              roleId: target.roleId,
+              status: target.status,
+            },
+            null,
+          );
           return { id: input.memberId };
         }),
       ),

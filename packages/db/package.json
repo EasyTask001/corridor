@@ -18,6 +18,7 @@
     "seed:generate": "tsx scripts/generate-seed-sql.ts"
   },
   "dependencies": {
+    "@corridor/ai": "workspace:*",
     "@corridor/domain": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "postgres": "^3.4.7"

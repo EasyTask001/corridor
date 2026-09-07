@@ -4,3 +4,4 @@ export { createCallerFactory } from "./trpc";
 export { scanOrganization } from "./services/compliance";
 export { processDueJobs, hasDueJobs, nextJobDueInMs, type ProcessResult } from "./services/jobs";
 export { upsertSubscription } from "./router/billing";
+export { copilotTools, retrieveContext, embedOrgKnowledge } from "./services/copilot";

@@ -22,9 +22,15 @@ import {
   uuid,
   type MovementStatus,
 } from "@corridor/domain";
-import { permissionProcedure, router, type OrgContext } from "../trpc";
+import { anyPermissionProcedure, permissionProcedure, router, type OrgContext } from "../trpc";
 import { transmitMovement } from "../services/customs";
+import { enqueueJob } from "../services/jobs";
 import { syncMovementRiskAlerts } from "../services/risk";
+import {
+  acceptMovementSuggestion,
+  dismissMovementSuggestion,
+  generateMovementSuggestion,
+} from "../services/predictive";
 import {
   addEvent,
   applyCustomsDecision,
@@ -34,7 +40,17 @@ import {
   validationFor,
 } from "../services/movements";
 
-const { movements, movementAmendments, cargo, seals, drivers, trucks, trailers, partners } = schema;
+const {
+  movements,
+  movementAmendments,
+  movementSuggestions,
+  cargo,
+  seals,
+  drivers,
+  trucks,
+  trailers,
+  partners,
+} = schema;
 
 function requireEditable(status: MovementStatus) {
   if (!isEditable(status)) {
@@ -51,7 +67,7 @@ const customsSimulationEnabled = () =>
   process.env.CORRIDOR_ALLOW_CUSTOMS_SIMULATION === "true" || process.env.NODE_ENV !== "production";
 
 export const movementRouter = router({
-  list: permissionProcedure("movement.read")
+  list: anyPermissionProcedure("movement.read", "movement.read_assigned")
     .input(movementListInput)
     .query(({ ctx, input }) =>
       ctx.rls(async (tx) => {
@@ -106,7 +122,7 @@ export const movementRouter = router({
     ),
 
   /** Status counts for the dispatcher board header. */
-  board: permissionProcedure("movement.read").query(({ ctx }) =>
+  board: anyPermissionProcedure("movement.read", "movement.read_assigned").query(({ ctx }) =>
     ctx.rls(async (tx) => {
       const rows = await tx
         .select({ status: movements.status, count: sql<number>`count(*)::int` })
@@ -119,11 +135,11 @@ export const movementRouter = router({
     }),
   ),
 
-  get: permissionProcedure("movement.read")
+  get: anyPermissionProcedure("movement.read", "movement.read_assigned")
     .input(z.object({ id: uuid }))
     .query(({ ctx, input }) => ctx.rls((tx) => loadFull(tx, ctx.orgId, input.id))),
 
-  validate: permissionProcedure("movement.read")
+  validate: anyPermissionProcedure("movement.read", "movement.read_assigned")
     .input(z.object({ id: uuid }))
     .query(({ ctx, input }) =>
       ctx.rls(async (tx) => {
@@ -285,11 +301,22 @@ export const movementRouter = router({
     .input(movementNoteInput)
     .mutation(({ ctx, input }) =>
       ctx.rls(async (tx) => {
-        await requireMovement(tx, ctx.orgId, input.movementId);
+        const m = await requireMovement(tx, ctx.orgId, input.movementId);
         await addEvent(tx, actorOf(ctx), input.movementId, {
           eventType: "note",
           actorType: "user",
           payload: { body: input.body },
+        });
+        // Keep note writes independent of the embedding provider. The worker
+        // retries failures without rolling back or delaying the user action.
+        await enqueueJob(tx, {
+          orgId: ctx.orgId,
+          jobType: "copilot.embed_knowledge",
+          payload: {
+            sourceType: "movement_note",
+            sourceId: input.movementId,
+            content: `Movement ${m.movementNumber}: ${input.body}`,
+          },
         });
         return { ok: true };
       }),
@@ -440,6 +467,43 @@ export const movementRouter = router({
         });
       }),
     ),
+
+  suggestions: router({
+    generate: permissionProcedure("movement.write")
+      .input(z.object({ movementId: uuid }))
+      .mutation(({ ctx, input }) =>
+        ctx.rls((tx) =>
+          generateMovementSuggestion(tx, ctx.orgId, ctx.session.user.id, input.movementId),
+        ),
+      ),
+    accept: permissionProcedure("movement.write")
+      .input(z.object({ suggestionId: uuid }))
+      .mutation(({ ctx, input }) =>
+        ctx.rls((tx) => acceptMovementSuggestion(tx, ctx.orgId, input.suggestionId)),
+      ),
+    dismiss: permissionProcedure("movement.write")
+      .input(z.object({ suggestionId: uuid }))
+      .mutation(({ ctx, input }) =>
+        ctx.rls((tx) => dismissMovementSuggestion(tx, ctx.orgId, input.suggestionId)),
+      ),
+    stats: permissionProcedure("movement.read").query(({ ctx }) =>
+      ctx.rls(async (tx) => {
+        const rows = await tx
+          .select({ status: movementSuggestions.status, count: sql<number>`count(*)::int` })
+          .from(movementSuggestions)
+          .where(eq(movementSuggestions.organizationId, ctx.orgId))
+          .groupBy(movementSuggestions.status);
+        const counts = Object.fromEntries(rows.map((row) => [row.status, row.count]));
+        const decided = (counts.accepted ?? 0) + (counts.dismissed ?? 0);
+        return {
+          offered: counts.offered ?? 0,
+          accepted: counts.accepted ?? 0,
+          dismissed: counts.dismissed ?? 0,
+          acceptanceRate: decided ? (counts.accepted ?? 0) / decided : null,
+        };
+      }),
+    ),
+  }),
 
   /** Lookup data for the wizard dropdowns in one round-trip. */
   options: permissionProcedure("movement.read").query(({ ctx }) =>

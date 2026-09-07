@@ -60,5 +60,23 @@ export function enforcePermission(...required: PermissionKey[]) {
   });
 }
 
+/** Requires at least one permission from a list (for full vs assigned-only reads). */
+export function enforceAnyPermission(...allowed: PermissionKey[]) {
+  return middleware(({ ctx, next }) => {
+    const session = ctx.session;
+    if (!session) throw new TRPCError({ code: "UNAUTHORIZED" });
+    if (!allowed.some((permission) => session.permissions.has(permission))) {
+      throw new TRPCError({
+        code: "FORBIDDEN",
+        message: `Missing one of: ${allowed.join(", ")}`,
+      });
+    }
+    return next();
+  });
+}
+
 export const permissionProcedure = (...required: PermissionKey[]) =>
   orgProcedure.use(enforcePermission(...required));
+
+export const anyPermissionProcedure = (...allowed: PermissionKey[]) =>
+  orgProcedure.use(enforceAnyPermission(...allowed));

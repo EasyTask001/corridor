@@ -10,6 +10,7 @@ import {
 } from "@corridor/integrations";
 import { permissionProcedure, router } from "../trpc";
 import { logIntegrationEvent } from "../services/customs";
+import { writeAudit } from "../services/audit";
 
 const { organizations, subscriptions } = schema;
 
@@ -152,16 +153,25 @@ export const billingRouter = router({
         currentPeriodEnd: periodEnd,
         cancelAtPeriodEnd: false,
       });
-      await ctx.rls((tx) =>
-        logIntegrationEvent(tx, {
+      await ctx.rls(async (tx) => {
+        await logIntegrationEvent(tx, {
           orgId: ctx.orgId,
           provider: "stripe",
           direction: "inbound",
           operation: "subscription.mock_activated",
           response: { plan: input.plan },
           success: true,
-        }),
-      );
+        });
+        await writeAudit(
+          tx,
+          ctx.orgId,
+          "billing.plan_change",
+          "subscription",
+          ctx.orgId,
+          undefined,
+          { plan: input.plan, status: "active" },
+        );
+      });
       return row;
     }),
 });

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { and, desc, eq, inArray, schema, sql } from "@corridor/db";
 import { alertListInput, alertStatus, canTransitionAlert, uuid } from "@corridor/domain";
 import { permissionProcedure, router } from "../trpc";
+import { writeAudit } from "../services/audit";
 import { scanOrganization } from "../services/compliance";
 
 const { complianceAlerts, drivers, trucks, trailers, movements } = schema;
@@ -132,6 +133,15 @@ export const alertsRouter = router({
           })
           .where(eq(complianceAlerts.id, input.id))
           .returning({ id: complianceAlerts.id, status: complianceAlerts.status });
+        await writeAudit(
+          tx,
+          ctx.orgId,
+          "alert.status_update",
+          "compliance_alert",
+          input.id,
+          { status: current.status },
+          { status: input.status },
+        );
         return row!;
       }),
     ),

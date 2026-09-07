@@ -10,6 +10,7 @@ import { LOW_CONFIDENCE_THRESHOLD, isEditable, type ApplyExtractionInput } from 
 import { runExtractionPipeline } from "@corridor/ai";
 import { addEvent, requireMovement, type Actor } from "./movements";
 import { notifyOrganization } from "./notifications";
+import { writeAudit } from "./audit";
 
 const { sourceDocuments, cargo, complianceAlerts } = schema;
 
@@ -229,6 +230,16 @@ export async function applyExtraction(
       documentId: doc.id,
     },
   });
+
+  await writeAudit(
+    tx,
+    actor.orgId,
+    "document.apply_extraction",
+    "source_document",
+    doc.id,
+    { status: doc.uploadStatus, movementId: doc.movementId },
+    { status: "applied", movementId: m.id, insertedLines: inserted.length, mode: input.mode },
+  );
 
   // Reviewer confirmed the data → resolve the AI low-confidence alert.
   await tx

@@ -4,6 +4,7 @@ import { and, desc, eq, schema, sql } from "@corridor/db";
 import { uuid } from "@corridor/domain";
 import { getBorderWait, lookupHsCode, searchTariff } from "@corridor/integrations";
 import { permissionProcedure, router } from "../trpc";
+import { writeAudit } from "../services/audit";
 import { processDueJobs } from "../services/jobs";
 
 const { integrationConfigs, integrationEvents, backgroundJobs, movements } = schema;
@@ -37,6 +38,12 @@ export const integrationsRouter = router({
       )
       .mutation(({ ctx, input }) =>
         ctx.rls(async (tx) => {
+          const before = await tx.query.integrationConfigs.findFirst({
+            where: and(
+              eq(integrationConfigs.organizationId, ctx.orgId),
+              eq(integrationConfigs.provider, input.provider),
+            ),
+          });
           const [row] = await tx
             .insert(integrationConfigs)
             .values({
@@ -56,6 +63,15 @@ export const integrationsRouter = router({
               },
             })
             .returning();
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "integration.configure",
+            "integration_config",
+            input.provider,
+            before,
+            row,
+          );
           return row!;
         }),
       ),

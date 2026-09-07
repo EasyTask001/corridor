@@ -21,7 +21,8 @@ import {
   uuid,
   type PermissionKey,
 } from "@corridor/domain";
-import { permissionProcedure, router, type OrgContext } from "../trpc";
+import { permissionProcedure, router } from "../trpc";
+import { writeAudit } from "../services/audit";
 import {
   findingsForDriver,
   findingsForTrailer,
@@ -44,26 +45,6 @@ interface RegistryConfig<T extends PgTable, I extends z.ZodObject> {
   orderBy: (t: T) => ReturnType<typeof asc>[];
   /** after insert/update/archive: run compliance rules for this entity */
   afterSave?: (tx: RlsTransaction, orgId: string, row: T["$inferSelect"]) => Promise<unknown>;
-}
-
-async function audit(
-  tx: RlsTransaction,
-  ctx: OrgContext,
-  action: string,
-  entityType: string,
-  entityId: string,
-  before: unknown,
-  after: unknown,
-) {
-  // audit_log INSERT is revoked from `authenticated`; go through the
-  // membership-checked SECURITY DEFINER function instead.
-  await tx.execute(sql`
-    select public.log_audit(
-      ${ctx.orgId}::uuid, ${action}, ${entityType}, ${entityId},
-      ${before ? JSON.stringify(before) : null}::jsonb,
-      ${after ? JSON.stringify(after) : null}::jsonb
-    )
-  `);
 }
 
 function mapDbError(e: unknown): never {
@@ -149,7 +130,15 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
           } as unknown as RegistryTable["$inferInsert"];
           const [row] = await tx.insert(t).values(values).returning().catch(mapDbError);
           const saved = row as unknown as Row & { id: string };
-          await audit(tx, ctx, `${cfg.entityType}.create`, cfg.entityType, saved.id, null, saved);
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            `${cfg.entityType}.create`,
+            cfg.entityType,
+            saved.id,
+            null,
+            saved,
+          );
           await cfg.afterSave?.(tx, ctx.orgId, saved);
           return saved as Row;
         }),
@@ -173,7 +162,15 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
             .returning()
             .catch(mapDbError);
           const saved = row as unknown as Row;
-          await audit(tx, ctx, `${cfg.entityType}.update`, cfg.entityType, id, before, saved);
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            `${cfg.entityType}.update`,
+            cfg.entityType,
+            id,
+            before,
+            saved,
+          );
           await cfg.afterSave?.(tx, ctx.orgId, saved);
           return saved;
         }),
@@ -191,9 +188,15 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
             .returning();
           if (!row) throw new TRPCError({ code: "NOT_FOUND" });
           const saved = row as unknown as Row;
-          await audit(tx, ctx, `${cfg.entityType}.archive`, cfg.entityType, input.id, null, {
-            status: "archived",
-          });
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            `${cfg.entityType}.archive`,
+            cfg.entityType,
+            input.id,
+            null,
+            { status: "archived" },
+          );
           await cfg.afterSave?.(tx, ctx.orgId, saved);
           return saved;
         }),

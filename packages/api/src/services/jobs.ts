@@ -19,7 +19,8 @@ import { applyCustomsDecision, loadFull, loadOrganization, requireMovement } fro
 
 const { backgroundJobs, movements } = schema;
 
-export type JobType = "customs.decide" | "compliance.scan" | "document.extract";
+export type JobType =
+  "customs.decide" | "compliance.scan" | "document.extract" | "copilot.embed_knowledge";
 
 export async function enqueueJob(
   tx: RlsTransaction,
@@ -119,6 +120,26 @@ const handlers: Record<JobType, Handler> = {
     const { scanOrganization } = await import("./compliance");
     if (!job.organizationId) throw new Error("compliance.scan requires organization_id");
     return scanOrganization(tx, job.organizationId);
+  },
+
+  "copilot.embed_knowledge": async (tx, job) => {
+    if (!job.organizationId) throw new Error("copilot.embed_knowledge requires organization_id");
+    const sourceType = job.payload.sourceType;
+    const content = job.payload.content;
+    if (
+      sourceType !== "movement_note" &&
+      sourceType !== "hold_resolution" &&
+      sourceType !== "sop_document"
+    ) {
+      throw new Error("copilot.embed_knowledge has an invalid source_type");
+    }
+    if (typeof content !== "string" || !content.trim()) {
+      throw new Error("copilot.embed_knowledge requires content");
+    }
+    const sourceId = typeof job.payload.sourceId === "string" ? job.payload.sourceId : null;
+    const { embedOrgKnowledge } = await import("./copilot");
+    await embedOrgKnowledge(tx, job.organizationId, { sourceType, sourceId, content });
+    return { sourceType, sourceId };
   },
 };
 

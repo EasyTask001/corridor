@@ -9,7 +9,14 @@ import { eq, sql } from "drizzle-orm";
 import { MOVEMENT_TRANSITIONS, movementStatus } from "@corridor/domain";
 import { createDb } from "./client";
 import { withRls } from "./rls";
-import { cargo, movementEvents, movements, organizationMembers } from "./schema";
+import {
+  cargo,
+  drivers,
+  movementEvents,
+  movementSuggestions,
+  movements,
+  organizationMembers,
+} from "./schema";
 
 const DB_URL =
   process.env.DIRECT_DATABASE_URL ?? "postgresql://postgres:postgres@127.0.0.1:55322/postgres";
@@ -26,6 +33,7 @@ interface Actor {
 }
 let dispatcherA: Actor;
 let readOnlyA: Actor;
+let driverA: Actor;
 let ownerB: Actor;
 
 async function actorFor(email: string): Promise<Actor> {
@@ -45,9 +53,10 @@ async function actorFor(email: string): Promise<Actor> {
 }
 
 beforeAll(async () => {
-  [dispatcherA, readOnlyA, ownerB] = await Promise.all([
+  [dispatcherA, readOnlyA, driverA, ownerB] = await Promise.all([
     actorFor("dispatch@pathfinder.demo"),
     actorFor("readonly@pathfinder.demo"),
+    actorFor("driver@pathfinder.demo"),
     actorFor("owner@northbound.demo"),
   ]);
 });
@@ -202,6 +211,64 @@ describe("movements RLS", () => {
     expect(msg).toMatch(/row-level security/);
   });
 
+  it("Driver-Portal sees only its assigned movements and their manifest details", async () => {
+    const [linkedDriver] = await db
+      .select({ id: drivers.id })
+      .from(drivers)
+      .where(eq(drivers.userId, driverA.userId));
+    expect(linkedDriver).toBeDefined();
+
+    const assigned = await withRls(db, as(driverA), (tx) => tx.select().from(movements));
+    expect(assigned.length).toBeGreaterThan(0);
+    expect(assigned.every((movement) => movement.driverId === linkedDriver!.id)).toBe(true);
+
+    const lines = await withRls(db, as(driverA), (tx) =>
+      tx.select().from(cargo).where(eq(cargo.movementId, assigned[0]!.id)),
+    );
+    const events = await withRls(db, as(driverA), (tx) =>
+      tx.select().from(movementEvents).where(eq(movementEvents.movementId, assigned[0]!.id)),
+    );
+    expect(lines.length).toBeGreaterThan(0);
+    expect(events.length).toBeGreaterThan(0);
+  });
+
+  it("read-only cannot edit or transition a movement through direct SQL", async () => {
+    const m = await createDraft(dispatcherA);
+    const edited = await withRls(db, as(readOnlyA), (tx) =>
+      tx
+        .update(movements)
+        .set({ tripNumber: "BYPASS" })
+        .where(eq(movements.id, m.id))
+        .returning({ id: movements.id }),
+    );
+    const transitioned = await withRls(db, as(readOnlyA), (tx) =>
+      tx
+        .update(movements)
+        .set({ status: "sent" })
+        .where(eq(movements.id, m.id))
+        .returning({ id: movements.id }),
+    );
+    expect(edited).toHaveLength(0);
+    expect(transitioned).toHaveLength(0);
+  });
+
+  it("an event cannot be attached to a movement from another organization", async () => {
+    const m = await createDraft(dispatcherA);
+    const msg = await rejection(
+      withRls(db, as(ownerB), (tx) =>
+        tx.insert(movementEvents).values({
+          movementId: m.id,
+          organizationId: ownerB.orgId,
+          eventType: "note",
+          actorType: "user",
+          actorId: ownerB.userId,
+          payload: { body: "cross-tenant event" },
+        }),
+      ),
+    );
+    expect(msg).toMatch(/movement .* not found|organization does not match/i);
+  });
+
   it("Org B cannot see or touch Org A movements", async () => {
     const m = await createDraft(dispatcherA);
     const seen = await withRls(db, as(ownerB), (tx) =>
@@ -216,5 +283,84 @@ describe("movements RLS", () => {
       tx.select().from(movementEvents).where(eq(movementEvents.movementId, m.id)),
     );
     expect(events).toHaveLength(0);
+  });
+});
+
+describe("predictive movement suggestions", () => {
+  it("tracks one immutable accept/dismiss decision and rejects cross-tenant sources", async () => {
+    const own = await db
+      .select()
+      .from(movements)
+      .where(eq(movements.organizationId, dispatcherA.orgId))
+      .limit(2);
+    expect(own).toHaveLength(2);
+    const [foreign] = await db
+      .insert(movements)
+      .values({
+        organizationId: ownerB.orgId,
+        regime: "ACE",
+        movementNumber: `TEST-SOURCE-${Date.now()}`,
+      })
+      .returning();
+    const payload = {
+      sourceMovementId: own[1]!.id,
+      sourceMovementNumber: own[1]!.movementNumber,
+      targetUpdatedAt: own[0]!.updatedAt.toISOString(),
+      crossingPoint: null,
+      driverId: null,
+      truckId: null,
+      trailerId: null,
+      cargo: [],
+    };
+
+    try {
+      const crossTenant = await rejection(
+        withRls(db, as(dispatcherA), (tx) =>
+          tx.insert(movementSuggestions).values({
+            organizationId: dispatcherA.orgId,
+            movementId: own[0]!.id,
+            sourceMovementId: foreign!.id,
+            score: 20,
+            reasons: ["same ACE filing regime"],
+            suggestedPayload: { ...payload, sourceMovementId: foreign!.id },
+            createdBy: dispatcherA.userId,
+          }),
+        ),
+      );
+      expect(crossTenant).toMatch(/must belong to its organization/i);
+
+      const [suggestion] = await withRls(db, as(dispatcherA), (tx) =>
+        tx
+          .insert(movementSuggestions)
+          .values({
+            organizationId: dispatcherA.orgId,
+            movementId: own[0]!.id,
+            sourceMovementId: own[1]!.id,
+            score: 20,
+            reasons: ["same ACE filing regime"],
+            suggestedPayload: payload,
+            createdBy: dispatcherA.userId,
+          })
+          .returning(),
+      );
+      await withRls(db, as(dispatcherA), (tx) =>
+        tx
+          .update(movementSuggestions)
+          .set({ status: "accepted" })
+          .where(eq(movementSuggestions.id, suggestion!.id)),
+      );
+      const secondDecision = await rejection(
+        withRls(db, as(dispatcherA), (tx) =>
+          tx
+            .update(movementSuggestions)
+            .set({ status: "dismissed" })
+            .where(eq(movementSuggestions.id, suggestion!.id)),
+        ),
+      );
+      expect(secondDecision).toMatch(/decision cannot be changed/i);
+      await db.delete(movementSuggestions).where(eq(movementSuggestions.id, suggestion!.id));
+    } finally {
+      await db.delete(movements).where(eq(movements.id, foreign!.id));
+    }
   });
 });

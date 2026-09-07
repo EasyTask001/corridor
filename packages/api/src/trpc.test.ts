@@ -1,13 +1,22 @@
 import { describe, expect, it } from "vitest";
 import type { Session } from "@corridor/auth";
 import type { Context } from "./context";
-import { createCallerFactory, enforcePermission, orgProcedure, router } from "./trpc";
+import {
+  createCallerFactory,
+  enforceAnyPermission,
+  enforcePermission,
+  orgProcedure,
+  router,
+} from "./trpc";
 
 const testRouter = router({
   transmit: orgProcedure
     .use(enforcePermission("movement.transmit_to_customs"))
     .mutation(() => "transmitted"),
   read: orgProcedure.use(enforcePermission("movement.read")).query(() => "ok"),
+  readAssigned: orgProcedure
+    .use(enforceAnyPermission("movement.read", "movement.read_assigned"))
+    .query(() => "assigned"),
 });
 const createCaller = createCallerFactory(testRouter);
 
@@ -56,5 +65,13 @@ describe("tRPC authorization middlewares", () => {
       code: "FORBIDDEN",
       message: "Missing permission: movement.transmit_to_customs",
     });
+  });
+
+  it("accepts either full or assigned-only movement read permission", async () => {
+    const assigned = createCaller(
+      ctx({ ...base, permissions: new Set(["movement.read_assigned"]) }),
+    );
+    await expect(assigned.readAssigned()).resolves.toBe("assigned");
+    await expect(assigned.read()).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });

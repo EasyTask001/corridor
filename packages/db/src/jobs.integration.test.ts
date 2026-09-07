@@ -147,13 +147,13 @@ describe("background_jobs queue", () => {
     );
   });
 
-  it("authenticated users may enqueue for their org but cannot claim", async () => {
+  it("authenticated users may enqueue authorized jobs but cannot arbitrary, cross-org, or claim", async () => {
     const [j] = await withRls(db, as(ownerA), (tx) =>
       tx
         .insert(backgroundJobs)
         .values({
           organizationId: ownerA.orgId,
-          jobType: "noop.test",
+          jobType: "compliance.scan",
           runAt: new Date(Date.now() + 3600_000),
         })
         .returning({ id: backgroundJobs.id }),
@@ -163,11 +163,20 @@ describe("background_jobs queue", () => {
       withRls(db, as(ownerA), (tx) => tx.execute(sql`select * from public.claim_jobs(1, 'x')`)),
     );
     expect(msg).toMatch(/permission denied/i);
+    const arbitrary = await rejection(
+      withRls(db, as(ownerA), (tx) =>
+        tx
+          .insert(backgroundJobs)
+          .values({ organizationId: ownerA.orgId, jobType: "noop.test" })
+          .returning(),
+      ),
+    );
+    expect(arbitrary).toMatch(/row-level security/);
     const cross = await rejection(
       withRls(db, as(ownerA), (tx) =>
         tx
           .insert(backgroundJobs)
-          .values({ organizationId: ownerB.orgId, jobType: "noop.test" })
+          .values({ organizationId: ownerB.orgId, jobType: "compliance.scan" })
           .returning(),
       ),
     );

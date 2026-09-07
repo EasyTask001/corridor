@@ -30,7 +30,9 @@ async function setChecked(checkbox: Locator, desired: boolean) {
 }
 
 test.describe("risk detection", () => {
-  test("a wildly outlying shipment line raises a risk_flag alert on the movement", async ({ page }) => {
+  test("a wildly outlying shipment line raises a risk_flag alert on the movement", async ({
+    page,
+  }) => {
     await login(page, "dispatch@pathfinder.demo");
     await page.goto("/movements");
     await page.getByRole("button", { name: "New ACE movement" }).click();
@@ -39,7 +41,9 @@ test.describe("risk detection", () => {
     const movementId = url.split("/movements/")[1]!;
 
     await page.getByLabel("Trip number").fill("RISK-TRIP");
-    await page.getByLabel("Port of entry").selectOption({ label: "3801 · Detroit — Ambassador Bridge, MI" });
+    await page
+      .getByLabel("Port of entry")
+      .selectOption({ label: "3801 · Detroit — Ambassador Bridge, MI" });
     await page.getByLabel("Estimated crossing").fill(localDateTime(2));
     await page.getByRole("button", { name: "Save trip" }).click();
 
@@ -74,7 +78,9 @@ test.describe("risk detection", () => {
 
     await page.goto("/alerts");
     await expect(
-      page.locator("div.panel > div").filter({ has: page.locator(`a[href="/movements/${movementId}"]`) }),
+      page
+        .locator("div.panel > div")
+        .filter({ has: page.locator(`a[href="/movements/${movementId}"]`) }),
     ).toHaveCount(0);
     await page.getByRole("button", { name: "Resolved" }).click();
     await expect(
@@ -86,7 +92,9 @@ test.describe("risk detection", () => {
 });
 
 test.describe("notifications", () => {
-  test("a critical alert notifies the bell and can be marked read from the notifications page", async ({ page }) => {
+  test("a critical alert notifies the bell and can be marked read from the notifications page", async ({
+    page,
+  }) => {
     await login(page, "owner@pathfinder.demo");
     await page.goto("/parties/trucks");
     const unit = `T-NOTIF-${Date.now().toString(36).toUpperCase()}`;
@@ -123,7 +131,9 @@ test.describe("notifications", () => {
     await login(page, "dispatch@pathfinder.demo");
     await page.goto("/settings/notifications");
     await expect(page.getByRole("heading", { name: "Notifications" })).toBeVisible();
-    const row = page.locator("div.flex.flex-wrap.items-center.justify-between", { hasText: "Critical compliance alert" });
+    const row = page.locator("div.flex.flex-wrap.items-center.justify-between", {
+      hasText: "Critical compliance alert",
+    });
     await setChecked(row.getByLabel("Notify me"), false);
     await expect(row.getByLabel("Email")).toBeDisabled();
 

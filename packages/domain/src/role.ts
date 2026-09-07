@@ -72,3 +72,16 @@ export const roleSchema = z.object({
   permissions: z.array(permissionKey),
 });
 export type Role = z.infer<typeof roleSchema>;
+
+export const customRoleInput = z.object({
+  name: z.string().trim().min(2).max(64),
+  permissions: z
+    .array(permissionKey)
+    .min(1, "Select at least one permission")
+    .max(PERMISSION_KEYS.length)
+    .refine((keys) => new Set(keys).size === keys.length, "Permissions must be unique"),
+});
+export type CustomRoleInput = z.infer<typeof customRoleInput>;
+
+export const updateCustomRoleInput = customRoleInput.extend({ id: uuid });
+export type UpdateCustomRoleInput = z.infer<typeof updateCustomRoleInput>;

@@ -10,3 +10,5 @@ export * from "./movement-inputs";
 export * from "./movement-validation";
 export * from "./document";
 export * from "./notification";
+export * from "./predictive";
+export * from "./reporting";

@@ -57,6 +57,44 @@ test.describe("seeded roles", () => {
     await expect(page.getByText("invited").first()).toBeVisible();
   });
 
+  test("owner can create, edit, and delete a custom role", async ({ page }) => {
+    await login(page, "owner@pathfinder.demo");
+    await page.getByRole("link", { name: "Roles" }).click();
+    await expect(page).toHaveURL(/\/settings\/roles/);
+
+    const name = `Border Reviewer ${unique()}`;
+    await page.getByLabel("Role name").fill(name);
+    await page
+      .getByText("movement.read", { exact: true })
+      .locator("..")
+      .locator("..")
+      .getByRole("checkbox")
+      .check();
+    await page.getByRole("button", { name: "Create role" }).click();
+    await expect(page.getByText("Role created.")).toBeVisible();
+    await expect(page.getByRole("button", { name: new RegExp(name) })).toBeVisible();
+
+    await page
+      .getByText("report.read", { exact: true })
+      .locator("..")
+      .locator("..")
+      .getByRole("checkbox")
+      .check();
+    await page.getByRole("button", { name: "Save role" }).click();
+    await expect(page.getByText("Role saved.")).toBeVisible();
+    await expect(page.getByText("2 permissions selected")).toBeVisible();
+
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.getByRole("button", { name: "Delete role" }).click();
+    await expect(page.getByText("Role deleted.")).toBeVisible();
+    await expect(page.getByRole("button", { name: new RegExp(name) })).toHaveCount(0);
+
+    await page.getByRole("link", { name: "Audit log" }).click();
+    await page.getByLabel("Search actions or entities").fill("role.delete");
+    await page.getByRole("button", { name: "Search" }).click();
+    await expect(page.getByText("role.delete", { exact: true }).first()).toBeVisible();
+  });
+
   test("read-only user is gated out of management UI", async ({ page }) => {
     await login(page, "readonly@pathfinder.demo");
     // Read-Only holds every *.read key, so read pages stay visible…

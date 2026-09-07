@@ -10,6 +10,7 @@ import {
   unique,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { MovementSuggestionPayload } from "@corridor/domain";
 import { authUsers, organizations } from "./core";
 import { drivers, partners, trailers, trucks } from "./registry";
 
@@ -59,6 +60,38 @@ export const movements = pgTable(
     index("movements_org_status_idx").on(t.organizationId, t.status),
     index("movements_org_created_idx").on(t.organizationId, t.createdAt),
     unique("movements_organization_id_movement_number_key").on(t.organizationId, t.movementNumber),
+  ],
+);
+
+export const movementSuggestions = pgTable(
+  "movement_suggestions",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    movementId: uuid("movement_id")
+      .notNull()
+      .references(() => movements.id, { onDelete: "cascade" }),
+    sourceMovementId: uuid("source_movement_id")
+      .notNull()
+      .references(() => movements.id, { onDelete: "cascade" }),
+    score: numeric("score", { precision: 5, scale: 2, mode: "number" }).notNull(),
+    reasons: text("reasons").array().notNull(),
+    suggestedPayload: jsonb("suggested_payload").$type<MovementSuggestionPayload>().notNull(),
+    status: text("status", { enum: ["offered", "accepted", "dismissed"] })
+      .notNull()
+      .default("offered"),
+    createdBy: uuid("created_by").references(() => authUsers.id, { onDelete: "set null" }),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("movement_suggestions_org_created_idx").on(t.organizationId, t.createdAt),
+    index("movement_suggestions_movement_idx").on(t.movementId, t.createdAt),
   ],
 );
 

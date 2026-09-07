@@ -15,6 +15,7 @@ type Outputs = inferRouterOutputs<AppRouter>;
 type Movement = Outputs["movement"]["get"];
 type Validation = Outputs["movement"]["validate"];
 type Options = Outputs["movement"]["options"];
+type Suggestion = NonNullable<Outputs["movement"]["suggestions"]["generate"]>;
 
 const STEPS = [
   { key: "trip", label: "Trip" },
@@ -105,6 +106,7 @@ export function MovementWorkspace({
   const editable = permissions.write && isEditable(m.status);
   const [step, setStep] = useState<StepKey>(editable ? "trip" : "review");
   const [error, setError] = useState<string | null>(null);
+  const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
   const onError = (e: { message: string }) => {
     setError(e.message);
     refresh(); // a failed transmit still writes an integration_events row
@@ -139,6 +141,30 @@ export function MovementWorkspace({
   );
   const customs = useMutation(
     trpc.movement.customsResponse.mutationOptions({ onSuccess: ok, onError }),
+  );
+  const generateSuggestion = useMutation(
+    trpc.movement.suggestions.generate.mutationOptions({
+      onSuccess: (value) => {
+        setSuggestion(value);
+        setError(value ? null : "No completed movement history is available for this regime yet.");
+      },
+      onError,
+    }),
+  );
+  const acceptSuggestion = useMutation(
+    trpc.movement.suggestions.accept.mutationOptions({
+      onSuccess: () => {
+        setSuggestion(null);
+        ok();
+      },
+      onError,
+    }),
+  );
+  const dismissSuggestion = useMutation(
+    trpc.movement.suggestions.dismiss.mutationOptions({
+      onSuccess: () => setSuggestion(null),
+      onError,
+    }),
   );
 
   const [amending, setAmending] = useState(false);
@@ -615,6 +641,15 @@ export function MovementWorkspace({
             )}
           </div>
           <div className="flex flex-wrap gap-2">
+            {editable && (
+              <button
+                className="btn-secondary"
+                disabled={generateSuggestion.isPending}
+                onClick={() => generateSuggestion.mutate({ movementId: id })}
+              >
+                {generateSuggestion.isPending ? "Finding a similar trip…" : "Suggest from history"}
+              </button>
+            )}
             {isEditable(m.status) && permissions.transmit && (
               <button
                 className="btn-signal"
@@ -656,6 +691,64 @@ export function MovementWorkspace({
           <p role="alert" className="rounded-md bg-danger-500/10 px-3 py-2 text-sm text-danger-500">
             {error}
           </p>
+        )}
+
+        {suggestion && (
+          <section className="rounded-md border border-signal-500/40 bg-signal-500/5 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-signal-600">
+                  AI suggested · not applied
+                </div>
+                <h2 className="mt-1 font-medium">
+                  Reuse the lane from {suggestion.suggestedPayload.sourceMovementNumber}
+                </h2>
+                <p className="mt-1 text-sm text-ink-500">
+                  Similarity {suggestion.score}/100 · {suggestion.reasons.join(" · ")}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  className="btn-signal"
+                  disabled={acceptSuggestion.isPending}
+                  onClick={() => acceptSuggestion.mutate({ suggestionId: suggestion.id })}
+                >
+                  Apply suggestion
+                </button>
+                <button
+                  className="btn-secondary"
+                  disabled={dismissSuggestion.isPending}
+                  onClick={() => dismissSuggestion.mutate({ suggestionId: suggestion.id })}
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+            <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-4">
+              <SuggestionValue
+                label="Crossing"
+                value={suggestion.suggestedPayload.crossingPoint?.name ?? "—"}
+              />
+              <SuggestionValue
+                label="Driver"
+                value={
+                  options.drivers.find((x) => x.id === suggestion.suggestedPayload.driverId)
+                    ?.label ?? "—"
+                }
+              />
+              <SuggestionValue
+                label="Truck"
+                value={
+                  options.trucks.find((x) => x.id === suggestion.suggestedPayload.truckId)?.label ??
+                  "—"
+                }
+              />
+              <SuggestionValue
+                label="Cargo"
+                value={`${suggestion.suggestedPayload.cargo.length} line${suggestion.suggestedPayload.cargo.length === 1 ? "" : "s"}`}
+              />
+            </dl>
+          </section>
         )}
 
         {cancelling && (
@@ -891,6 +984,15 @@ function Detail({ rows }: { rows: [string, string][] }) {
         </div>
       ))}
     </dl>
+  );
+}
+
+function SuggestionValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs uppercase tracking-wide text-ink-500">{label}</dt>
+      <dd className="mt-0.5 font-medium">{value}</dd>
+    </div>
   );
 }
 

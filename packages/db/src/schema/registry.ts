@@ -32,6 +32,7 @@ export const drivers = pgTable(
   "drivers",
   {
     ...base(),
+    userId: uuid("user_id").references(() => authUsers.id, { onDelete: "set null" }),
     firstName: text("first_name").notNull(),
     lastName: text("last_name").notNull(),
     licenseNumber: text("license_number").notNull(),

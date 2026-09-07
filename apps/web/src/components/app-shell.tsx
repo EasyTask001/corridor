@@ -30,6 +30,7 @@ const SETTINGS: NavItem[] = [
   { href: "/settings/organization", label: "Organization", permission: "organization.read" },
   { href: "/settings/users", label: "Users", permission: "organization.members.read" },
   { href: "/settings/roles", label: "Roles", permission: "organization.roles.manage" },
+  { href: "/settings/audit", label: "Audit log", permission: "audit_log.read" },
   { href: "/settings/billing", label: "Billing", permission: "billing.read" },
   { href: "/settings/integrations", label: "Integrations", permission: "integrations.manage" },
   { href: "/settings/notifications", label: "Notifications" },

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PERMISSION_KEYS, PERMISSIONS } from "./permission";
-import { SYSTEM_ROLES, SYSTEM_ROLE_PERMISSIONS, type SystemRoleKey } from "./role";
+import { customRoleInput, SYSTEM_ROLES, SYSTEM_ROLE_PERMISSIONS, type SystemRoleKey } from "./role";
 
 describe("system role grants", () => {
   it("every system role has a permission list", () => {
@@ -33,5 +33,20 @@ describe("system role grants", () => {
       "movement.read_assigned",
       "document.upload",
     ]);
+  });
+});
+
+describe("customRoleInput", () => {
+  it("requires a useful name and at least one unique permission", () => {
+    expect(
+      customRoleInput.parse({ name: "  Border Reviewer  ", permissions: ["movement.read"] }),
+    ).toEqual({ name: "Border Reviewer", permissions: ["movement.read"] });
+    expect(() => customRoleInput.parse({ name: "x", permissions: [] })).toThrow();
+    expect(() =>
+      customRoleInput.parse({
+        name: "Duplicate grants",
+        permissions: ["movement.read", "movement.read"],
+      }),
+    ).toThrow();
   });
 });

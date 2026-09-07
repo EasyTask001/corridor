@@ -12,7 +12,7 @@ import { createClient } from "@supabase/supabase-js";
 import { eq, sql } from "drizzle-orm";
 import { createDb } from "./client";
 import { withRls } from "./rls";
-import { organizationMembers, organizations, roles } from "./schema";
+import { auditLog, organizationMembers, organizations, roles } from "./schema";
 
 const DB_URL =
   process.env.DIRECT_DATABASE_URL ?? "postgresql://postgres:postgres@127.0.0.1:55322/postgres";
@@ -76,6 +76,17 @@ async function expectRlsDenied(p: Promise<unknown>) {
   const messages: string[] = [];
   for (let e = err; e instanceof Error; e = e.cause) messages.push(e.message);
   expect(messages.join(" | ")).toMatch(/permission denied|row-level security/i);
+}
+
+async function rejection(p: Promise<unknown>): Promise<string> {
+  try {
+    await p;
+  } catch (err) {
+    const messages: string[] = [];
+    for (let e: unknown = err; e instanceof Error; e = e.cause) messages.push(e.message);
+    return messages.join(" | ");
+  }
+  throw new Error("expected rejection");
 }
 
 describe("organizations RLS", () => {
@@ -177,6 +188,31 @@ describe("organization_members RLS", () => {
       ),
     );
   });
+
+  it("cannot assign another organization's custom role", async () => {
+    const [foreignRole] = await db
+      .insert(roles)
+      .values({ organizationId: ownerB.orgId, name: `Foreign Role ${Date.now()}` })
+      .returning({ id: roles.id });
+    const [target] = await db
+      .select({ id: organizationMembers.id })
+      .from(organizationMembers)
+      .where(eq(organizationMembers.userId, readOnlyA.userId));
+
+    try {
+      const message = await rejection(
+        withRls(db, as(ownerA), (tx) =>
+          tx
+            .update(organizationMembers)
+            .set({ roleId: foreignRole!.id })
+            .where(eq(organizationMembers.id, target!.id)),
+        ),
+      );
+      expect(message).toMatch(/does not belong to organization/i);
+    } finally {
+      await db.delete(roles).where(eq(roles.id, foreignRole!.id));
+    }
+  });
 });
 
 describe("helper functions", () => {
@@ -213,5 +249,40 @@ describe("helper functions", () => {
     await withRls(db, as(ownerA), (tx) => tx.select().from(organizations));
     const r = await db.execute<{ current_user: string }>(sql`select current_user`);
     expect(r[0]?.current_user).not.toBe("authenticated");
+  });
+});
+
+describe("audit log RLS", () => {
+  it("keeps audit events inside their organization", async () => {
+    const marker = `rls-audit-${Date.now()}`;
+    await withRls(db, as(ownerA), (tx) =>
+      tx.execute(
+        sql`select public.log_audit(${ownerA.orgId}::uuid, 'test.audit', 'test', ${marker}, null, null)`,
+      ),
+    );
+    try {
+      const own = await withRls(db, as(ownerA), (tx) =>
+        tx.select().from(auditLog).where(eq(auditLog.entityId, marker)),
+      );
+      const foreign = await withRls(db, as(ownerB), (tx) =>
+        tx.select().from(auditLog).where(eq(auditLog.entityId, marker)),
+      );
+      expect(own).toHaveLength(1);
+      expect(foreign).toHaveLength(0);
+    } finally {
+      await db.delete(auditLog).where(eq(auditLog.entityId, marker));
+    }
+  });
+
+  it("rejects direct authenticated writes to the append-only log", async () => {
+    await expectRlsDenied(
+      withRls(db, as(ownerA), (tx) =>
+        tx.insert(auditLog).values({
+          organizationId: ownerA.orgId,
+          action: "test.direct_write",
+          entityType: "test",
+        }),
+      ),
+    );
   });
 });
