@@ -279,30 +279,46 @@ max_frequency = "5s"
 # enabled = true
 # uri = "pg-functions://postgres/auth/before-user-created-hook"
 
-# --- Corridor: Auth → app webhook -------------------------------------------
+# --- Corridor: auth.users → app webhook --------------------------------------
 # `POST /api/webhooks/supabase-auth` keeps public.user_profiles in step with
 # Auth-side changes (display-name edits, deletes) that the on_auth_user_created
 # trigger in migration 0001 does not cover. It is a *complement* to that
 # trigger, never a replacement: sign-up must not depend on an HTTP hop.
 #
-# Wire it up by pointing an Auth hook at the route and sharing the secret:
+# It is a **Database Webhook on auth.users**, NOT an Auth Hook. None of the Auth
+# Hooks above report a created/updated/deleted user — they are
+# before_user_created, custom_access_token, send_sms, send_email and the
+# MFA/password verification hooks. In particular:
 #
-#   [auth.hook.before_user_created]
-#   enabled = true
-#   uri = "http://host.docker.internal:3000/api/webhooks/supabase-auth"
-#   secret = "env(SUPABASE_AUTH_WEBHOOK_SECRET)"
+#   ⚠ Do NOT point [auth.hook.before_user_created] at this route. That hook is a
+#     *gate*: its payload is `{ metadata, user }` with no event type, and a
+#     non-2xx answer DENIES the sign-up. Wiring it here would block every new
+#     user.
 #
-# (from inside the Auth container, `host.docker.internal` is the Next.js dev
-# server on the host; use the deployed origin in the cloud, where the same
-# hooks live under Authentication → Hooks in the dashboard.)
+# Wire it in the dashboard (Database → Webhooks → new hook on auth.users, events
+# INSERT/UPDATE/DELETE, HTTP POST to <origin>/api/webhooks/supabase-auth, HTTP
+# header `x-corridor-webhook-secret: <SUPABASE_AUTH_WEBHOOK_SECRET>`), or with
+# the equivalent trigger SQL — locally, `host.docker.internal` reaches the
+# Next.js dev server from inside the Postgres container:
 #
-# The secret is a Standard Webhooks secret — `whsec_` followed by base64 — and
-# the route verifies `webhook-id` / `webhook-timestamp` / `webhook-signature`
-# over `${id}.${timestamp}.${body}` with a 5-minute replay window. With
-# SUPABASE_AUTH_WEBHOOK_SECRET unset the route answers 503 and processes
-# nothing, so leaving this commented out is a supported configuration.
+#   create trigger on_auth_user_changed
+#     after insert or update or delete on auth.users
+#     for each row execute function supabase_functions.http_request(
+#       'http://host.docker.internal:3000/api/webhooks/supabase-auth',
+#       'POST',
+#       '{"Content-Type":"application/json","x-corridor-webhook-secret":"<secret>"}',
+#       '{}',
+#       '5000'
+#     );
 #
-# Generate one: `openssl rand -base64 24 | sed 's/^/whsec_/'`
+# The route requires that header (constant-time compare) and, if the sender also
+# sends Standard Webhooks headers (webhook-id / webhook-timestamp /
+# webhook-signature over `${id}.${timestamp}.${body}`), verifies the signature
+# too within a 5-minute replay window. With SUPABASE_AUTH_WEBHOOK_SECRET unset
+# the route answers 503 and processes nothing, so leaving this unwired is a
+# supported configuration — the 0001 trigger still creates every profile.
+#
+# Generate a secret: `openssl rand -base64 24 | sed 's/^/whsec_/'`
 # -----------------------------------------------------------------------------
 
 # This hook runs before a token is issued and allows you to add additional claims based on the authentication method used.
