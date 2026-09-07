@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   index,
   integer,
   jsonb,
@@ -14,6 +15,7 @@ import {
   uuid,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+import { ACE_SHIPMENT_TYPES, ACI_CARGO_TYPES } from "@corridor/domain";
 import type { MovementSuggestionPayload } from "@corridor/domain";
 import { authUsers, organizations } from "./core";
 import { sourceDocuments } from "./documents";
@@ -147,6 +149,10 @@ export const movementEvents = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
+    /** 0019 — the shipment this row is about, when it is about one. */
+    shipmentId: uuid("shipment_id").references((): AnyPgColumn => shipments.id, {
+      onDelete: "set null",
+    }),
     eventType: text("event_type", {
       enum: ["status_change", "amendment", "note", "customs_response", "ai_flag"],
     }).notNull(),
@@ -199,28 +205,116 @@ export const movementAmendments = pgTable(
   ],
 );
 
-export const cargo = pgTable(
-  "cargo",
+export const SHIPMENT_STATUSES = [
+  "draft",
+  "sent",
+  "accepted",
+  "rejected",
+  "entry_on_file",
+  "released",
+  "held",
+  "arrived",
+  "cancelled",
+] as const;
+
+export const shipments = pgTable(
+  "shipments",
   {
     id: uuid("id")
       .primaryKey()
       .default(sql`gen_random_uuid()`),
-    movementId: uuid("movement_id")
+    organizationId: uuid("organization_id")
       .notNull()
-      .references(() => movements.id, { onDelete: "cascade" }),
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    regime: text("regime", { enum: ["ACE", "ACI"] }).notNull(),
+    /** Null while the shipment is waiting to be put on a trip. */
+    movementId: uuid("movement_id").references(() => movements.id, { onDelete: "set null" }),
+    carrierCode: text("carrier_code").notNull(),
+    shipmentType: text("shipment_type", { enum: ACE_SHIPMENT_TYPES }),
+    cargoType: text("cargo_type", { enum: ACI_CARGO_TYPES }),
+    controlReference: text("control_reference").notNull(),
+    /** Denormalised `carrier_code || control_reference`, kept by the
+     * shipments_control_number() trigger — never written by application code. */
+    controlNumber: text("control_number").notNull().default(""),
+    isPars: boolean("is_pars").notNull().default(false),
+    entryNumber: text("entry_number"),
+    entryPortId: uuid("entry_port_id").references(() => ports.id),
+    inBondEntryType: text("in_bond_entry_type", { enum: ["IT", "TE", "IE"] }),
+    inBondDestinationPortId: uuid("in_bond_destination_port_id").references(() => ports.id),
+    inBondNumber: text("in_bond_number"),
+    shipperId: uuid("shipper_id").references(() => partners.id, { onDelete: "restrict" }),
+    consigneeId: uuid("consignee_id").references(() => partners.id, { onDelete: "restrict" }),
+    destinationPortId: uuid("destination_port_id").references(() => ports.id),
+    sublocationPortId: uuid("sublocation_port_id").references(() => ports.id),
+    loadingCountry: text("loading_country"),
+    loadingProvince: text("loading_province"),
+    loadingCity: text("loading_city"),
+    deliveryAddress: jsonb("delivery_address")
+      .$type<{
+        line1?: string;
+        line2?: string;
+        city?: string;
+        region?: string;
+        postalCode?: string;
+        country?: string;
+      }>()
+      .notNull()
+      .default({}),
+    consigneeBusinessNumber: text("consignee_business_number"),
+    status: text("status", { enum: SHIPMENT_STATUSES }).notNull().default("draft"),
+    entryOnFileAt: timestamp("entry_on_file_at", { withTimezone: true }),
+    releasedAt: timestamp("released_at", { withTimezone: true }),
+    arrivedAt: timestamp("arrived_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    /** FK added in Task 11 with the import_batches table. */
+    importBatchId: uuid("import_batch_id"),
+    sourceDocumentId: uuid("source_document_id").references((): AnyPgColumn => sourceDocuments.id, {
+      onDelete: "set null",
+    }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("shipments_organization_id_idx").on(t.organizationId),
+    index("shipments_org_status_idx").on(t.organizationId, t.status),
+    index("shipments_movement_idx")
+      .on(t.movementId)
+      .where(sql`${t.movementId} is not null`),
+    index("shipments_control_search_idx").using(
+      "gin",
+      sql`to_tsvector('simple', ${t.controlNumber})`,
+    ),
+    unique("shipments_organization_id_control_number_key").on(t.organizationId, t.controlNumber),
+  ],
+);
+
+/** 0019 — `cargo`, renamed and re-parented onto the shipment. */
+export const commodities = pgTable(
+  "commodities",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    shipmentId: uuid("shipment_id")
+      .notNull()
+      .references(() => shipments.id, { onDelete: "cascade" }),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     lineNumber: integer("line_number").notNull().default(1),
-    shipperId: uuid("shipper_id").references(() => partners.id, { onDelete: "restrict" }),
-    consigneeId: uuid("consignee_id").references(() => partners.id, { onDelete: "restrict" }),
     commodityDescription: text("commodity_description").notNull(),
     hsCode: text("hs_code"),
+    /** Canonical weight; `weightUnit` records what the user typed. */
     weightKg: numeric("weight_kg", { precision: 12, scale: 2, mode: "number" }),
-    pieceCount: integer("piece_count"),
+    weightUnit: text("weight_unit", { enum: ["KG", "LB"] })
+      .notNull()
+      .default("KG"),
+    quantity: integer("quantity"),
+    quantityUnit: text("quantity_unit"),
     packagingType: text("packaging_type"),
-    entryNumber: text("entry_number"),
-    inBondNumber: text("in_bond_number"),
+    marksAndNumbers: text("marks_and_numbers"),
+    isConsolidated: boolean("is_consolidated").notNull().default(false),
     valueAmount: numeric("value_amount", { precision: 14, scale: 2, mode: "number" }),
     valueCurrency: text("value_currency", { enum: ["USD", "CAD"] }),
     countryOfOrigin: text("country_of_origin"),
@@ -236,12 +330,38 @@ export const cargo = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    index("cargo_movement_idx").on(t.movementId, t.lineNumber),
-    index("cargo_organization_id_idx").on(t.organizationId),
-    index("cargo_commodity_search_idx").using(
+    index("commodities_shipment_idx").on(t.shipmentId, t.lineNumber),
+    index("commodities_organization_id_idx").on(t.organizationId),
+    index("commodities_commodity_search_idx").using(
       "gin",
       sql`to_tsvector('simple', ${t.commodityDescription})`,
     ),
+  ],
+);
+
+/** Up to three dangerous-goods declarations per commodity line. */
+export const commodityHazmat = pgTable(
+  "commodity_hazmat",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    commodityId: uuid("commodity_id")
+      .notNull()
+      .references(() => commodities.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    unCode: text("un_code").notNull(),
+    description: text("description"),
+    emergencyContact: text("emergency_contact"),
+    emergencyPhone: text("emergency_phone"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("commodity_hazmat_organization_id_idx").on(t.organizationId),
+    unique("commodity_hazmat_commodity_id_position_key").on(t.commodityId, t.position),
   ],
 );
 

@@ -10,7 +10,7 @@ import { MOVEMENT_TRANSITIONS, movementStatus } from "@corridor/domain";
 import { createDb } from "./client";
 import { withRls } from "./rls";
 import {
-  cargo,
+  commodities,
   drivers,
   movementAmendments,
   movementEvents,
@@ -21,6 +21,7 @@ import {
   rolePermissions,
   roles,
   seals,
+  shipments,
 } from "./schema";
 
 const DB_URL =
@@ -102,6 +103,24 @@ async function createDraft(actor: Actor) {
   });
 }
 
+/** A draft shipment on `movementId`, so commodity lines have somewhere to live. */
+async function createShipment(actor: Actor, movementId: string | null) {
+  return withRls(db, as(actor), async (tx) => {
+    const [s] = await tx
+      .insert(shipments)
+      .values({
+        organizationId: actor.orgId,
+        regime: "ACE",
+        movementId,
+        carrierCode: "PFTR",
+        shipmentType: "regular_bill",
+        controlReference: `T${Date.now().toString(36).toUpperCase()}${Math.floor(Math.random() * 1000)}`,
+      })
+      .returning();
+    return s!;
+  });
+}
+
 describe("state machine parity (SQL vs domain)", () => {
   it("movement_can_transition agrees with MOVEMENT_TRANSITIONS for every pair", async () => {
     const statuses = movementStatus.options;
@@ -141,11 +160,12 @@ describe("movement triggers", () => {
     expect(msg).toMatch(/invalid movement transition draft -> released/);
   });
 
-  it("freezes header + cargo once sent; stamps submitted_at", async () => {
+  it("freezes header + commodities once sent; stamps submitted_at", async () => {
     const m = await createDraft(dispatcherA);
+    const shipment = await createShipment(dispatcherA, m.id);
     await withRls(db, as(dispatcherA), (tx) =>
-      tx.insert(cargo).values({
-        movementId: m.id,
+      tx.insert(commodities).values({
+        shipmentId: shipment.id,
         organizationId: dispatcherA.orgId,
         commodityDescription: "Lumber",
       }),
@@ -162,16 +182,24 @@ describe("movement triggers", () => {
     );
     expect(headerMsg).toMatch(/not editable in status sent/);
 
-    const cargoMsg = await rejection(
+    const commodityMsg = await rejection(
       withRls(db, as(dispatcherA), (tx) =>
-        tx.insert(cargo).values({
-          movementId: m.id,
+        tx.insert(commodities).values({
+          shipmentId: shipment.id,
           organizationId: dispatcherA.orgId,
           commodityDescription: "Sneaky extra line",
         }),
       ),
     );
-    expect(cargoMsg).toMatch(/not editable in status sent/);
+    expect(commodityMsg).toMatch(/not editable in status sent/);
+
+    // …and the shipment header itself is frozen too (shipments_guard).
+    const shipmentMsg = await rejection(
+      withRls(db, as(dispatcherA), (tx) =>
+        tx.update(shipments).set({ entryNumber: "SNEAK" }).where(eq(shipments.id, shipment.id)),
+      ),
+    );
+    expect(shipmentMsg).toMatch(/not editable in status sent/);
   });
 
   it("movement_events is append-only", async () => {
@@ -227,8 +255,12 @@ describe("movements RLS", () => {
     expect(assigned.length).toBeGreaterThan(0);
     expect(assigned.every((movement) => movement.driverId === linkedDriver!.id)).toBe(true);
 
+    const assignedShipments = await withRls(db, as(driverA), (tx) =>
+      tx.select().from(shipments).where(eq(shipments.movementId, assigned[0]!.id)),
+    );
+    expect(assignedShipments.length).toBeGreaterThan(0);
     const lines = await withRls(db, as(driverA), (tx) =>
-      tx.select().from(cargo).where(eq(cargo.movementId, assigned[0]!.id)),
+      tx.select().from(commodities).where(eq(commodities.shipmentId, assignedShipments[0]!.id)),
     );
     const events = await withRls(db, as(driverA), (tx) =>
       tx.select().from(movementEvents).where(eq(movementEvents.movementId, assigned[0]!.id)),
@@ -308,9 +340,10 @@ describe("movements RLS", () => {
 
     // A draft with lines and a timeline deletes too — the child guards let the
     // cascade through even though both tables reject ordinary deletes.
+    const draftShipment = await createShipment(dispatcherA, draft.id);
     await withRls(db, as(dispatcherA), (tx) =>
-      tx.insert(cargo).values({
-        movementId: draft.id,
+      tx.insert(commodities).values({
+        shipmentId: draftShipment.id,
         organizationId: dispatcherA.orgId,
         commodityDescription: "Line on a deletable draft",
       }),
@@ -329,13 +362,20 @@ describe("movements RLS", () => {
       tx.delete(movements).where(eq(movements.id, draft.id)).returning({ id: movements.id }),
     );
     expect(draftDeleted).toHaveLength(1);
-    const orphanCargo = await db.select().from(cargo).where(eq(cargo.movementId, draft.id));
     const orphanEvents = await db
       .select()
       .from(movementEvents)
       .where(eq(movementEvents.movementId, draft.id));
-    expect(orphanCargo).toHaveLength(0);
     expect(orphanEvents).toHaveLength(0);
+    // `on delete set null`: the shipment survives the movement, unassigned.
+    const [survivor] = await db.select().from(shipments).where(eq(shipments.id, draftShipment.id));
+    expect(survivor!.movementId).toBeNull();
+    const survivingLines = await db
+      .select()
+      .from(commodities)
+      .where(eq(commodities.shipmentId, draftShipment.id));
+    expect(survivingLines).toHaveLength(1);
+    await db.delete(shipments).where(eq(shipments.id, draftShipment.id));
   });
 
   it("only draft amendments are deletable (0011)", async () => {
@@ -378,7 +418,7 @@ describe("movements RLS", () => {
     await db.delete(movements).where(eq(movements.id, m.id));
   });
 
-  it("cross-tenant: Org A sees zero Org B cargo, seals and movement_amendments rows", async () => {
+  it("cross-tenant: Org A sees zero Org B seals and movement_amendments rows", async () => {
     // Built with the owning connection (not RLS) so Org B needs no fixtures.
     const [foreign] = await db
       .insert(movements)
@@ -389,14 +429,6 @@ describe("movements RLS", () => {
       })
       .returning({ id: movements.id });
     try {
-      const [line] = await db
-        .insert(cargo)
-        .values({
-          movementId: foreign!.id,
-          organizationId: ownerB.orgId,
-          commodityDescription: "Cross-tenant probe cargo",
-        })
-        .returning({ id: cargo.id });
       const [seal] = await db
         .insert(seals)
         .values({
@@ -415,29 +447,23 @@ describe("movements RLS", () => {
         })
         .returning({ id: movementAmendments.id });
 
-      const seenCargo = await withRls(db, as(dispatcherA), (tx) =>
-        tx.select().from(cargo).where(eq(cargo.id, line!.id)),
-      );
       const seenSeals = await withRls(db, as(dispatcherA), (tx) =>
         tx.select().from(seals).where(eq(seals.id, seal!.id)),
       );
       const seenAmendments = await withRls(db, as(dispatcherA), (tx) =>
         tx.select().from(movementAmendments).where(eq(movementAmendments.id, amendment!.id)),
       );
-      expect(seenCargo).toHaveLength(0);
       expect(seenSeals).toHaveLength(0);
       expect(seenAmendments).toHaveLength(0);
 
-      const allCargo = await withRls(db, as(dispatcherA), (tx) => tx.select().from(cargo));
       const allSeals = await withRls(db, as(dispatcherA), (tx) => tx.select().from(seals));
       const allAmendments = await withRls(db, as(dispatcherA), (tx) =>
         tx.select().from(movementAmendments),
       );
-      expect(allCargo.every((r) => r.organizationId === dispatcherA.orgId)).toBe(true);
       expect(allSeals.every((r) => r.organizationId === dispatcherA.orgId)).toBe(true);
       expect(allAmendments.every((r) => r.organizationId === dispatcherA.orgId)).toBe(true);
     } finally {
-      // cascades to cargo / seals / amendments
+      // cascades to seals / amendments
       await db.delete(movements).where(eq(movements.id, foreign!.id));
     }
   });
@@ -556,7 +582,6 @@ describe("predictive movement suggestions", () => {
       driverId: null,
       truckId: null,
       trailerId: null,
-      cargo: [],
     };
 
     try {
