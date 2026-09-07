@@ -22,7 +22,7 @@ export interface MovementRow {
   etaLabel: string;
   driverLabel: string;
   unitsLabel: string;
-  cargoCount: number;
+  shipmentCount: number;
   customsReferenceLabel: string;
 }
 
@@ -66,9 +66,9 @@ export function MovementsTable({ rows }: { rows: MovementRow[] }) {
         header: "Truck / Trailer",
         meta: { className: "font-mono text-xs" },
       }),
-      helper.accessor("cargoCount", {
-        id: "lines",
-        header: "Lines",
+      helper.accessor("shipmentCount", {
+        id: "shipments",
+        header: "Shipments",
         meta: { className: "font-mono" },
       }),
       helper.accessor("customsReferenceLabel", {

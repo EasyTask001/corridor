@@ -74,7 +74,7 @@ export default async function MovementsPage({
     etaLabel: fmt(m.scheduledCrossingAt),
     driverLabel: m.driverName ?? "—",
     unitsLabel: `${m.truckUnit ?? "—"} / ${m.trailerUnit ?? "—"}`,
-    cargoCount: m.cargoCount,
+    shipmentCount: m.shipmentCount,
     customsReferenceLabel: m.customsReferenceNumber ?? "—",
   }));
 

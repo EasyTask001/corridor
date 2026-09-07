@@ -31,7 +31,7 @@ export default function MovementScreen() {
     );
   }
 
-  const { driver, truck, trailer, events, cargo } = data;
+  const { driver, truck, trailer, events, shipments } = data;
   const movement = data;
 
   return (
@@ -82,14 +82,19 @@ export default function MovementScreen() {
       </View>
 
       <View style={styles.panel}>
-        <Text style={styles.h2}>Cargo ({cargo.length})</Text>
-        {cargo.length === 0 ? (
-          <Text style={styles.muted}>No cargo lines on this movement.</Text>
+        <Text style={styles.h2}>Shipments ({shipments.length})</Text>
+        {shipments.length === 0 ? (
+          <Text style={styles.muted}>No shipments on this movement.</Text>
         ) : (
-          cargo.map((line) => (
-            <Text key={line.id} style={styles.body}>
-              {line.lineNumber}. {line.commodityDescription}
-            </Text>
+          shipments.map((shipment) => (
+            <View key={shipment.id} style={{ gap: 2, paddingVertical: 4 }}>
+              <Text style={styles.body}>{shipment.controlNumber}</Text>
+              {shipment.commodities.map((line) => (
+                <Text key={line.id} style={styles.muted}>
+                  {line.lineNumber}. {line.commodityDescription}
+                </Text>
+              ))}
+            </View>
           ))
         )}
       </View>
