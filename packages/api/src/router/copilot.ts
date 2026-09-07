@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { desc, eq, schema, sql } from "@corridor/db";
 import { embedderAvailable } from "@corridor/ai";
-import { aiProcedure, router } from "../trpc";
+import { permissionProcedure, router } from "../trpc";
 
 const { regulationDocuments } = schema;
 
@@ -14,8 +14,13 @@ export const SUGGESTED_QUESTIONS = [
 ] as const;
 
 export const copilotRouter = router({
-  /** Which embedder/model is active, and whether the regulation corpus has been ingested. */
-  capabilities: aiProcedure("copilot.use").query(async ({ ctx }) => {
+  /**
+   * Which embedder/model is active, and whether the regulation corpus has been
+   * ingested. Two cheap reads and an env check — no model call, so it stays on
+   * the standard tier; spending the caller's much smaller `ai` budget here
+   * would let a page load starve the chat route it exists to describe.
+   */
+  capabilities: permissionProcedure("copilot.use").query(async ({ ctx }) => {
     const mode = embedderAvailable() ? "model" : "mock";
     const rows = await ctx.rls((tx) =>
       tx.select({ count: sql<number>`count(*)::int` }).from(regulationDocuments),
@@ -28,7 +33,8 @@ export const copilotRouter = router({
   }),
 
   regulations: router({
-    list: aiProcedure("copilot.use")
+    /** A plain table scan of the ingested corpus — no model call. */
+    list: permissionProcedure("copilot.use")
       .input(z.object({ jurisdiction: z.enum(["US", "CA"]).optional() }))
       .query(({ ctx, input }) =>
         ctx.rls((tx) =>

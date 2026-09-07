@@ -164,7 +164,7 @@ export const integrationsRouter = router({
             writeAudit(
               tx,
               ctx.orgId,
-              "integration.credentials_clear",
+              "integration.credentials_cleared",
               "integration_config",
               input.provider,
               { hasCredentials: true },

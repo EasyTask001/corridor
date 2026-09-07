@@ -35,7 +35,12 @@ import {
   type NotificationChannel,
   type NotificationEventType,
 } from "@corridor/domain";
-import { sendEmail, sendExpoPush, type ExpoPushMessage } from "@corridor/integrations";
+import {
+  deadPushTokens,
+  sendEmail,
+  sendExpoPush,
+  type ExpoPushMessage,
+} from "@corridor/integrations";
 import {
   and,
   eq,
@@ -49,7 +54,7 @@ import {
 import { logIntegrationEvent } from "./customs";
 import { enqueueJob } from "./jobs";
 
-const { authUsers, drivers, notificationRules, notifications } = schema;
+const { authUsers, drivers, notificationRules, notifications, userDevices } = schema;
 
 export interface NotifyInput {
   orgId: string;
@@ -261,18 +266,37 @@ export async function deliverQueuedPush(
   const eventType = targets[0]!.type;
   const started = Date.now();
   const result = await sendExpoPush(messages);
+  // Expo asks senders to stop using a token it reports as DeviceNotRegistered
+  // (app uninstalled, or the registration expired). Nothing else ever prunes
+  // user_devices, so a dead handset would otherwise be re-sent to on every
+  // fan-out forever. We already hold the service role here.
+  const pruned = await pruneDeadDevices(tx, orgId, deadPushTokens(messages, result.tickets));
   await logIntegrationEvent(tx, {
     orgId,
     provider: "expo_push",
     direction: "outbound",
     operation: `notify:${eventType}`,
     request: { notifications: targets.length, devices: messages.length },
-    response: { mode: result.mode, sent: result.sent },
+    response: { mode: result.mode, sent: result.sent, prunedDevices: pruned },
     success: !result.error,
     error: result.error,
     durationMs: Date.now() - started,
   });
-  return { pushed: result.sent, devices: messages.length };
+  return { pushed: result.sent, devices: messages.length, prunedDevices: pruned };
+}
+
+/** Delete the `user_devices` rows for tokens Expo has retired. Returns the count. */
+async function pruneDeadDevices(
+  tx: RlsTransaction,
+  orgId: string,
+  tokens: string[],
+): Promise<number> {
+  if (tokens.length === 0) return 0;
+  const deleted = await tx
+    .delete(userDevices)
+    .where(and(eq(userDevices.organizationId, orgId), inArray(userDevices.expoPushToken, tokens)))
+    .returning({ id: userDevices.id });
+  return deleted.length;
 }
 
 // ---------------------------------------------------------------------------

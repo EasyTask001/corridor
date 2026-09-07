@@ -70,6 +70,20 @@ export function SsoForm({ plan, initial }: { plan: SubscriptionPlan; initial: Ss
     }),
   );
 
+  const removeButton = (
+    <Button
+      type="button"
+      variant="danger"
+      disabled={remove.isPending}
+      onClick={() => {
+        setSaved(null);
+        remove.mutate();
+      }}
+    >
+      {remove.isPending ? "Removing…" : "Remove SSO"}
+    </Button>
+  );
+
   if (plan !== "enterprise") {
     return (
       <section className="panel space-y-3 p-6">
@@ -79,8 +93,28 @@ export function SsoForm({ plan, initial }: { plan: SubscriptionPlan; initial: Ss
         </header>
         <p className="text-sm text-ink-500">
           Let your team sign in with your identity provider (Okta, Entra ID, Google Workspace) and
-          switch off passwords for your domains. Available on the Enterprise plan.
+          switch off passwords for your domains. Configuring it needs the Enterprise plan.
         </p>
+        {/*
+          A configuration left over from an Enterprise subscription keeps
+          working — including `enforced`, which refuses password sign-in. So the
+          card still shows it and still offers removal on a lower plan; only
+          `configure` is gated on the plan.
+        */}
+        {config && (
+          <>
+            <Alert variant="warn">
+              Single sign-on is still active for {config.domains.join(", ")} from a previous
+              Enterprise subscription.
+              {config.enforced
+                ? " Password sign-in is refused for those domains until you remove it."
+                : ""}
+            </Alert>
+            {remove.error && <p className="text-sm text-danger-500">{remove.error.message}</p>}
+            {saved && <p className="text-sm text-ok-500">{saved}</p>}
+            {removeButton}
+          </>
+        )}
         <Link href="/settings/billing" className="text-sm font-medium text-ink-950 underline">
           Compare plans
         </Link>
@@ -193,19 +227,7 @@ export function SsoForm({ plan, initial }: { plan: SubscriptionPlan; initial: Ss
           <Button type="submit" disabled={configure.isPending}>
             {configure.isPending ? "Saving…" : config ? "Update SSO" : "Enable SSO"}
           </Button>
-          {config && (
-            <Button
-              type="button"
-              variant="danger"
-              disabled={remove.isPending}
-              onClick={() => {
-                setSaved(null);
-                remove.mutate();
-              }}
-            >
-              {remove.isPending ? "Removing…" : "Remove SSO"}
-            </Button>
-          )}
+          {config && removeButton}
         </div>
       </form>
     </section>

@@ -24,9 +24,13 @@ const { organizations, usageRecords } = schema;
 const HOUR = 60 * 60 * 1000;
 const ago = (ms: number) => new Date(Date.now() - ms);
 
-/** Run the job body the way `services/jobs.ts` does: service role, real reporter. */
+/**
+ * Run the job body the way `services/jobs.ts` does: the pool, not a
+ * transaction. The reporter opens its own short transactions around the Stripe
+ * call precisely so no transaction spans it.
+ */
 function run(report?: (r: UsageMeterRecord[]) => Promise<Array<{ id: number; eventId: string }>>) {
-  return withServiceRole(db, (tx) => reportPendingUsage(tx, report));
+  return reportPendingUsage(db, report);
 }
 
 /** Two throwaway orgs: one that reached Stripe checkout, one that never did. */
@@ -147,6 +151,37 @@ describe("billing.report_usage", () => {
     expect(rows.get(unbilled)!.eventId).toBe(`unbilled_${unbilled}`);
   });
 
+  it("calls the reporter with no transaction open", async () => {
+    // I3: the reporter used to run inside the job's service-role transaction,
+    // pinning a pooled connection across up to 500 sequential Stripe calls.
+    // Observed from a second connection: while the reporter callback is
+    // running, no backend of ours may be sitting `idle in transaction` on the
+    // batch query.
+    const id = await seed(billedOrg, ago(3 * HOUR));
+    const order: string[] = [];
+    let openTxDuringReport = -1;
+
+    const result = await run(async (records) => {
+      order.push("report");
+      const [row] = await conn.sql<{ n: number }[]>`
+        select count(*)::int as n
+        from pg_stat_activity
+        where datname = current_database()
+          and pid <> pg_backend_pid()
+          and state = 'idle in transaction'
+          and query ilike '%usage_records%'
+      `;
+      openTxDuringReport = row!.n;
+      return records.map((r) => ({ id: r.id, eventId: `mock_tx_probe_${r.id}` }));
+    });
+
+    expect(order).toEqual(["report"]);
+    expect(openTxDuringReport).toBe(0);
+    expect(result.reported).toBe(1);
+    // …and the stamping transaction ran after it.
+    expect((await rowsFor([id])).get(id)!.eventId).toBe(`mock_tx_probe_${id}`);
+  });
+
   it("a second run is a no-op and does not re-stamp a settled record", async () => {
     const id = await seed(billedOrg, ago(3 * HOUR));
     const first = await run();
@@ -202,7 +237,7 @@ describe("job dispatch", () => {
     // Deliberately calls the handler rather than processDueJobs: the two
     // integration suites run in parallel, and claiming from the shared queue
     // would race @corridor/db's SKIP LOCKED tests.
-    const { jobHandlers } = await import("./services/jobs");
+    const { detachedJobHandlers } = await import("./services/jobs");
     const id = await seed(billedOrg, ago(3 * HOUR));
     const [job] = await withServiceRole(db, (tx) =>
       tx
@@ -211,9 +246,7 @@ describe("job dispatch", () => {
         .returning(),
     );
     try {
-      const result = await withServiceRole(db, (tx) =>
-        jobHandlers["billing.report_usage"](tx, job!),
-      );
+      const result = await detachedJobHandlers["billing.report_usage"]!(db, job!);
       expect(result).toMatchObject({ failures: [] });
       expect((result as { reported: number }).reported).toBeGreaterThanOrEqual(1);
       expect((await rowsFor([id])).get(id)!.reportedAt).not.toBeNull();

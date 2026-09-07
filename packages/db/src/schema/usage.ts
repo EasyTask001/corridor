@@ -16,7 +16,7 @@ import { organizations } from "./core";
 /**
  * Mirror of `usage_records` (migration 0013). Rows are written through the
  * SECURITY DEFINER `record_usage()` (see services/usage.ts); `authenticated`
- * has SELECT only, gated on `billing.manage`.
+ * has SELECT only, gated on `billing.read`.
  */
 export const usageRecords = pgTable(
   "usage_records",

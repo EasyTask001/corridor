@@ -304,7 +304,7 @@ describe("notifyOrganization push", () => {
 
     // Now the worker half, on its own service-role transaction.
     const delivered = await withServiceRole(db, (tx) =>
-      jobHandlers["notification.push"](tx, jobs[0]!),
+      jobHandlers["notification.push"]!(tx, jobs[0]!),
     );
     expect(delivered).toMatchObject({ devices: 1 });
   });

@@ -55,11 +55,13 @@ type Job = typeof backgroundJobs.$inferSelect;
 type Handler = (tx: RlsTransaction, job: Job) => Promise<Record<string, unknown> | void>;
 
 /**
- * The dispatch table. Exported so a test can drive one handler directly rather
- * than racing every other worker for a claim; `processDueJobs` is the only
- * production caller.
+ * The transactional dispatch table. Exported so a test can drive one handler
+ * directly rather than racing every other worker for a claim; `processDueJobs`
+ * is the only production caller. Partial because `billing.report_usage`
+ * lives in `detachedJobHandlers` below; every JobType appears in exactly one of
+ * the two, and `processDueJobs` throws for a type in neither.
  */
-export const jobHandlers: Record<JobType, Handler> = {
+export const jobHandlers: Partial<Record<JobType, Handler>> = {
   /**
    * Deliver the Expo pushes for one notification fan-out. The producer runs
    * inside a user's RLS transaction and cannot reach `push_tokens_for` (granted
@@ -182,13 +184,26 @@ export const jobHandlers: Record<JobType, Handler> = {
     await invalidateOrgKnowledgeCache(job.organizationId);
     return { sourceType, sourceId };
   },
+};
 
+/**
+ * Handlers that must NOT run inside the dispatcher's transaction because they
+ * call a third-party API a bounded number of times per job and manage their own
+ * short transactions around it. They get the pool, not a transaction, and their
+ * job row is marked succeeded afterwards in a transaction of its own.
+ */
+type DetachedHandler = (db: DatabaseClient, job: Job) => Promise<Record<string, unknown> | void>;
+
+export const detachedJobHandlers: Partial<Record<JobType, DetachedHandler>> = {
   /**
    * Push metered usage to Stripe. Queue-wide (organization_id is null): the
    * body lives in services/usage.ts so it can be exercised directly by
    * jobs.integration.test.ts.
+   *
+   * Detached because one run is up to 500 sequential Stripe calls — a
+   * transaction held across those would pin a pooled connection for minutes.
    */
-  "billing.report_usage": (tx) => reportPendingUsage(tx),
+  "billing.report_usage": (db) => reportPendingUsage(db),
 };
 
 export interface ProcessResult {
@@ -237,16 +252,27 @@ export async function processDueJobs(
     // execute() returns snake_case columns; normalise the ones we use.
     const job = normalise(raw as unknown as Record<string, unknown>);
     const handler = jobHandlers[job.jobType as JobType];
+    const detached = detachedJobHandlers[job.jobType as JobType];
     try {
-      if (!handler) throw new Error(`no handler for job type ${job.jobType}`);
-      const result = await withServiceRole(db, async (tx) => {
-        const r = await handler(tx, job);
-        await tx
+      if (!handler && !detached) throw new Error(`no handler for job type ${job.jobType}`);
+      const markSucceeded = (tx: RlsTransaction) =>
+        tx
           .update(backgroundJobs)
           .set({ status: "succeeded", finishedAt: new Date(), lastError: null })
           .where(eq(backgroundJobs.id, job.id));
-        return r;
-      });
+      let result: Record<string, unknown> | void;
+      if (detached) {
+        // No transaction is open while the handler runs; the job row is only
+        // stamped once it has returned, so a crash mid-flight retries the job.
+        result = await detached(db, job);
+        await withServiceRole(db, markSucceeded);
+      } else {
+        result = await withServiceRole(db, async (tx) => {
+          const r = await handler!(tx, job);
+          await markSucceeded(tx);
+          return r;
+        });
+      }
       out.succeeded++;
       out.results.push({ id: job.id, jobType: job.jobType, ok: true, result: result ?? null });
     } catch (e) {

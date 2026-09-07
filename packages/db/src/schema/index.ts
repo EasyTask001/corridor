@@ -4,7 +4,8 @@
  * express); these files exist so application queries are typed.
  *
  * Verified column-for-column and index-for-index (key columns, order and sort
- * direction) against migrations 0001–0015. When you add a migration, mirror it
+ * direction) against migrations 0001–0017 (0016 and 0017 add no columns: 0016
+ * adds a policy, 0017 replaces a function). When you add a migration, mirror it
  * here in the same change and re-check with:
  *
  *   pnpm db:reset && pnpm --filter @corridor/db verify:mirror

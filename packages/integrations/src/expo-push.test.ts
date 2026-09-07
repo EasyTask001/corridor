@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { EXPO_PUSH_ENDPOINT, expoPushMode, sendExpoPush } from "./expo-push";
+import { deadPushTokens, EXPO_PUSH_ENDPOINT, expoPushMode, sendExpoPush } from "./expo-push";
 
 const message = (to: string) => ({ to, title: "Customs decision", body: "Released" });
 
@@ -81,5 +81,37 @@ describe("sendExpoPush", () => {
       fetchImpl as unknown as typeof fetch,
     );
     expect(result.error).toBe("Invalid credentials");
+  });
+});
+
+describe("deadPushTokens", () => {
+  const messages = [
+    message("ExponentPushToken[alive]"),
+    message("ExponentPushToken[gone]"),
+    message("ExponentPushToken[transient]"),
+  ];
+
+  it("picks out the tokens Expo retired, by position", () => {
+    expect(
+      deadPushTokens(messages, [
+        { status: "ok", id: "ticket-1" },
+        { status: "error", message: "not registered", details: { error: "DeviceNotRegistered" } },
+        { status: "error", message: "rate limited", details: { error: "MessageRateExceeded" } },
+      ]),
+    ).toEqual(["ExponentPushToken[gone]"]);
+  });
+
+  it("returns nothing when there are no tickets (mock mode) or none are fatal", () => {
+    expect(deadPushTokens(messages, [])).toEqual([]);
+    expect(deadPushTokens(messages, [{ status: "error", message: "boom" }])).toEqual([]);
+  });
+
+  it("de-duplicates a token that failed on more than one message", () => {
+    const repeated = [message("ExponentPushToken[gone]"), message("ExponentPushToken[gone]")];
+    const ticket = {
+      status: "error" as const,
+      details: { error: "DeviceNotRegistered" },
+    };
+    expect(deadPushTokens(repeated, [ticket, ticket])).toEqual(["ExponentPushToken[gone]"]);
   });
 });

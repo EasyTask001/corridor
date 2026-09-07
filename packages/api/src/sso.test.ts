@@ -71,6 +71,16 @@ function row(over: Partial<SsoRow> = {}): SsoRow {
 function fakeTx(state: { row: SsoRow | null; failWrite?: boolean; failDelete?: boolean }) {
   return {
     query: { organizationSso: { findFirst: async () => state.row ?? undefined } },
+    // `configure` takes an advisory lock and re-reads the row FOR UPDATE
+    // before writing (the TOCTOU guard around the GoTrue round-trip).
+    execute: async () => [],
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          for: async () => (state.row ? [{ providerId: state.row.providerId }] : []),
+        }),
+      }),
+    }),
     insert: () => ({
       values: (values: Omit<SsoRow, "createdAt" | "updatedAt">) => ({
         onConflictDoUpdate: () => ({
@@ -137,23 +147,31 @@ beforeEach(() => {
 
 describe("organization.sso enterprise gate", () => {
   for (const plan of ["trial", "starter", "professional"] as const) {
-    it(`refuses a ${plan} tenant`, async () => {
-      await expect(caller(plan).sso.get()).rejects.toMatchObject({
-        code: "FORBIDDEN",
-        message: "SSO requires the Enterprise plan",
-      });
+    it(`refuses to configure SSO for a ${plan} tenant`, async () => {
       await expect(
         caller(plan).sso.configure({
           metadataUrl: "https://idp.acme.test/metadata",
           domains: ["acme.test"],
           enforced: false,
         }),
-      ).rejects.toMatchObject({ message: "SSO requires the Enterprise plan" });
-      await expect(caller(plan).sso.remove()).rejects.toMatchObject({
-        message: "SSO requires the Enterprise plan",
-      });
+      ).rejects.toMatchObject({ code: "FORBIDDEN", message: "SSO requires the Enterprise plan" });
       expect(createSsoProvider).not.toHaveBeenCalled();
-      expect(deleteSsoProvider).not.toHaveBeenCalled();
+    });
+
+    /**
+     * `organization_sso.enforced` survives a downgrade, so a tenant that drops
+     * off Enterprise still has password sign-in blocked. Gating `get`/`remove`
+     * on the plan would leave them no way to turn it off — locked out of their
+     * own account with only a support ticket for a key.
+     */
+    it(`still lets a ${plan} tenant read and remove an existing configuration`, async () => {
+      await expect(caller(plan).sso.get()).rejects.toThrow(PAST_THE_GATE);
+
+      const state = { row: row({ enforced: true }) };
+      const result = await caller(plan, ["organization.manage"], state).sso.remove();
+      expect(result).toEqual({ organizationId: ORG });
+      expect(deleteSsoProvider).toHaveBeenCalledTimes(1);
+      expect(state.row).toBeNull();
     });
   }
 
@@ -161,8 +179,12 @@ describe("organization.sso enterprise gate", () => {
     await expect(caller("enterprise").sso.get()).rejects.toThrow(PAST_THE_GATE);
   });
 
-  it("still requires organization.manage on the Enterprise plan", async () => {
+  it("still requires organization.manage on every operation, on every plan", async () => {
     await expect(caller("enterprise", ["organization.read"]).sso.get()).rejects.toMatchObject({
+      code: "FORBIDDEN",
+      message: "Missing permission: organization.manage",
+    });
+    await expect(caller("starter", ["organization.read"]).sso.remove()).rejects.toMatchObject({
       code: "FORBIDDEN",
       message: "Missing permission: organization.manage",
     });

@@ -45,6 +45,32 @@ export interface ExpoPushTicket {
   status: "ok" | "error";
   id?: string;
   message?: string;
+  /**
+   * Expo's machine-readable reason. `DeviceNotRegistered` means the token is
+   * permanently dead (app uninstalled, or the receipt expired) and Expo asks
+   * senders to stop using it — see `deadPushTokens`.
+   */
+  details?: { error?: string };
+}
+
+/**
+ * Which of `messages` Expo has told us to stop sending to. Tickets come back
+ * positionally aligned with the messages that produced them, so a short or
+ * absent ticket array (mock mode, or a transport error part-way through) simply
+ * yields fewer entries.
+ */
+export function deadPushTokens(
+  messages: readonly ExpoPushMessage[],
+  tickets: readonly ExpoPushTicket[],
+): string[] {
+  const dead = new Set<string>();
+  tickets.forEach((ticket, i) => {
+    const to = messages[i]?.to;
+    if (to && ticket.status === "error" && ticket.details?.error === "DeviceNotRegistered") {
+      dead.add(to);
+    }
+  });
+  return [...dead];
 }
 
 export interface SendExpoPushResult {

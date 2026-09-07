@@ -23,7 +23,7 @@ import {
   type SsoMode,
   type SsoProviderInput,
 } from "@corridor/integrations";
-import { and, eq, inArray, isNull, or, schema, type RlsTransaction } from "@corridor/db";
+import { and, eq, inArray, isNull, or, schema, sql, type RlsTransaction } from "@corridor/db";
 import {
   authedProcedure,
   orgProcedure,
@@ -130,10 +130,11 @@ function mapRoleError(error: unknown): never {
 }
 
 /**
- * SAML SSO is sold with the Enterprise plan. The gate is the plan on the
- * session (resolved from `organizations.subscription_plan` in the tRPC
- * context), checked on read as well as write so a downgraded tenant cannot keep
- * editing the configuration.
+ * SAML SSO is *sold* with the Enterprise plan, so setting it up needs that
+ * plan. Reading and tearing it down must not: `organization_sso.enforced` stays
+ * true across a downgrade, and gating `remove` on the plan would leave the
+ * tenant unable to turn enforcement off — locked out of password sign-in with
+ * no self-service way back.
  */
 function assertEnterprise(ctx: OrgContext) {
   if (ctx.session.plan !== "enterprise") {
@@ -144,9 +145,12 @@ function assertEnterprise(ctx: OrgContext) {
 /**
  * SSO configuration is part of the organization profile, so it rides on
  * `organization.manage` — the same permission the RLS policies on
- * `organization_sso` enforce — plus the Enterprise gate.
+ * `organization_sso` enforce. `get` and `remove` need nothing more.
  */
-const ssoProcedure = permissionProcedure("organization.manage").use(({ ctx, next }) => {
+const ssoProcedure = permissionProcedure("organization.manage");
+
+/** …and `configure` adds the Enterprise plan gate on top. */
+const ssoConfigureProcedure = ssoProcedure.use(({ ctx, next }) => {
   assertEnterprise(ctx);
   return next();
 });
@@ -299,7 +303,7 @@ export const organizationRouter = router({
      * just-created provider if the mirror write fails, which also keeps a retry
      * from tripping GoTrue's "domain already claimed" rejection.
      */
-    configure: ssoProcedure.input(ssoConfigureInput).mutation(async ({ ctx, input }) => {
+    configure: ssoConfigureProcedure.input(ssoConfigureInput).mutation(async ({ ctx, input }) => {
       const before = await ctx.rls((tx) =>
         tx.query.organizationSso.findFirst({
           where: eq(organizationSso.organizationId, ctx.orgId),
@@ -319,6 +323,27 @@ export const organizationRouter = router({
 
       try {
         const row = await ctx.rls(async (tx) => {
+          // TOCTOU guard. `before` was read in an earlier transaction, with a
+          // GoTrue round-trip since; a concurrent `configure` may have created
+          // or replaced the provider in the meantime. Serialise on the org
+          // (the advisory lock also covers the not-yet-existing row, which
+          // `for update` cannot) and re-read before writing: if the world
+          // moved, bail out and let the catch below delete the provider we
+          // just created rather than orphaning it in Auth.
+          await tx.execute(
+            sql`select pg_advisory_xact_lock(hashtext('organization_sso:' || ${ctx.orgId}))`,
+          );
+          const [current] = await tx
+            .select({ providerId: organizationSso.providerId })
+            .from(organizationSso)
+            .where(eq(organizationSso.organizationId, ctx.orgId))
+            .for("update");
+          if ((current?.providerId ?? null) !== (before?.providerId ?? null)) {
+            throw new TRPCError({
+              code: "CONFLICT",
+              message: "SSO was reconfigured concurrently — reload and try again",
+            });
+          }
           const [saved] = await tx
             .insert(organizationSso)
             .values({

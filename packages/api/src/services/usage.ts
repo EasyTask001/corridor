@@ -9,7 +9,18 @@
  * with it, which is the behaviour we want — an action that did not happen is
  * not billed.
  */
-import { and, asc, eq, isNull, lt, schema, sql, type RlsTransaction } from "@corridor/db";
+import {
+  and,
+  asc,
+  eq,
+  isNull,
+  lt,
+  schema,
+  sql,
+  withServiceRole,
+  type DatabaseClient,
+  type RlsTransaction,
+} from "@corridor/db";
 import { USAGE_METRICS, type UsageMetric } from "@corridor/domain";
 import {
   planUsageFor,
@@ -171,29 +182,48 @@ export type UsageReportResult = {
  * `report` is injectable so tests can drive the failure path without a Stripe
  * key or a network stub; production always uses the real reporter, which
  * itself degrades to synthetic ids when no key is configured.
+ *
+ * ## Why this takes a `db`, not a transaction
+ *
+ * A batch is up to 500 records and Stripe wants one meter event per record, so
+ * a run can be hundreds of sequential HTTP calls. Holding a Postgres
+ * transaction — and therefore a pooled connection — open across all of them is
+ * the same mistake `billing.checkout` and the SSO `configure` path already
+ * avoid: it pins a connection for the whole round-trip and keeps the rows'
+ * snapshot alive for minutes. So the run is three phases:
+ *
+ *   1. one short transaction picks the batch,
+ *   2. Stripe is called with **no transaction open**,
+ *   3. one short transaction per org stamps what actually landed.
+ *
+ * The retry story is unchanged: `reportUsage` derives a deterministic
+ * `identifier` from the record id, so a crash between (2) and (3) leaves the
+ * rows unstamped and the next run re-sends events Stripe deduplicates away.
  */
 export async function reportPendingUsage(
-  tx: RlsTransaction,
+  db: DatabaseClient,
   report: (
     records: UsageMeterRecord[],
   ) => Promise<Array<{ id: number; eventId: string }>> = reportUsage,
   now: Date = new Date(),
 ): Promise<UsageReportResult> {
   const cutoff = new Date(now.getTime() - USAGE_SETTLE_MS);
-  const pending = await tx
-    .select({
-      id: usageRecords.id,
-      organizationId: usageRecords.organizationId,
-      metric: usageRecords.metric,
-      quantity: usageRecords.quantity,
-      occurredAt: usageRecords.occurredAt,
-      stripeCustomerId: organizations.stripeCustomerId,
-    })
-    .from(usageRecords)
-    .innerJoin(organizations, eq(organizations.id, usageRecords.organizationId))
-    .where(and(isNull(usageRecords.reportedAt), lt(usageRecords.occurredAt, cutoff)))
-    .orderBy(asc(usageRecords.occurredAt), asc(usageRecords.id))
-    .limit(USAGE_REPORT_BATCH);
+  const pending = await withServiceRole(db, (tx) =>
+    tx
+      .select({
+        id: usageRecords.id,
+        organizationId: usageRecords.organizationId,
+        metric: usageRecords.metric,
+        quantity: usageRecords.quantity,
+        occurredAt: usageRecords.occurredAt,
+        stripeCustomerId: organizations.stripeCustomerId,
+      })
+      .from(usageRecords)
+      .innerJoin(organizations, eq(organizations.id, usageRecords.organizationId))
+      .where(and(isNull(usageRecords.reportedAt), lt(usageRecords.occurredAt, cutoff)))
+      .orderBy(asc(usageRecords.occurredAt), asc(usageRecords.id))
+      .limit(USAGE_REPORT_BATCH),
+  );
   if (pending.length === 0) return { reported: 0, organizations: 0, failures: [] };
 
   const byOrg = new Map<string, UsageMeterRecord[]>();
@@ -208,13 +238,21 @@ export async function reportPendingUsage(
   for (const [organizationId, records] of byOrg) {
     try {
       const results = await report(records);
-      for (const result of results) {
-        await tx
-          .update(usageRecords)
-          .set({ reportedAt: new Date(), stripeMeterEventId: result.eventId })
-          .where(eq(usageRecords.id, result.id));
-        reported++;
-      }
+      if (results.length === 0) continue;
+      const stamped = await withServiceRole(db, async (tx) => {
+        let n = 0;
+        for (const result of results) {
+          await tx
+            .update(usageRecords)
+            .set({ reportedAt: new Date(), stripeMeterEventId: result.eventId })
+            .where(eq(usageRecords.id, result.id));
+          n++;
+        }
+        return n;
+      });
+      // Only counted once the stamping transaction has committed: a rolled-back
+      // write leaves the rows for the next run, and must not be reported as done.
+      reported += stamped;
     } catch (e) {
       failures.push({ organizationId, error: e instanceof Error ? e.message : String(e) });
     }

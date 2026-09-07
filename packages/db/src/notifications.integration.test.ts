@@ -142,6 +142,50 @@ describe("notify_organization", () => {
     );
     expect(seenByA).toHaveLength(0);
   });
+
+  /**
+   * Migration 0017. The function is SECURITY DEFINER and EXECUTE-granted to
+   * `authenticated`, so before the guard any signed-in user could hand it
+   * another tenant's organization id and get that tenant's member emails back
+   * (plus a notification planted in every one of those inboxes).
+   */
+  describe("caller guard (0017)", () => {
+    const call = (orgId: string, title: string) =>
+      sql`select * from public.notify_organization(${orgId}::uuid, 'alert.critical', 'alert.manage', ${title}, null, null)`;
+
+    it("rejects a member of another organization with 42501 and inserts nothing", async () => {
+      const title = `Cross-tenant probe ${crypto.randomUUID()}`;
+      const msg = await rejection(
+        withRls(db, as(ownerB), (tx) => tx.execute(call(ownerA.orgId, title))),
+      );
+      expect(msg).toMatch(/not a member of organization/i);
+
+      const planted = await withServiceRole(db, (tx) =>
+        tx
+          .select({ id: notifications.id })
+          .from(notifications)
+          .where(eq(notifications.title, title)),
+      );
+      expect(planted).toHaveLength(0);
+    });
+
+    it("still works for a member of the organization", async () => {
+      const title = `Own-org fan-out ${crypto.randomUUID()}`;
+      const rows = await withRls(db, as(ownerA), (tx) =>
+        tx.execute<{ user_id: string; email: string }>(call(ownerA.orgId, title)),
+      );
+      expect(rows.length).toBeGreaterThan(0);
+      expect(rows.some((r) => r.user_id === ownerA.userId)).toBe(true);
+    });
+
+    it("still works for the service role, which has no auth.uid()", async () => {
+      const title = `Worker fan-out ${crypto.randomUUID()}`;
+      const rows = await withServiceRole(db, (tx) =>
+        tx.execute<{ user_id: string }>(call(ownerB.orgId, title)),
+      );
+      expect(rows.length).toBeGreaterThan(0);
+    });
+  });
 });
 
 describe("notifications RLS", () => {

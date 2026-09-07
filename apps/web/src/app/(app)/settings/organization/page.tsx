@@ -12,9 +12,11 @@ export default async function OrganizationSettingsPage() {
   const canManage = session?.permissions.has("organization.manage") ?? false;
   const plan = session?.plan ?? "trial";
 
-  // `sso.get` is gated on organization.manage *and* the Enterprise plan, so it
-  // is only called when both hold; below Enterprise the section is an upsell.
-  const sso = canManage && plan === "enterprise" ? await caller.organization.sso.get() : null;
+  // `sso.get` needs only `organization.manage` — deliberately not the plan.
+  // A tenant that downgraded away from Enterprise keeps `enforced` (and so
+  // keeps password sign-in switched off) until someone removes it, so the card
+  // has to be able to show and undo that configuration on any plan.
+  const sso = canManage ? await caller.organization.sso.get() : null;
 
   return (
     <div className="max-w-2xl space-y-6">
