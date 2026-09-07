@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { PermissionKey } from "@corridor/domain";
+import type { PermissionKey, SubscriptionPlan } from "@corridor/domain";
 import {
   extractBearer,
   resolveUser,
@@ -8,6 +8,7 @@ import {
   type Session,
 } from "@corridor/auth";
 import { getDb, withRls, type DatabaseClient, type RlsTransaction } from "@corridor/db";
+import { cachePermissions, getCachedPermissions } from "./infra/permission-cache";
 
 export const ACTIVE_ORG_HEADER = "x-corridor-org";
 export const ACTIVE_ORG_COOKIE = "corridor_org";
@@ -38,7 +39,7 @@ interface MembershipRow {
   organization_id: string;
   role_id: string;
   status: OrgMembership["status"];
-  organizations: { name: string } | null;
+  organizations: { name: string; subscription_plan: SubscriptionPlan | null } | null;
   roles: { name: string } | null;
 }
 
@@ -71,19 +72,29 @@ export async function createContext(opts: CreateContextOptions): Promise<Context
   const [{ data: memberRows }, { data: profile }] = await Promise.all([
     authed
       .from("organization_members")
-      .select("organization_id, role_id, status, organizations(name), roles(name)")
+      .select(
+        "organization_id, role_id, status, organizations(name, subscription_plan), roles(name)",
+      )
       .eq("user_id", user.id)
       .returns<MembershipRow[]>(),
     authed.from("user_profiles").select("display_name").eq("user_id", user.id).maybeSingle(),
   ]);
 
-  const memberships: OrgMembership[] = (memberRows ?? []).map((m) => ({
+  const rows = memberRows ?? [];
+  const memberships: OrgMembership[] = rows.map((m) => ({
     organizationId: m.organization_id,
     organizationName: m.organizations?.name ?? "",
     roleId: m.role_id,
     roleName: m.roles?.name ?? "",
     status: m.status,
   }));
+  const plansByOrg = new Map<string, SubscriptionPlan>(
+    rows.flatMap((m) =>
+      m.organizations?.subscription_plan
+        ? [[m.organization_id, m.organizations.subscription_plan] as const]
+        : [],
+    ),
+  );
 
   const active = memberships.filter((m) => m.status === "active");
   const hint = opts.headers.get(ACTIVE_ORG_HEADER) ?? opts.activeOrgCookie ?? null;
@@ -92,18 +103,28 @@ export async function createContext(opts: CreateContextOptions): Promise<Context
     active[0]?.organizationId ??
     null;
 
+  // The permission set is stable between role edits, so it is cached per
+  // (user, org) for a minute and invalidated by the mutations that change it.
   let permissions = new Set<PermissionKey>();
   if (activeOrganizationId) {
-    const { data } = await authed.rpc("current_user_permissions", {
-      org_id: activeOrganizationId,
-    });
-    permissions = new Set((data ?? []) as PermissionKey[]);
+    const cached = await getCachedPermissions(activeOrganizationId, user.id);
+    if (cached) {
+      permissions = new Set(cached);
+    } else {
+      const { data } = await authed.rpc("current_user_permissions", {
+        org_id: activeOrganizationId,
+      });
+      const keys = (data ?? []) as PermissionKey[];
+      permissions = new Set(keys);
+      await cachePermissions(activeOrganizationId, user.id, keys);
+    }
   }
 
   const session: Session = {
     user: toSessionUser(user, (profile as { display_name?: string | null } | null)?.display_name),
     memberships,
     activeOrganizationId,
+    plan: (activeOrganizationId ? plansByOrg.get(activeOrganizationId) : undefined) ?? "trial",
     permissions,
     accessToken,
   };

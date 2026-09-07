@@ -8,7 +8,13 @@ import {
   type UIMessage,
 } from "ai";
 import { cookies } from "next/headers";
-import { ACTIVE_ORG_COOKIE, createContext, copilotTools, retrieveContext } from "@corridor/api";
+import {
+  ACTIVE_ORG_COOKIE,
+  createContext,
+  copilotTools,
+  rateLimitFor,
+  retrieveContext,
+} from "@corridor/api";
 import { COPILOT_SYSTEM_PROMPT, buildContextBlock, languageModel } from "@corridor/ai";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -29,6 +35,16 @@ export async function POST(req: Request) {
   if (!ctx.session.permissions.has("copilot.use"))
     return new Response("Forbidden", { status: 403 });
   const orgId = ctx.session.activeOrganizationId;
+
+  // Same `ai` tier the copilot tRPC procedures use — applied before any model
+  // or embedding call so a burst costs nothing.
+  const limit = await rateLimitFor("ai", ctx.session.plan).check(orgId);
+  if (!limit.success) {
+    return new Response(
+      `Rate limit of ${limit.limit} copilot requests/minute exceeded on the ${ctx.session.plan} plan.`,
+      { status: 429, headers: { "Retry-After": String(limit.retryAfterSeconds) } },
+    );
+  }
 
   const { messages }: { messages: UIMessage[] } = await req.json();
   const lastUserText =

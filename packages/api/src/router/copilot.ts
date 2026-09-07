@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { desc, eq, schema, sql } from "@corridor/db";
 import { embedderAvailable } from "@corridor/ai";
-import { permissionProcedure, router } from "../trpc";
+import { aiProcedure, router } from "../trpc";
 
 const { regulationDocuments } = schema;
 
@@ -15,7 +15,7 @@ export const SUGGESTED_QUESTIONS = [
 
 export const copilotRouter = router({
   /** Which embedder/model is active, and whether the regulation corpus has been ingested. */
-  capabilities: permissionProcedure("copilot.use").query(async ({ ctx }) => {
+  capabilities: aiProcedure("copilot.use").query(async ({ ctx }) => {
     const mode = embedderAvailable() ? "model" : "mock";
     const rows = await ctx.rls((tx) =>
       tx.select({ count: sql<number>`count(*)::int` }).from(regulationDocuments),
@@ -28,7 +28,7 @@ export const copilotRouter = router({
   }),
 
   regulations: router({
-    list: permissionProcedure("copilot.use")
+    list: aiProcedure("copilot.use")
       .input(z.object({ jurisdiction: z.enum(["US", "CA"]).optional() }))
       .query(({ ctx, input }) =>
         ctx.rls((tx) =>

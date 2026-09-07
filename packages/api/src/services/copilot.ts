@@ -5,6 +5,7 @@
  * checks copilot.use itself). Tools give the model live, tenant-scoped data
  * instead of letting it guess.
  */
+import { createHash } from "node:crypto";
 import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import { and, desc, eq, ilike, or, schema, sql, type RlsTransaction } from "@corridor/db";
@@ -16,40 +17,124 @@ import {
   type RegulationMatch,
   type RetrievedContext,
 } from "@corridor/ai";
+import { getKv } from "../infra/redis";
 
 const { movements, drivers, movementEvents } = schema;
+
+/**
+ * Retrieval caching. The regulation corpus is global and changes only when it
+ * is re-ingested, so its matches keep for 10 minutes. Org knowledge is tenant
+ * data — its key carries the org id (never shared across tenants) and a version
+ * counter bumped whenever a `copilot.embed_knowledge` job adds to the corpus.
+ */
+const REGULATION_CACHE_TTL_SECONDS = 600;
+const ORG_KNOWLEDGE_CACHE_TTL_SECONDS = 60;
+
+/** Whitespace/case-insensitive, so trivially different phrasings share a key. */
+function normaliseQuery(query: string): string {
+  return query.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Bounded, stable key suffix for an arbitrarily long question. SHA-256 rather
+ * than a cheap 32-bit hash: a collision here would answer one question with
+ * another question's citations.
+ */
+function fingerprint(text: string): string {
+  return createHash("sha256").update(text).digest("hex").slice(0, 32);
+}
+
+function orgKnowledgeVersionKey(orgId: string): string {
+  return `copilot:kb:${orgId}:version`;
+}
+
+/** Bumped when org knowledge is added, which retires every cached org result. */
+export async function invalidateOrgKnowledgeCache(orgId: string): Promise<void> {
+  try {
+    await getKv().incr(orgKnowledgeVersionKey(orgId));
+  } catch (error) {
+    console.error("[copilot] knowledge cache invalidation failed", error);
+  }
+}
+
+async function cacheGet<T>(key: string): Promise<T | null> {
+  try {
+    return await getKv().get<T>(key);
+  } catch (error) {
+    console.error("[copilot] retrieval cache read failed", error);
+    return null;
+  }
+}
+
+async function cacheSet<T>(key: string, value: T, ttlSeconds: number): Promise<void> {
+  try {
+    await getKv().set(key, value, ttlSeconds);
+  } catch (error) {
+    console.error("[copilot] retrieval cache write failed", error);
+  }
+}
 
 export async function retrieveContext(
   tx: RlsTransaction,
   orgId: string,
   query: string,
+  opts: { jurisdiction?: "US" | "CA" | null } = {},
 ): Promise<RetrievedContext> {
+  const jurisdiction = opts.jurisdiction ?? null;
+  const queryKey = fingerprint(normaliseQuery(query));
+  const regulationKey = `copilot:reg:${jurisdiction ?? "all"}:${queryKey}`;
+  const version = (await cacheGet<number>(orgKnowledgeVersionKey(orgId))) ?? 0;
+  const orgKey = `copilot:org:${orgId}:${version}:${queryKey}`;
+
+  const [cachedRegulations, cachedOrgKnowledge] = await Promise.all([
+    cacheGet<RegulationMatch[]>(regulationKey),
+    cacheGet<OrgKnowledgeMatch[]>(orgKey),
+  ]);
+  if (cachedRegulations && cachedOrgKnowledge) {
+    return { regulations: cachedRegulations, orgKnowledge: cachedOrgKnowledge };
+  }
+
+  // The raw query is embedded (normalisation only affects the cache key).
   const embedder = selectEmbedder();
   const { embedding } = await embedder.embed(query);
   const vectorLiteral = `[${embedding.join(",")}]`;
 
-  const [regRows, orgRows] = await Promise.all([
-    tx.execute<{
-      regulation_document_id: string;
-      title: string;
-      source: string;
-      jurisdiction: "US" | "CA";
-      url: string | null;
-      chunk_index: number;
-      content: string;
-      similarity: number;
-    }>(sql`select * from public.match_regulations(${vectorLiteral}::vector, 5, null)`),
-    tx.execute<{
-      id: string;
-      source_type: OrgKnowledgeMatch["sourceType"];
-      source_id: string | null;
-      content: string;
-      metadata: Record<string, unknown>;
-      similarity: number;
-    }>(sql`select * from public.match_org_knowledge(${orgId}::uuid, ${vectorLiteral}::vector, 5)`),
+  const [regulations, orgKnowledge] = await Promise.all([
+    cachedRegulations ?? matchRegulations(tx, vectorLiteral, jurisdiction),
+    cachedOrgKnowledge ?? matchOrgKnowledge(tx, orgId, vectorLiteral),
   ]);
 
-  const regulations: RegulationMatch[] = regRows
+  await Promise.all([
+    cachedRegulations
+      ? undefined
+      : cacheSet(regulationKey, regulations, REGULATION_CACHE_TTL_SECONDS),
+    cachedOrgKnowledge
+      ? undefined
+      : cacheSet(orgKey, orgKnowledge, ORG_KNOWLEDGE_CACHE_TTL_SECONDS),
+  ]);
+
+  return { regulations, orgKnowledge };
+}
+
+async function matchRegulations(
+  tx: RlsTransaction,
+  vectorLiteral: string,
+  jurisdiction: "US" | "CA" | null,
+): Promise<RegulationMatch[]> {
+  const rows = await tx.execute<{
+    regulation_document_id: string;
+    title: string;
+    source: string;
+    jurisdiction: "US" | "CA";
+    url: string | null;
+    chunk_index: number;
+    content: string;
+    similarity: number;
+  }>(
+    sql`select * from public.match_regulations(${vectorLiteral}::vector, 5, ${jurisdiction}::text)`,
+  );
+
+  return rows
     .filter((r) => r.similarity >= MIN_CITATION_SIMILARITY)
     .map((r) => ({
       regulationDocumentId: r.regulation_document_id,
@@ -61,8 +146,23 @@ export async function retrieveContext(
       content: r.content,
       similarity: r.similarity,
     }));
+}
 
-  const orgKnowledge: OrgKnowledgeMatch[] = orgRows
+async function matchOrgKnowledge(
+  tx: RlsTransaction,
+  orgId: string,
+  vectorLiteral: string,
+): Promise<OrgKnowledgeMatch[]> {
+  const rows = await tx.execute<{
+    id: string;
+    source_type: OrgKnowledgeMatch["sourceType"];
+    source_id: string | null;
+    content: string;
+    metadata: Record<string, unknown>;
+    similarity: number;
+  }>(sql`select * from public.match_org_knowledge(${orgId}::uuid, ${vectorLiteral}::vector, 5)`);
+
+  return rows
     .filter((r) => r.similarity >= MIN_CITATION_SIMILARITY)
     .map((r) => ({
       id: r.id,
@@ -72,8 +172,6 @@ export async function retrieveContext(
       metadata: r.metadata,
       similarity: r.similarity,
     }));
-
-  return { regulations, orgKnowledge };
 }
 
 /** Embed and store one piece of organization knowledge (e.g. a movement note). */

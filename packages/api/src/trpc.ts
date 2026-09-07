@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 import type { PermissionKey } from "@corridor/domain";
 import type { Session } from "@corridor/auth";
 import type { Context } from "./context";
+import { RateLimitExceededError, rateLimitFor, type RateLimitTier } from "./infra/ratelimit";
 
 const t = initTRPC.context<Context>().create({
   transformer: superjson,
@@ -23,11 +24,41 @@ export const router = t.router;
 export const middleware = t.middleware;
 export const publicProcedure = t.procedure;
 
-/** Requires an authenticated user (any org state — used for onboarding). */
-export const authedProcedure = t.procedure.use(({ ctx, next }) => {
-  if (!ctx.session) throw new TRPCError({ code: "UNAUTHORIZED" });
-  return next({ ctx: { ...ctx, session: ctx.session } });
-});
+/**
+ * Sliding-window rate limit for the caller's plan. The counter is keyed by the
+ * active org when there is one and by the user otherwise (onboarding calls,
+ * which have no org yet) — never by IP, so a tenant cannot be throttled by
+ * another tenant behind the same NAT.
+ */
+export function rateLimited(tier: RateLimitTier) {
+  return middleware(async ({ ctx, next }) => {
+    const session = ctx.session;
+    if (!session) throw new TRPCError({ code: "UNAUTHORIZED" });
+    const identity = session.activeOrganizationId ?? session.user.id;
+    const result = await rateLimitFor(tier, session.plan).check(identity);
+    if (!result.success) {
+      const cause = new RateLimitExceededError(
+        tier,
+        session.plan,
+        result.limit,
+        result.retryAfterSeconds,
+      );
+      throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: cause.message, cause });
+    }
+    return next();
+  });
+}
+
+/**
+ * Requires an authenticated user (any org state — used for onboarding).
+ * Carries the `standard` rate-limit tier, which `orgProcedure` inherits.
+ */
+export const authedProcedure = t.procedure
+  .use(({ ctx, next }) => {
+    if (!ctx.session) throw new TRPCError({ code: "UNAUTHORIZED" });
+    return next({ ctx: { ...ctx, session: ctx.session } });
+  })
+  .use(rateLimited("standard"));
 
 export type AuthedContext = Context & { session: Session };
 export type OrgContext = AuthedContext & { orgId: string };
@@ -80,3 +111,11 @@ export const permissionProcedure = (...required: PermissionKey[]) =>
 
 export const anyPermissionProcedure = (...allowed: PermissionKey[]) =>
   orgProcedure.use(enforceAnyPermission(...allowed));
+
+/**
+ * For procedures that spend model tokens (extraction, suggestions, reporting,
+ * copilot). Permission is checked first so a forbidden call does not eat the
+ * caller's much smaller `ai` budget.
+ */
+export const aiProcedure = (...required: PermissionKey[]) =>
+  orgProcedure.use(enforcePermission(...required)).use(rateLimited("ai"));

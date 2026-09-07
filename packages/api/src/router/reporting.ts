@@ -1,10 +1,9 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import type { SQL } from "drizzle-orm";
-import { and, desc, eq, gte, schema, sql, type RlsTransaction } from "@corridor/db";
+import { and, desc, eq, gte, schema, sql, type RlsTransaction, type SQL } from "@corridor/db";
 import { reportQuery, type ReportQuery } from "@corridor/domain";
 import { translateReportQuestion, UnsupportedReportQuestionError } from "@corridor/ai";
-import { permissionProcedure, router } from "../trpc";
+import { aiProcedure, router } from "../trpc";
 
 const { movements, cargo } = schema;
 
@@ -123,7 +122,7 @@ function summarize(
 }
 
 export const reportingRouter = router({
-  run: permissionProcedure("report.read", "movement.read")
+  run: aiProcedure("report.read", "movement.read")
     .input(reportInput)
     .mutation(({ ctx, input }) =>
       ctx.rls(async (tx) => {

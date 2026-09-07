@@ -1,5 +1,5 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
-import type { PermissionKey } from "@corridor/domain";
+import type { PermissionKey, SubscriptionPlan } from "@corridor/domain";
 
 export interface SessionUser {
   id: string;
@@ -21,6 +21,11 @@ export interface Session {
   memberships: OrgMembership[];
   /** The org the caller is acting in for this request (header/cookie/default). */
   activeOrganizationId: string | null;
+  /**
+   * Subscription plan of the active org — drives the rate-limit tier.
+   * `"trial"` when there is no active org (or the row carries no plan).
+   */
+  plan: SubscriptionPlan;
   permissions: ReadonlySet<PermissionKey>;
   /** Raw JWT — needed to set `request.jwt.claims` for RLS. Never sent to the browser. */
   accessToken: string;

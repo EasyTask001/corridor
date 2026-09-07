@@ -43,6 +43,7 @@ const base: Session = {
     },
   ],
   activeOrganizationId: "o1",
+  plan: "trial",
   permissions: new Set(["movement.read"]),
   accessToken: "jwt",
 };

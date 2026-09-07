@@ -9,7 +9,7 @@ import {
   uuid,
 } from "@corridor/domain";
 import { modelExtractorAvailable } from "@corridor/ai";
-import { permissionProcedure, router } from "../trpc";
+import { aiProcedure, permissionProcedure, router } from "../trpc";
 import { DOCUMENTS_BUCKET, applyExtraction, storagePathFor } from "../services/documents";
 import { enqueueJob } from "../services/jobs";
 import { requireMovement } from "../services/movements";
@@ -66,7 +66,7 @@ export const documentsRouter = router({
     }),
 
   /** Step 2: after the browser upload completes, queue extraction. */
-  finalizeUpload: permissionProcedure("document.upload")
+  finalizeUpload: aiProcedure("document.upload")
     .input(finalizeUploadInput)
     .mutation(({ ctx, input }) =>
       ctx.rls(async (tx) => {
@@ -96,7 +96,7 @@ export const documentsRouter = router({
       }),
     ),
 
-  retry: permissionProcedure("document.upload")
+  retry: aiProcedure("document.upload")
     .input(z.object({ documentId: uuid }))
     .mutation(({ ctx, input }) =>
       ctx.rls(async (tx) => {

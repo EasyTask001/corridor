@@ -22,7 +22,13 @@ import {
   uuid,
   type MovementStatus,
 } from "@corridor/domain";
-import { anyPermissionProcedure, permissionProcedure, router, type OrgContext } from "../trpc";
+import {
+  aiProcedure,
+  anyPermissionProcedure,
+  permissionProcedure,
+  router,
+  type OrgContext,
+} from "../trpc";
 import { transmitMovement } from "../services/customs";
 import { enqueueJob } from "../services/jobs";
 import { syncMovementRiskAlerts } from "../services/risk";
@@ -469,7 +475,7 @@ export const movementRouter = router({
     ),
 
   suggestions: router({
-    generate: permissionProcedure("movement.write")
+    generate: aiProcedure("movement.write")
       .input(z.object({ movementId: uuid }))
       .mutation(({ ctx, input }) =>
         ctx.rls((tx) =>

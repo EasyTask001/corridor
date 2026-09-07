@@ -21,9 +21,35 @@ import {
   type OrgContext,
 } from "../trpc";
 import { writeAudit } from "../services/audit";
+import { invalidatePermissionCache } from "../infra/permission-cache";
 
 const { organizations, organizationMembers, roles, rolePermissions, permissions, userProfiles } =
   schema;
+
+/**
+ * Drop the cached permission sets of everyone in the org (plus any user id the
+ * caller passes explicitly — a member being removed is gone from the table by
+ * the time this runs). Called after every mutation that can change what a
+ * member may do, so the change lands on the member's next request instead of
+ * up to `PERMISSION_CACHE_TTL_SECONDS` later.
+ *
+ * This runs inside the mutation's transaction, so a request that lands between
+ * the delete and the commit can re-cache the pre-change set. That is why the
+ * TTL — not this call — is the guarantee: staleness is bounded by
+ * `PERMISSION_CACHE_TTL_SECONDS` either way, and invalidation just makes the
+ * common case immediate.
+ */
+async function invalidateOrgPermissions(
+  tx: RlsTransaction,
+  orgId: string,
+  extraUserIds: readonly (string | null)[] = [],
+) {
+  const rows = await tx
+    .select({ userId: organizationMembers.userId })
+    .from(organizationMembers)
+    .where(eq(organizationMembers.organizationId, orgId));
+  await invalidatePermissionCache(orgId, [...rows.map((r) => r.userId), ...extraUserIds]);
+}
 
 function assertCanGrant(ctx: OrgContext, requested: readonly PermissionKey[]) {
   const missing = requested.filter((key) => !ctx.session.permissions.has(key));
@@ -264,6 +290,7 @@ export const organizationRouter = router({
               permissions: grants.map((grant) => grant.key as PermissionKey),
             };
             await writeAudit(tx, ctx.orgId, "role.update", "role", input.id, previous, saved);
+            await invalidateOrgPermissions(tx, ctx.orgId);
             return saved;
           } catch (error) {
             mapRoleError(error);
@@ -287,6 +314,7 @@ export const organizationRouter = router({
           try {
             await tx.delete(roles).where(eq(roles.id, role.id));
             await writeAudit(tx, ctx.orgId, "role.delete", "role", role.id, before, null);
+            await invalidateOrgPermissions(tx, ctx.orgId);
             return { id: role.id };
           } catch (error) {
             mapRoleError(error);
@@ -389,6 +417,7 @@ export const organizationRouter = router({
             { roleId: target.roleId },
             { roleId: input.roleId },
           );
+          await invalidateOrgPermissions(tx, ctx.orgId, [target.userId]);
           return row;
         }),
       ),
@@ -422,6 +451,7 @@ export const organizationRouter = router({
             { status: target.status },
             { status: input.status },
           );
+          await invalidateOrgPermissions(tx, ctx.orgId, [target.userId]);
           return row!;
         }),
       ),
@@ -456,6 +486,7 @@ export const organizationRouter = router({
             },
             null,
           );
+          await invalidateOrgPermissions(tx, ctx.orgId, [target.userId]);
           return { id: input.memberId };
         }),
       ),

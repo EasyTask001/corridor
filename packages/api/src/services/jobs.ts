@@ -137,8 +137,10 @@ const handlers: Record<JobType, Handler> = {
       throw new Error("copilot.embed_knowledge requires content");
     }
     const sourceId = typeof job.payload.sourceId === "string" ? job.payload.sourceId : null;
-    const { embedOrgKnowledge } = await import("./copilot");
+    const { embedOrgKnowledge, invalidateOrgKnowledgeCache } = await import("./copilot");
     await embedOrgKnowledge(tx, job.organizationId, { sourceType, sourceId, content });
+    // The org's corpus changed — retire its cached retrieval results.
+    await invalidateOrgKnowledgeCache(job.organizationId);
     return { sourceType, sourceId };
   },
 };

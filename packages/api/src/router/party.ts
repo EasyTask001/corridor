@@ -10,8 +10,18 @@
  */
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
-import { and, asc, eq, ilike, or, schema, sql, type RlsTransaction } from "@corridor/db";
+import {
+  and,
+  asc,
+  eq,
+  ilike,
+  or,
+  schema,
+  sql,
+  type PgColumn,
+  type PgTable,
+  type RlsTransaction,
+} from "@corridor/db";
 import {
   driverInput,
   partnerInput,
