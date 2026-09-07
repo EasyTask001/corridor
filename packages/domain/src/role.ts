@@ -42,6 +42,8 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleKey, readonly PermissionK
     "movement.transmit_to_customs",
     "movement.amend",
     "movement.cancel",
+    "shipment.read",
+    "shipment.write",
     "document.read",
     "document.upload",
     "document.review_extraction",

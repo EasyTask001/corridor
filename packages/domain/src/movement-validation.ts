@@ -4,7 +4,8 @@
  * Mirrors the data CBP ACE / CBSA ACI reject a manifest for when missing.
  */
 import { daysBetween, todayIso } from "./compliance";
-import type { CargoInput, Regime } from "./movement";
+import type { Regime } from "./movement";
+import type { AceShipmentType, AciCargoType, InBondEntryType } from "./shipment";
 
 export type IssueSeverity = "blocking" | "warning";
 
@@ -13,7 +14,38 @@ export interface ValidationIssue {
   severity: IssueSeverity;
   message: string;
   /** which wizard step fixes it */
-  step: "trip" | "truck" | "crew" | "shipment" | "trailer" | "seals";
+  step: "trip" | "truck" | "crew" | "shipment" | "commodity" | "trailer" | "seals";
+}
+
+/** A party as the manifest needs it: a name to print and a country to sanity-check. */
+export interface PartyForValidation {
+  name: string;
+  country: string | null;
+}
+
+/** The commodity fields a manifest is rejected for, as stored (not as typed). */
+export interface CommodityForValidation {
+  commodityDescription: string;
+  hsCode?: string | null;
+  weightKg?: number | null;
+  quantity?: number | null;
+  quantityUnit?: string | null;
+  valueAmount?: number | null;
+  valueCurrency?: string | null;
+  countryOfOrigin?: string | null;
+}
+
+export interface ShipmentForValidation {
+  controlNumber: string;
+  /** ACE files a shipment type, ACI a cargo type — exactly one is set. */
+  shipmentType: AceShipmentType | null;
+  cargoType: AciCargoType | null;
+  shipper: PartyForValidation | null;
+  consignee: PartyForValidation | null;
+  entryNumber: string | null;
+  inBondEntryType: InBondEntryType | null;
+  inBondDestinationPortId: string | null;
+  commodities: CommodityForValidation[];
 }
 
 export interface MovementForValidation {
@@ -41,20 +73,7 @@ export interface MovementForValidation {
     plateNumber: string;
     status: string;
   } | null;
-  cargo: Array<
-    Pick<
-      CargoInput,
-      | "commodityDescription"
-      | "hsCode"
-      | "weightKg"
-      | "pieceCount"
-      | "shipperId"
-      | "consigneeId"
-      | "valueAmount"
-      | "valueCurrency"
-      | "countryOfOrigin"
-    >
-  >;
+  shipments: ShipmentForValidation[];
   seals: Array<{ sealNumber: string }>;
 }
 
@@ -73,8 +92,7 @@ export function validateForTransmit(
     issues.push({ code, severity: "warning", message, step });
 
   // --- trip ---
-  if (!m.port)
-    block("crossing_point_missing", "Select a port of entry / CBSA office.", "trip");
+  if (!m.port) block("crossing_point_missing", "Select a port of entry / CBSA office.", "trip");
   if (!m.carrierCode)
     block(
       "carrier_code_missing",
@@ -120,21 +138,67 @@ export function validateForTransmit(
       );
   }
 
-  // --- shipment ---
-  if (m.cargo.length === 0) block("cargo_missing", "Add at least one shipment line.", "shipment");
-  m.cargo.forEach((c, i) => {
-    const line = `Line ${i + 1}`;
-    if (!c.shipperId) block(`cargo_${i}_shipper`, `${line}: shipper is required.`, "shipment");
-    if (!c.consigneeId)
-      block(`cargo_${i}_consignee`, `${line}: consignee is required.`, "shipment");
-    if (!c.weightKg) block(`cargo_${i}_weight`, `${line}: weight is required.`, "shipment");
-    if (!c.pieceCount) block(`cargo_${i}_pieces`, `${line}: piece count is required.`, "shipment");
-    if (!c.hsCode)
-      warn(`cargo_${i}_hs`, `${line}: no HS code — broker may need it for entry.`, "shipment");
-    if (m.regime === "ACI" && !c.countryOfOrigin)
-      warn(`cargo_${i}_origin`, `${line}: country of origin missing.`, "shipment");
-    if (c.valueAmount != null && !c.valueCurrency)
-      block(`cargo_${i}_currency`, `${line}: value has no currency.`, "shipment");
+  // --- shipments ---
+  // ACE moves goods into the US, so the shipper is normally Canadian and the
+  // consignee American; ACI is the mirror image. A cross-border pair that does
+  // not follow that shape is legal but nearly always a data-entry slip.
+  const expectedShipperCountry = m.regime === "ACE" ? "CA" : "US";
+  const expectedConsigneeCountry = m.regime === "ACE" ? "US" : "CA";
+
+  if (m.shipments.length === 0)
+    block("shipments_missing", "Add or assign at least one shipment.", "shipment");
+
+  m.shipments.forEach((s, i) => {
+    const label = s.controlNumber || `Shipment ${i + 1}`;
+    const at = (suffix: string) => `shipment_${i}_${suffix}`;
+
+    if (!s.shipper) block(at("shipper"), `${label}: shipper is required.`, "shipment");
+    else if (s.shipper.country && s.shipper.country !== expectedShipperCountry)
+      warn(
+        at("shipper_country"),
+        `${label}: shipper is in ${s.shipper.country}, not ${expectedShipperCountry} as ${m.regime} usually expects.`,
+        "shipment",
+      );
+
+    if (!s.consignee) block(at("consignee"), `${label}: consignee is required.`, "shipment");
+    else if (s.consignee.country && s.consignee.country !== expectedConsigneeCountry)
+      warn(
+        at("consignee_country"),
+        `${label}: consignee is in ${s.consignee.country}, not ${expectedConsigneeCountry} as ${m.regime} usually expects.`,
+        "shipment",
+      );
+
+    if (s.shipmentType === "in_bond" && (!s.inBondEntryType || !s.inBondDestinationPortId))
+      block(
+        at("in_bond"),
+        `${label}: an in-bond shipment needs an entry type (IT/TE/IE) and a destination port.`,
+        "shipment",
+      );
+
+    if (s.cargoType === "consolidated" && s.commodities.length < 2)
+      block(
+        at("consolidated"),
+        `${label}: a consolidated cargo type needs at least two commodity lines.`,
+        "shipment",
+      );
+
+    if (s.commodities.length === 0)
+      block(at("commodities"), `${label}: add at least one commodity line.`, "commodity");
+
+    s.commodities.forEach((c, j) => {
+      const line = `${label} line ${j + 1}`;
+      const code = (suffix: string) => `shipment_${i}_commodity_${j}_${suffix}`;
+      if (!c.weightKg) block(code("weight"), `${line}: weight is required.`, "commodity");
+      if (!c.quantity) block(code("quantity"), `${line}: quantity is required.`, "commodity");
+      if (!c.quantityUnit)
+        block(code("quantity_unit"), `${line}: quantity unit is required.`, "commodity");
+      if (c.valueAmount != null && !c.valueCurrency)
+        block(code("currency"), `${line}: value has no currency.`, "commodity");
+      if (!c.hsCode)
+        warn(code("hs"), `${line}: no HS code — broker may need it for entry.`, "commodity");
+      if (m.regime === "ACI" && !c.countryOfOrigin)
+        warn(code("origin"), `${line}: country of origin missing.`, "commodity");
+    });
   });
 
   // --- trailer ---

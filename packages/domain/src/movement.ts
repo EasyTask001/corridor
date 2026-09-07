@@ -164,7 +164,8 @@ export const movementEventSchema = z.object({
 export type MovementEvent = z.infer<typeof movementEventSchema>;
 
 // ---------------------------------------------------------------------------
-// Cargo — the SAME schema validates AI extraction output and the DB insert.
+// Shared commodity value types. The commodity line itself lives in
+// shipment.ts — it hangs off a shipment, not a movement (migration 0019).
 // ---------------------------------------------------------------------------
 
 export const currency = z.enum(["USD", "CAD"]);
@@ -177,34 +178,6 @@ export const countryCode = z
   .trim()
   .toUpperCase()
   .length(2, "ISO 3166-1 alpha-2 country code");
-
-export const cargoInput = z.object({
-  shipperId: uuid.nullable().optional(),
-  consigneeId: uuid.nullable().optional(),
-  commodityDescription: nonEmpty.max(500),
-  hsCode: hsCode.nullable().optional(),
-  weightKg: z.number().positive().max(100_000).nullable().optional(),
-  pieceCount: z.number().int().positive().nullable().optional(),
-  packagingType: z.string().trim().max(60).nullable().optional(),
-  entryNumber: z.string().trim().max(40).nullable().optional(),
-  inBondNumber: z.string().trim().max(40).nullable().optional(),
-  valueAmount: z.number().nonnegative().nullable().optional(),
-  valueCurrency: currency.nullable().optional(),
-  countryOfOrigin: countryCode.nullable().optional(),
-  sourceDocumentId: uuid.nullable().optional(),
-  /** 0..1 — populated only when the row originated from AI extraction. */
-  extractionConfidence: z.number().min(0).max(1).nullable().optional(),
-});
-export type CargoInput = z.infer<typeof cargoInput>;
-
-export const cargoSchema = cargoInput.extend({
-  id: uuid,
-  movementId: uuid,
-  organizationId: uuid,
-  createdAt: isoDateTime,
-  updatedAt: isoDateTime,
-});
-export type Cargo = z.infer<typeof cargoSchema>;
 
 export const sealInput = z.object({
   trailerId: uuid.nullable().optional(),

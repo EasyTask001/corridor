@@ -1,15 +1,14 @@
 import { z } from "zod";
 import { uuid } from "./common";
-import { cargoInput } from "./movement";
 
-export const suggestedCargo = cargoInput.omit({
-  entryNumber: true,
-  inBondNumber: true,
-  sourceDocumentId: true,
-  extractionConfidence: true,
-});
-
-/** Historical values offered to a dispatcher; nothing is applied until accept. */
+/**
+ * Historical values offered to a dispatcher; nothing is applied until accept.
+ *
+ * Only the lane and the equipment are suggested. Commodity lines are NOT:
+ * since 0019 they belong to a shipment, and a shipment is identified by a real
+ * PAPS/PARS control number that cannot be cloned from an earlier trip. Reusing
+ * a past shipment is what `shipment.assign` is for.
+ */
 export const movementSuggestionPayload = z.object({
   sourceMovementId: uuid,
   sourceMovementNumber: z.string().min(1).max(40),
@@ -22,7 +21,6 @@ export const movementSuggestionPayload = z.object({
   driverId: uuid.nullable(),
   truckId: uuid.nullable(),
   trailerId: uuid.nullable(),
-  cargo: z.array(suggestedCargo).max(100),
 });
 
 export type MovementSuggestionPayload = z.infer<typeof movementSuggestionPayload>;

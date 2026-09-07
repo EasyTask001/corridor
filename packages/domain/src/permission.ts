@@ -45,6 +45,13 @@ export const PERMISSIONS = {
     description: "View movements assigned to me (driver portal)",
   },
 
+  // shipments
+  "shipment.read": { module: "shipment", description: "View shipments and commodities" },
+  "shipment.write": {
+    module: "shipment",
+    description: "Create/edit shipments, commodities and their movement assignment",
+  },
+
   // documents
   "document.read": { module: "document", description: "View uploaded documents" },
   "document.upload": { module: "document", description: "Upload documents" },

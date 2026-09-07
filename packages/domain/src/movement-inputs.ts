@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { isoDateTime, nonEmpty, uuid } from "./common";
-import { cargoInput, carrierCode, movementStatus, regime, sealInput } from "./movement";
+import { carrierCode, movementStatus, regime, sealInput } from "./movement";
 
 export const movementListInput = z.object({
   status: z.array(movementStatus).optional(),
@@ -26,12 +26,6 @@ export const movementPatch = z.object({
   notes: z.string().trim().max(4000).nullable().optional(),
 });
 export type MovementPatch = z.infer<typeof movementPatch>;
-
-export const cargoUpsertInput = cargoInput.extend({
-  id: uuid.optional(),
-  movementId: uuid,
-});
-export const cargoRemoveInput = z.object({ movementId: uuid, id: uuid });
 
 export const sealAddInput = sealInput.extend({ movementId: uuid });
 export const sealRemoveInput = z.object({ movementId: uuid, id: uuid });

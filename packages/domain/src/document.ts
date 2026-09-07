@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { isoDate, isoDateTime, uuid } from "./common";
-import { cargoInput, countryCode, currency, hsCode } from "./movement";
+import { countryCode, currency, hsCode } from "./movement";
+import { commodityInput, controlReference } from "./shipment";
 
 export const documentType = z.enum(["bol", "invoice", "rate_confirmation", "other"]);
 export type DocumentType = z.infer<typeof documentType>;
@@ -32,7 +33,7 @@ export const extractedParty = z.object({
 export type ExtractedParty = z.infer<typeof extractedParty>;
 
 /**
- * One shipment line as extracted. Field names mirror `cargoInput` so review →
+ * One commodity line as extracted. Field names mirror `commodityInput` so review →
  * apply is a straight mapping; `confidence` is per-line.
  */
 export const extractedCargoLine = z.object({
@@ -62,7 +63,7 @@ const tenderDateTime = z
 /**
  * A broker → carrier rate confirmation (load tender). It is NOT a customs
  * document: it carries no commodity detail, so nothing here ever becomes a
- * cargo line or a manifest field — review shows it read-only. Non-rate-con
+ * commodity line or a manifest field — review shows it read-only. Non-rate-con
  * documents carry `null` here.
  */
 export const extractedRateConfirmation = z.object({
@@ -81,7 +82,7 @@ export type ExtractedRateConfirmation = z.infer<typeof extractedRateConfirmation
 /**
  * THE extraction contract. The same schema validates the model's structured
  * output (`generateObject`) and the review form, so AI output can never
- * bypass domain validation on its way into `cargo`.
+ * bypass domain validation on its way into `commodities`.
  */
 export const extractedDocument = z.object({
   documentType,
@@ -160,28 +161,31 @@ export const documentListInput = z.object({
   offset: z.number().int().min(0).default(0),
 });
 
-/** Reviewer-confirmed lines to apply to a movement (already validated against cargoInput). */
+/**
+ * Reviewer-confirmed lines. Applying them creates ONE draft shipment on the
+ * chosen movement carrying every line, since a document is one bill of lading.
+ */
 export const applyExtractionInput = z.object({
   documentId: uuid,
   movementId: uuid,
+  /** PAPS/PARS number for the shipment the lines land on. */
+  controlReference,
   shipperId: uuid.nullable().optional(),
   consigneeId: uuid.nullable().optional(),
   lines: z
-    .array(cargoInput.omit({ sourceDocumentId: true, shipperId: true, consigneeId: true }))
+    .array(commodityInput.omit({ sourceDocumentId: true, hazmat: true }))
     .min(1)
     .max(50),
-  /** replace existing cargo lines on the movement (draft only) or append */
-  mode: z.enum(["append", "replace"]).default("append"),
 });
 export type ApplyExtractionInput = z.infer<typeof applyExtractionInput>;
 
-/** Map an extracted line to a cargoInput-compatible object (confidence carried along). */
-export function extractedLineToCargo(line: ExtractedCargoLine) {
+/** Map an extracted line to a commodityInput-compatible object (confidence carried along). */
+export function extractedLineToCommodity(line: ExtractedCargoLine) {
   return {
     commodityDescription: line.commodityDescription,
     hsCode: line.hsCode,
     weightKg: line.weightKg,
-    pieceCount: line.pieceCount,
+    quantity: line.pieceCount,
     packagingType: line.packagingType,
     valueAmount: line.valueAmount,
     valueCurrency: line.valueCurrency,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { cargoInput } from "./movement";
-import { extractedDocument, extractedLineToCargo, type ExtractedDocument } from "./document";
+import { commodityInput } from "./shipment";
+import { extractedDocument, extractedLineToCommodity, type ExtractedDocument } from "./document";
 
 const good: ExtractedDocument = {
   documentType: "bol",
@@ -99,9 +99,9 @@ describe("extractedDocument schema", () => {
     ).toBe(false);
   });
 
-  it("extracted lines map onto the cargo input schema unchanged", () => {
-    const mapped = extractedLineToCargo(good.cargo[0]!);
-    const parsed = cargoInput.safeParse(mapped);
+  it("extracted lines map onto the commodity input schema unchanged", () => {
+    const mapped = extractedLineToCommodity(good.cargo[0]!);
+    const parsed = commodityInput.safeParse(mapped);
     expect(parsed.success).toBe(true);
     expect(parsed.data?.extractionConfidence).toBe(0.92);
   });
