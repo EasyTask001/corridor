@@ -1,16 +1,22 @@
-# deps
+# Root ignore rules for the whole workspace. Package-specific rules live next to
+# what they cover: apps/mobile/.gitignore (Expo), load/.gitignore (k6 sessions),
+# supabase/.gitignore (written by the Supabase CLI).
+
+# --- Dependencies ---------------------------------------------------------------
 node_modules/
 .pnpm-store/
+.npm/
+*.tgz
 
-# build
+# --- Build output ---------------------------------------------------------------
 .next/
-dist/
 out/
+dist/
 build/
 .turbo/
 *.tsbuildinfo
 
-# env
+# --- Environment ----------------------------------------------------------------
 # `.env.*` on purpose: any new dotenv variant is ignored by default rather than
 # waiting for someone to remember to add it. `.env.example` is the one file we
 # do track — it documents the variable names, never a value.
@@ -18,41 +24,75 @@ build/
 .env.*
 !.env.example
 
-# supabase local
+# --- Secrets and certificates ----------------------------------------------------
+# Belt and braces: no key material of any kind is ever tracked.
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.mobileprovision
+
+# --- Supabase local stack --------------------------------------------------------
 # supabase/config.toml is TRACKED: `supabase db reset` and CI both read it.
 supabase/.branches/
 supabase/.temp/
 
-# generated: `pnpm db:types` writes this from the running local database
+# --- Generated ------------------------------------------------------------------
+# `pnpm db:types` writes this from the running local database.
 packages/db/src/supabase-types.ts
 
-# expo
-apps/mobile/.expo/
-apps/mobile/.expo-shared/
-
-# test artifacts
+# --- Test artifacts -------------------------------------------------------------
 coverage/
-playwright-report/
-test-results/
 .nyc_output/
+playwright-report/
+blob-report/
+test-results/
+playwright/.cache/
 
-# logs
+# --- Logs -----------------------------------------------------------------------
+logs/
 *.log
 npm-debug.log*
 pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+lerna-debug.log*
 
-# editors
+# --- Caches ---------------------------------------------------------------------
+.cache/
+.eslintcache
+.stylelintcache
+.prettiercache
+*.tmp
+tmp/
+temp/
+
+# --- Deployment -----------------------------------------------------------------
+.vercel
+
+# --- Editors and IDEs -----------------------------------------------------------
 .idea/
-.vscode/
+.vscode/*
+!.vscode/extensions.json
+.fleet/
+.zed/
+.history/
+*.sublime-workspace
 *.swp
 *.swo
 *~
 
-# misc
+# --- Operating system -----------------------------------------------------------
 .DS_Store
-.vercel
-.eslintcache
-.stylelintcache
+._*
+Thumbs.db
+Desktop.ini
+
+# --- AI agent tooling -----------------------------------------------------------
+# Per-developer state only; shared instructions live in the tracked CLAUDE.md /
+# AGENTS.md files.
 .claude/
+.superpowers/
