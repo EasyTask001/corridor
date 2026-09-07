@@ -75,6 +75,35 @@ test.describe("registries", () => {
     await expect(page.getByText(`Driver's license expires in 7 days — Ada ${last}`)).toBeVisible();
   });
 
+  test("a driver's travel documents are recorded on their own tab", async ({ page }) => {
+    await login(page, "dispatch@pathfinder.demo");
+    await page.goto("/parties/drivers");
+    await page.getByLabel("Search").fill("Reyes");
+    await page.getByRole("button", { name: "Edit" }).first().click();
+
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("button", { name: "Travel documents" }).click();
+    // Seeded: Marcus Reyes travels on a passport (primary) plus a FAST card.
+    await expect(dialog.getByText("US8871220")).toBeVisible();
+    await expect(dialog.getByText("FAST-77014")).toBeVisible();
+
+    const number = `NX-${unique().toUpperCase()}`;
+    await dialog.getByRole("button", { name: "Add document" }).click();
+    await dialog.getByLabel("Document type").selectOption("nexus");
+    await dialog.getByLabel("Document number").fill(number);
+    await dialog.getByLabel("Issuing country").fill("us");
+    await dialog.getByLabel("Expires on").fill(isoDaysFromNow(700));
+    await dialog.getByRole("button", { name: "Save document" }).click();
+
+    await expect(dialog.getByText("NEXUS card")).toBeVisible();
+    await expect(dialog.getByText(number)).toBeVisible();
+
+    // …and it can be taken off again.
+    const row = dialog.locator("tr", { hasText: number });
+    await row.getByRole("button", { name: "Remove" }).click();
+    await expect(dialog.getByText(number)).toHaveCount(0);
+  });
+
   test("duplicate unit number is rejected with a friendly message", async ({ page }) => {
     await login(page, "dispatch@pathfinder.demo");
     await page.goto("/parties/trucks");

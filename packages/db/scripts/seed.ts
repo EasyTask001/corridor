@@ -186,13 +186,38 @@ export async function seed() {
       select count(*)::int as existing from public.partners where organization_id = ${orgId}`;
     if ((partnerCountRows[0]?.existing ?? 0) === 0) {
       await sql`
-        insert into public.drivers (organization_id, first_name, last_name, license_number, license_jurisdiction,
-          license_expiry, fast_card_number, fast_card_expiry, medical_cert_expiry, citizenship, phone, email)
+        insert into public.drivers (organization_id, first_name, last_name, person_type, gender,
+          license_number, license_jurisdiction, license_expiry, medical_cert_expiry, citizenship,
+          hazmat_endorsement, us_address, phone, email)
         values
-          (${orgId}, 'Gurpreet', 'Singh',   'S1234-56789-01234', 'ON', ${day(400)}, 'FAST-88123', ${day(45)},  ${day(200)}, 'CA', '+1 905 555 0101', 'gurpreet@pathfinder.demo'),
-          (${orgId}, 'Marcus',   'Reyes',   'R7788-11223-33445', 'MI', ${day(9)},   null,         null,        ${day(300)}, 'US', '+1 313 555 0102', 'marcus@pathfinder.demo'),
-          (${orgId}, 'Amrit',    'Kaur',    'K5566-99887-77665', 'BC', ${day(-12)}, 'FAST-90455', ${day(500)}, null,        'CA', '+1 604 555 0103', 'amrit@pathfinder.demo'),
-          (${orgId}, 'Dale',     'Thompson','T1010-20203-30304', 'NY', ${day(700)}, null,         null,        ${day(650)}, 'US', '+1 716 555 0104', 'dale@pathfinder.demo')
+          (${orgId}, 'Gurpreet', 'Singh',   'driver',    'M', 'S1234-56789-01234', 'ON', ${day(400)}, ${day(200)}, 'CA', true,  ${sql.json({})}, '+1 905 555 0101', 'gurpreet@pathfinder.demo'),
+          (${orgId}, 'Marcus',   'Reyes',   'driver',    'M', 'R7788-11223-33445', 'MI', ${day(9)},   ${day(300)}, 'US', false, ${sql.json({})}, '+1 313 555 0102', 'marcus@pathfinder.demo'),
+          (${orgId}, 'Amrit',    'Kaur',    'driver',    'F', 'K5566-99887-77665', 'BC', ${day(-12)}, null,        'CA', false, ${sql.json({})}, '+1 604 555 0103', 'amrit@pathfinder.demo'),
+          (${orgId}, 'Dale',     'Thompson','driver',    'M', 'T1010-20203-30304', 'NY', ${day(700)}, ${day(650)}, 'US', false, ${sql.json({})}, '+1 716 555 0104', 'dale@pathfinder.demo'),
+          -- A passenger rides along and never drives: no licence, a travel
+          -- document instead, and a US address for the ACE crew list.
+          (${orgId}, 'Rosa',     'Delgado', 'passenger', 'F', null,                null, null,        null,        'MX', false,
+            ${sql.json({ line1: "2200 Michigan Ave", city: "Detroit", region: "MI", postalCode: "48216", country: "US" })},
+            '+1 313 555 0105', 'rosa@pathfinder.demo')
+        on conflict do nothing`;
+
+      // Travel documents (0020): the FAST cards that used to be columns on
+      // `drivers`, plus the passports the crew actually presents at the booth.
+      await sql`
+        insert into public.driver_documents (organization_id, driver_id, document_type, document_number,
+          issuing_country, issued_on, expires_on, is_primary)
+        select ${orgId}, d.id, x.document_type, x.document_number, x.issuing_country,
+               x.issued_on::date, x.expires_on::date, x.is_primary
+        from (values
+          ('Singh',   'fast',     'FAST-88123', 'CA', ${day(-1200)}, ${day(45)},   false),
+          ('Singh',   'passport', 'HA412355',   'CA', ${day(-1500)}, ${day(1500)}, true),
+          ('Reyes',   'passport', 'US8871220',  'US', ${day(-900)},  ${day(120)},  true),
+          ('Reyes',   'fast',     'FAST-77014', 'US', ${day(-600)},  ${day(900)},  false),
+          ('Kaur',    'fast',     'FAST-90455', 'CA', ${day(-800)},  ${day(500)},  false),
+          ('Delgado', 'laser_visa_bcc', 'BCC-4471902', 'MX', ${day(-400)}, ${day(1100)}, true)
+        ) as x(last_name, document_type, document_number, issuing_country, issued_on, expires_on, is_primary)
+        join public.drivers d
+          on d.organization_id = ${orgId} and d.last_name = x.last_name
         on conflict do nothing`;
 
       await sql`
@@ -270,6 +295,7 @@ export async function seed() {
       const gurpreet = await ids("drivers", "last_name", "Singh");
       const marcus = await ids("drivers", "last_name", "Reyes");
       const dale = await ids("drivers", "last_name", "Thompson");
+      const rosa = await ids("drivers", "last_name", "Delgado");
       const t101 = await ids("trucks", "unit_number", "T-101");
       const t103 = await ids("trucks", "unit_number", "T-103");
       const tr501 = await ids("trailers", "unit_number", "TR-501");
@@ -325,7 +351,9 @@ export async function seed() {
       let seq = 0;
       const seedMovement = async (spec: {
         regime: "ACE" | "ACI";
+        /** The person in charge; `alsoCrew` rides along. */
         driver: string;
+        alsoCrew?: Array<{ driverId: string; role: "crew_member" | "passenger" }>;
         truck: string;
         trailer: string | null;
         portCode: string;
@@ -361,11 +389,21 @@ export async function seed() {
         if (!port) throw new Error(`seed: unknown port code ${spec.portCode} for ${spec.regime}`);
         const [m] = await sql<{ id: string }[]>`
           insert into public.movements (organization_id, regime, movement_number, trip_number, port_id, carrier_code,
-            scheduled_crossing_at, driver_id, truck_id, trailer_id, created_by)
+            scheduled_crossing_at, truck_id, trailer_id, created_by)
           values (${orgId}, ${spec.regime}, ${number}, ${"TRIP-" + String(1000 + seq)}, ${port.id}, ${carrierCode},
-            ${eta.toISOString()}, ${spec.driver}, ${spec.truck}, ${spec.trailer}, ${dispatcherId})
+            ${eta.toISOString()}, ${spec.truck}, ${spec.trailer}, ${dispatcherId})
           returning id`;
         const id = m!.id;
+        await sql`
+          insert into public.movement_crew (organization_id, movement_id, driver_id, role, position)
+          values (${orgId}, ${id}, ${spec.driver}, 'person_in_charge', 1)`;
+        let crewPosition = 1;
+        for (const extra of spec.alsoCrew ?? []) {
+          crewPosition++;
+          await sql`
+            insert into public.movement_crew (organization_id, movement_id, driver_id, role, position)
+            values (${orgId}, ${id}, ${extra.driverId}, ${extra.role}, ${crewPosition})`;
+        }
         await sql`
           insert into public.movement_events (movement_id, organization_id, event_type, from_status, to_status, actor_type, actor_id, payload)
           values (${id}, ${orgId}, 'status_change', null, 'draft', 'user', ${dispatcherId}, ${sql.json({ movementNumber: number })})`;
@@ -461,6 +499,11 @@ export async function seed() {
       await seedMovement({
         regime: "ACE",
         driver: gurpreet,
+        // Two people in the cab: a second driver and a passenger.
+        alsoCrew: [
+          { driverId: marcus, role: "crew_member" },
+          { driverId: rosa, role: "passenger" },
+        ],
         truck: t101,
         trailer: tr501,
         portCode: DET,

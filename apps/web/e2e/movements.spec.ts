@@ -48,7 +48,11 @@ async function buildReadyMovement(page: Page) {
   await page.getByRole("button", { name: /^Truck/ }).click();
   await page.getByLabel("Truck", { exact: true }).selectOption({ label: "T-101 · AB12345" });
   await page.getByRole("button", { name: /^Crew/ }).click();
-  await selectByText(page.getByLabel("Driver", { exact: true }), "Singh, Gurpreet");
+  await selectByText(page.getByLabel("Add to crew", { exact: true }), "Singh, Gurpreet");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "Role for Gurpreet Singh" })).toHaveValue(
+    "person_in_charge",
+  );
   await page.getByRole("button", { name: /^Trailer/ }).click();
   await page.getByLabel("Trailer", { exact: true }).selectOption({ label: "TR-501 · dry van" });
 
@@ -212,14 +216,14 @@ test.describe("movement builder", () => {
     await expect(heading(page).getByText("accepted")).toBeVisible();
 
     await page.getByRole("button", { name: "Amend" }).click();
-    await page.getByLabel("Reason").fill("Driver swapped at yard");
-    await selectByText(page.getByLabel("Driver"), "Thompson, Dale");
+    await page.getByLabel("Reason").fill("Trailer swapped at yard");
+    await selectByText(page.getByLabel("Trailer"), "TR-503");
     await page.getByRole("button", { name: "Submit amendment" }).click();
     await expect(heading(page).getByText("sent")).toBeVisible();
-    await expect(timeline(page).getByText("Amendment #1: Driver swapped at yard")).toBeVisible();
+    await expect(timeline(page).getByText("Amendment #1: Trailer swapped at yard")).toBeVisible();
     await expect(timeline(page).getByText("accepted → sent")).toBeVisible();
     await page.getByRole("button", { name: /^Review/ }).click();
-    await expect(page.getByText(/driverId:/)).toBeVisible();
+    await expect(page.getByText(/trailerId:/)).toBeVisible();
 
     // Customs accepts the amendment → amendment row marked accepted
     await page.getByRole("button", { name: "accepted", exact: true }).click();

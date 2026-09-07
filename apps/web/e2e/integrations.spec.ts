@@ -46,7 +46,8 @@ async function buildReady(page: Page, tripNumber: string) {
   await page.getByRole("button", { name: /^Truck/ }).click();
   await page.getByLabel("Truck", { exact: true }).selectOption({ label: "T-101 · AB12345" });
   await page.getByRole("button", { name: /^Crew/ }).click();
-  await selectByText(page.getByLabel("Driver", { exact: true }), "Singh, Gurpreet");
+  await selectByText(page.getByLabel("Add to crew", { exact: true }), "Singh, Gurpreet");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
   await page.getByRole("button", { name: /^Trailer/ }).click();
   await page.getByLabel("Trailer", { exact: true }).selectOption({ label: "TR-501 · dry van" });
   const reference = `PAPS${Date.now().toString(36).toUpperCase()}`;
