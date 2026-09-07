@@ -114,9 +114,13 @@ export const anyPermissionProcedure = (...allowed: PermissionKey[]) =>
   orgProcedure.use(enforceAnyPermission(...allowed));
 
 /**
- * For procedures that spend model tokens (extraction, suggestions, reporting,
- * copilot). Permission is checked first so a forbidden call does not eat the
- * caller's much smaller `ai` budget.
+ * For procedures that invoke a model or enqueue model work — document
+ * extraction, movement suggestions, copilot. Permission is checked first so a
+ * forbidden call does not eat the caller's much smaller `ai` budget.
+ *
+ * Deterministic work does NOT belong here even when it looks AI-shaped:
+ * `reporting.run` translates a question with a regex-driven grammar and never
+ * calls a model, so it stays on the standard tier.
  */
 export const aiProcedure = (...required: PermissionKey[]) =>
   orgProcedure.use(enforcePermission(...required)).use(rateLimited("ai"));

@@ -11,6 +11,11 @@
  * the whole tenant out of ordinary reads and writes; `ai` is per org, because
  * model spend is an org-level plan resource that the whole tenant shares. The
  * per-plan ceilings apply to whichever counter the tier uses.
+ *
+ * The `ai` tier is for procedures that **invoke a model or enqueue model work**
+ * — its ceilings exist to cap token spend, not request volume. A procedure that
+ * is merely expensive, or that only looks AI-shaped (a deterministic
+ * question-to-DSL translation, say), belongs on `standard`.
  */
 import { Ratelimit, type Duration } from "@upstash/ratelimit";
 import type { SubscriptionPlan } from "@corridor/domain";

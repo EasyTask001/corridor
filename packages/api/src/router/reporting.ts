@@ -3,7 +3,7 @@ import { z } from "zod";
 import { and, desc, eq, gte, schema, sql, type RlsTransaction, type SQL } from "@corridor/db";
 import { reportQuery, type ReportQuery } from "@corridor/domain";
 import { translateReportQuestion, UnsupportedReportQuestionError } from "@corridor/ai";
-import { aiProcedure, router } from "../trpc";
+import { permissionProcedure, router } from "../trpc";
 
 const { movements, cargo } = schema;
 
@@ -122,7 +122,7 @@ function summarize(
 }
 
 export const reportingRouter = router({
-  run: aiProcedure("report.read", "movement.read")
+  run: permissionProcedure("report.read", "movement.read")
     .input(reportInput)
     .mutation(({ ctx, input }) =>
       ctx.rls(async (tx) => {
