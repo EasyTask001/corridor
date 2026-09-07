@@ -5,13 +5,26 @@
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import NetInfo from "@react-native-community/netinfo";
-import { Outbox, type OutboxEntry, type OutboxInput, type OutboxSend } from "./outbox";
+import {
+  Outbox,
+  SIGNED_OUT_SCOPE,
+  UNRESOLVED_SCOPE,
+  userScope,
+  type OutboxEntry,
+  type OutboxInput,
+  type OutboxScope,
+  type OutboxSend,
+} from "./outbox";
 import { trpc } from "./trpc";
 
 /** Optimistic: assume a connection until NetInfo says otherwise. */
 let online = true;
-/** auth.users.id of the signed-in driver; set by the session provider. */
-let scope: string | null = null;
+/**
+ * Whose queue this is. Starts *unresolved* — until the stored Supabase session
+ * has been read there is no correct key, and a launch-time flush against the
+ * wrong one would leave the driver's real queue unsent.
+ */
+let scope: OutboxScope = UNRESOLVED_SCOPE;
 
 export const isOnline = () => online;
 
@@ -36,12 +49,18 @@ export const outbox = new Outbox({
 });
 
 /**
- * Point the queue at a user. Called on every auth state change so the storage
- * key follows the session — a queue written by the previous driver on a shared
- * handset is simply not visible to the next one.
+ * Point the queue at a user (or at nobody). Called once the stored session has
+ * been read and again on every auth state change, so the storage key follows
+ * the session — a queue written by the previous driver on a shared handset is
+ * simply not visible to the next one.
  */
 export function setOutboxScope(userId: string | null) {
-  scope = userId;
+  scope = userId ? userScope(userId) : SIGNED_OUT_SCOPE;
+}
+
+/** Back to "we do not know yet" — used when tearing the session down. */
+export function resetOutboxScope() {
+  scope = UNRESOLVED_SCOPE;
 }
 
 /**
@@ -62,6 +81,11 @@ export async function clearOutboxForSignOut() {
 /**
  * Track connectivity and replay the queue on the rising edge. Returns the
  * NetInfo unsubscribe function.
+ *
+ * MUST NOT be started before `setOutboxScope` has run: the immediate flush
+ * below would otherwise target the unresolved scope and do nothing, leaving a
+ * signed-in driver's queued work waiting for an offline→online edge that may
+ * never come. `SessionProvider` starts it from inside the auth effect.
  */
 export function startOutboxSync(onChange?: (state: { online: boolean; pending: number }) => void) {
   const report = async () => {

@@ -25,7 +25,8 @@ export type JobType =
   | "compliance.scan"
   | "document.extract"
   | "copilot.embed_knowledge"
-  | "billing.report_usage";
+  | "billing.report_usage"
+  | "notification.push";
 
 export async function enqueueJob(
   tx: RlsTransaction,
@@ -59,6 +60,27 @@ type Handler = (tx: RlsTransaction, job: Job) => Promise<Record<string, unknown>
  * production caller.
  */
 export const jobHandlers: Record<JobType, Handler> = {
+  /**
+   * Deliver the Expo pushes for one notification fan-out. The producer runs
+   * inside a user's RLS transaction and cannot reach `push_tokens_for` (granted
+   * to `service_role` only) without taking a second pooled connection while its
+   * own is still held — so it enqueues this instead, and the worker, which
+   * already holds the service role, does the sending.
+   *
+   * The payload carries only row ids; the text and the recipients are re-read
+   * from `notifications`.
+   */
+  "notification.push": async (tx, job) => {
+    const orgId = job.organizationId;
+    if (!orgId) throw new Error("notification.push requires organization_id");
+    const ids = Array.isArray(job.payload.notificationIds)
+      ? job.payload.notificationIds.filter((id): id is string => typeof id === "string")
+      : [];
+    // Dynamic import: notifications.ts imports enqueueJob from here.
+    const { deliverQueuedPush } = await import("./notifications");
+    return deliverQueuedPush(tx, orgId, ids);
+  },
+
   /**
    * Ask the customs gateway for its decision on a transmitted manifest and
    * apply it. Chains the next decision (accepted → released/held → released)

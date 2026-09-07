@@ -45,6 +45,7 @@ import {
   requireMovement,
   validationFor,
 } from "../services/movements";
+import { notifyUser, resolveDriverAssignment } from "../services/notifications";
 import { writeAudit } from "../services/audit";
 import { recordUsage } from "../services/usage";
 
@@ -189,8 +190,14 @@ export const movementRouter = router({
 
   update: permissionProcedure("movement.write")
     .input(movementPatch.extend({ id: uuid }))
-    .mutation(({ ctx, input }) =>
-      ctx.rls(async (tx) => {
+    .mutation(async ({ ctx, input }) => {
+      // Assigning (or reassigning) a driver is the one patch a driver needs to
+      // hear about. It is *resolved* inside the transaction (so `drivers` is
+      // read under the caller's RLS) but *delivered* after it commits: delivery
+      // needs the service role, and taking that connection while this one is
+      // still open would hold two from the same pool per request.
+      let pending: Awaited<ReturnType<typeof resolveDriverAssignment>> = null;
+      const row = await ctx.rls(async (tx) => {
         const { id, ...patch } = input;
         const m = await requireMovement(tx, ctx.orgId, id);
         requireEditable(m.status);
@@ -212,11 +219,8 @@ export const movementRouter = router({
           .where(eq(movements.id, id))
           .returning();
         await writeAudit(tx, ctx.orgId, "movement.update", "movement", id, m, row!);
-        // Assigning (or reassigning) a driver is the one patch a driver needs to
-        // hear about — targeted at that driver, never fanned out to the org.
         if (patch.driverId && patch.driverId !== m.driverId) {
-          const { notifyDriverAssigned } = await import("../services/notifications");
-          await notifyDriverAssigned(tx, ctx.db, {
+          pending = await resolveDriverAssignment(tx, {
             orgId: ctx.orgId,
             driverId: patch.driverId,
             movementId: id,
@@ -225,8 +229,12 @@ export const movementRouter = router({
           });
         }
         return row!;
-      }),
-    ),
+      });
+      // Post-commit: no transaction of ours is open, so notifyUser's
+      // service-role transaction is the only connection in play.
+      if (pending) await notifyUser(ctx.db, pending);
+      return row;
+    }),
 
   cargo: router({
     upsert: permissionProcedure("movement.write")

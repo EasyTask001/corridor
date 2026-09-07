@@ -1,14 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   Outbox,
+  OutboxScopeError,
   OutboxValidationError,
+  SIGNED_OUT_SCOPE,
+  UNRESOLVED_SCOPE,
   outboxKeyFor,
+  userScope,
   validateOutboxInput,
   type OutboxEntry,
+  type OutboxScope,
   type OutboxStorage,
 } from "./outbox";
 
-const ANON_KEY = outboxKeyFor(null);
+const ANON_KEY = outboxKeyFor(SIGNED_OUT_SCOPE)!;
+const keyFor = (userId: string) => outboxKeyFor(userScope(userId))!;
 
 /** In-memory stand-in for AsyncStorage. */
 function memoryStorage(initial: Record<string, string> = {}) {
@@ -19,7 +25,8 @@ function memoryStorage(initial: Record<string, string> = {}) {
   } = {
     getItem: async (key) => map.get(key) ?? null,
     setItem: async (key, value) => void map.set(key, value),
-    snapshot: (userId = null) => JSON.parse(map.get(outboxKeyFor(userId)) ?? "[]") as OutboxEntry[],
+    snapshot: (userId = null) =>
+      JSON.parse(map.get(userId === null ? ANON_KEY : keyFor(userId)) ?? "[]") as OutboxEntry[],
     keys: () => [...map.keys()],
   };
   return storage;
@@ -244,8 +251,8 @@ describe("per-user scoping", () => {
 
   it("writes each user's queue under its own key", async () => {
     const storage = memoryStorage();
-    let user: string | null = DRIVER_A;
-    const { outbox, online } = build({ storage, scope: () => user });
+    let user = DRIVER_A;
+    const { outbox, online } = build({ storage, scope: () => userScope(user) });
     online.value = false;
 
     await outbox.enqueue("notifications.markRead", { id: NOTE });
@@ -254,13 +261,13 @@ describe("per-user scoping", () => {
 
     expect(storage.snapshot(DRIVER_A).map((e) => e.op)).toEqual(["notifications.markRead"]);
     expect(storage.snapshot(DRIVER_B).map((e) => e.op)).toEqual(["documents.finalizeUpload"]);
-    expect(storage.keys().sort()).toEqual([outboxKeyFor(DRIVER_A), outboxKeyFor(DRIVER_B)].sort());
+    expect(storage.keys().sort()).toEqual([keyFor(DRIVER_A), keyFor(DRIVER_B)].sort());
   });
 
   it("never replays one driver's queue for the next driver on the handset", async () => {
     const storage = memoryStorage();
-    let user: string | null = DRIVER_A;
-    const { outbox, send, online } = build({ storage, scope: () => user });
+    let user = DRIVER_A;
+    const { outbox, send, online } = build({ storage, scope: () => userScope(user) });
     online.value = false;
     await outbox.enqueue("notifications.markRead", { id: NOTE });
 
@@ -277,8 +284,8 @@ describe("per-user scoping", () => {
 
   it("clear() empties only the current scope and reports the count", async () => {
     const storage = memoryStorage();
-    let user: string | null = DRIVER_A;
-    const { outbox, online } = build({ storage, scope: () => user });
+    let user = DRIVER_A;
+    const { outbox, online } = build({ storage, scope: () => userScope(user) });
     online.value = false;
     await outbox.enqueue("notifications.markRead", { id: NOTE });
     user = DRIVER_B;
@@ -321,5 +328,76 @@ describe("Outbox.drainAndClear", () => {
     const result = await outbox.drainAndClear();
     expect(result).toEqual({ sent: 0, discarded: 1 });
     expect(storage.snapshot()).toEqual([]);
+  });
+});
+
+describe("unresolved scope (app launch)", () => {
+  const DRIVER = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
+  /**
+   * The bug this guards: `startOutboxSync` used to flush the moment the app
+   * started, before `getSession()` had resolved, so the launch replay ran
+   * against the wrong key and the driver's real queue sat unsent until a
+   * NetInfo offline→online edge that might never come.
+   */
+  it("replays the signed-in driver's queue on launch, not the anonymous one", async () => {
+    const storage = memoryStorage({
+      [keyFor(DRIVER)]: JSON.stringify([
+        {
+          id: "queued-before-launch",
+          op: "notifications.markRead",
+          input: { id: NOTE },
+          enqueuedAt: "2026-01-01T00:00:00.000Z",
+          attempts: 0,
+        },
+      ]),
+    });
+    // The fake session flow: unresolved at launch, then resolved to the driver.
+    let scope: OutboxScope = UNRESOLVED_SCOPE;
+    const { outbox, send } = build({ storage, scope: () => scope });
+
+    // Whatever fires before the session is read must do nothing at all.
+    expect(await outbox.flush()).toMatchObject({ sent: 0, remaining: 0, interrupted: true });
+    expect(await outbox.pending()).toEqual([]);
+    expect(send).not.toHaveBeenCalled();
+    expect(storage.snapshot(DRIVER)).toHaveLength(1);
+
+    // getSession() resolves → the very next flush finds the driver's own queue.
+    scope = userScope(DRIVER);
+    expect(await outbox.flush()).toMatchObject({ sent: 1, remaining: 0 });
+    expect(send.mock.calls.map((c) => c[0])).toEqual(["notifications.markRead"]);
+    expect(storage.snapshot(DRIVER)).toEqual([]);
+  });
+
+  it("refuses to queue anything before the session is known", async () => {
+    const storage = memoryStorage();
+    const { outbox } = build({ storage, scope: () => UNRESOLVED_SCOPE });
+    await expect(outbox.enqueue("notifications.markRead", { id: NOTE })).rejects.toBeInstanceOf(
+      OutboxScopeError,
+    );
+    expect(storage.keys()).toEqual([]);
+  });
+
+  it("clear() is a no-op while unresolved, so nothing is destroyed on launch", async () => {
+    const storage = memoryStorage({
+      [keyFor(DRIVER)]: JSON.stringify([
+        {
+          id: "keep-me",
+          op: "notifications.markRead",
+          input: { id: NOTE },
+          enqueuedAt: "2026-01-01T00:00:00.000Z",
+          attempts: 0,
+        },
+      ]),
+    });
+    const { outbox } = build({ storage, scope: () => UNRESOLVED_SCOPE });
+    expect(await outbox.clear()).toBe(0);
+    expect(storage.snapshot(DRIVER)).toHaveLength(1);
+  });
+
+  it("gives signed-out work its own key, distinct from unresolved", () => {
+    expect(outboxKeyFor(UNRESOLVED_SCOPE)).toBeNull();
+    expect(outboxKeyFor(SIGNED_OUT_SCOPE)).toBe(ANON_KEY);
+    expect(outboxKeyFor(userScope(DRIVER))).not.toBe(ANON_KEY);
   });
 });

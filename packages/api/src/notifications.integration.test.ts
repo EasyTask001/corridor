@@ -13,7 +13,8 @@
 import { afterEach, afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, and, eq, schema, withRls, withServiceRole } from "@corridor/db";
 import { createClient } from "@supabase/supabase-js";
-import { notifyDriverAssigned, notifyOrganization, notifyUser } from "./services/notifications";
+import { notifyOrganization, notifyUser, resolveDriverAssignment } from "./services/notifications";
+import { jobHandlers } from "./services/jobs";
 
 const DB_URL =
   process.env.DIRECT_DATABASE_URL ?? "postgresql://postgres:postgres@127.0.0.1:55322/postgres";
@@ -22,7 +23,8 @@ const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const conn = createDb(DB_URL, { max: 4 });
 const db = conn.db;
-const { drivers, movements, notificationRules, notifications, userDevices } = schema;
+const { backgroundJobs, drivers, movements, notificationRules, notifications, userDevices } =
+  schema;
 
 let orgId: string;
 let driverUserId: string;
@@ -98,6 +100,7 @@ afterEach(async () => {
         ),
       );
     await tx.delete(userDevices).where(eq(userDevices.userId, dispatcherUserId));
+    await tx.delete(backgroundJobs).where(eq(backgroundJobs.jobType, "notification.push"));
     await tx
       .delete(notificationRules)
       .where(
@@ -114,17 +117,26 @@ afterAll(async () => {
   await conn.sql.end();
 });
 
-/** Run the helper the way `movement.update` does: inside the dispatcher's RLS transaction. */
-function assign(driverId: string, actorUserId: string | null = dispatcherUserId) {
-  return withRls(db, { sub: dispatcherUserId, email: "dispatch@pathfinder.demo" }, (tx) =>
-    notifyDriverAssigned(tx, db, {
-      orgId,
-      driverId,
-      movementId,
-      movementNumber,
-      actorUserId,
-    }),
+/**
+ * Run the two phases the way `movement.update` does: resolve inside the
+ * dispatcher's RLS transaction, deliver only once it has committed — never a
+ * service-role transaction nested inside an RLS one.
+ */
+async function assign(driverId: string, actorUserId: string | null = dispatcherUserId) {
+  const pending = await withRls(
+    db,
+    { sub: dispatcherUserId, email: "dispatch@pathfinder.demo" },
+    (tx) =>
+      resolveDriverAssignment(tx, {
+        orgId,
+        driverId,
+        movementId,
+        movementNumber,
+        actorUserId,
+      }),
   );
+  if (!pending) return { notified: 0, emailed: 0, pushed: 0 };
+  return notifyUser(db, pending);
 }
 
 const inboxFor = (userId: string) =>
@@ -133,7 +145,7 @@ const inboxFor = (userId: string) =>
     .from(notifications)
     .where(and(eq(notifications.userId, userId), eq(notifications.type, "movement.assigned")));
 
-describe("notifyDriverAssigned", () => {
+describe("resolveDriverAssignment + notifyUser", () => {
   it("notifies the auth user behind the assigned driver", async () => {
     const result = await assign(linkedDriverId);
     expect(result.notified).toBe(1);
@@ -168,11 +180,11 @@ describe("notifyDriverAssigned", () => {
       .where(eq(drivers.userId, driverUserId))
       .limit(1);
     // Same driver id, wrong org: the org filter must reject it.
-    const result = await withRls(
+    const pending = await withRls(
       db,
       { sub: dispatcherUserId, email: "dispatch@pathfinder.demo" },
       (tx) =>
-        notifyDriverAssigned(tx, db, {
+        resolveDriverAssignment(tx, {
           orgId: "00000000-0000-4000-8000-000000000000",
           driverId: foreign!.id,
           movementId,
@@ -180,7 +192,7 @@ describe("notifyDriverAssigned", () => {
           actorUserId: dispatcherUserId,
         }),
     );
-    expect(result).toMatchObject({ notified: 0 });
+    expect(pending).toBeNull();
   });
 
   it("respects the recipient's opt-out", async () => {
@@ -238,13 +250,12 @@ describe("notifyUser push delivery", () => {
 
 describe("notifyOrganization push", () => {
   /**
-   * The org fan-out inserts and emails inside the *caller's* RLS transaction,
-   * but has to open a second, service-role transaction for the push step —
-   * `push_tokens_for` is not executable by `authenticated`. This proves that
-   * nested transaction really works against a live pool rather than deadlocking
-   * behind the transaction that is still open above it.
+   * The fan-out runs inside the caller's RLS transaction and must NOT open a
+   * service-role one for the push — that would hold two pooled connections per
+   * request. It enqueues a `notification.push` job instead, which the worker
+   * (already service-role) delivers. This test walks both halves.
    */
-  it("resolves handsets from a service-role transaction nested inside the caller's", async () => {
+  it("enqueues a push job inside the caller's transaction and lets the worker deliver it", async () => {
     await withServiceRole(db, async (tx) => {
       await tx.insert(notificationRules).values({
         organizationId: orgId,
@@ -261,24 +272,64 @@ describe("notifyOrganization push", () => {
       });
     });
 
+    const title = `Fan-out push ${crypto.randomUUID()}`;
     const result = await withRls(
       db,
       { sub: dispatcherUserId, email: "dispatch@pathfinder.demo" },
       (tx) =>
-        notifyOrganization(
-          tx,
-          {
-            orgId,
-            eventType: "alert.critical",
-            title: `Fan-out push ${crypto.randomUUID()}`,
-            body: "body",
-            linkPath: "/alerts",
-          },
-          db,
-        ),
+        notifyOrganization(tx, {
+          orgId,
+          eventType: "alert.critical",
+          title,
+          body: "body",
+          linkPath: "/alerts",
+        }),
     );
 
     expect(result.notified).toBeGreaterThan(0);
-    expect(result.pushed).toBe(1);
+    expect(result.queuedPush).toBe(1);
+
+    // The job is a real row, enqueued under the dispatcher's own RLS — proving
+    // migration 0016's insert policy allows this producer.
+    const jobs = await db
+      .select()
+      .from(backgroundJobs)
+      .where(
+        and(
+          eq(backgroundJobs.organizationId, orgId),
+          eq(backgroundJobs.jobType, "notification.push"),
+        ),
+      );
+    expect(jobs).toHaveLength(1);
+
+    // Now the worker half, on its own service-role transaction.
+    const delivered = await withServiceRole(db, (tx) =>
+      jobHandlers["notification.push"](tx, jobs[0]!),
+    );
+    expect(delivered).toMatchObject({ devices: 1 });
+  });
+
+  it("enqueues nothing when no recipient wants push", async () => {
+    const result = await withRls(
+      db,
+      { sub: dispatcherUserId, email: "dispatch@pathfinder.demo" },
+      (tx) =>
+        notifyOrganization(tx, {
+          orgId,
+          eventType: "alert.critical",
+          title: `No push ${crypto.randomUUID()}`,
+        }),
+    );
+    expect(result.queuedPush).toBe(0);
+    const jobs = await db
+      .select()
+      .from(backgroundJobs)
+      .where(
+        and(
+          eq(backgroundJobs.organizationId, orgId),
+          eq(backgroundJobs.jobType, "notification.push"),
+        ),
+      );
+    expect(jobs).toEqual([]);
   });
 });

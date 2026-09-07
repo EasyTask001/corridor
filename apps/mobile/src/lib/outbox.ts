@@ -57,11 +57,12 @@ export interface OutboxOptions {
   /** Latest known connectivity, from NetInfo on a device. */
   isOnline: () => boolean;
   /**
-   * auth.users.id of the signed-in driver, or null when nobody is. The queue is
-   * stored under a per-user key so that on a shared handset one driver's
-   * unsent mutations can never be replayed with another driver's token.
+   * Who the queue currently belongs to. The queue is stored under a per-user key
+   * so that on a shared handset one driver's unsent mutations can never be
+   * replayed with another driver's token, and it stays *unresolved* until the
+   * stored session has actually been read — see `OutboxScope`.
    */
-  scope?: () => string | null;
+  scope?: () => OutboxScope;
   /** Entries are discarded after this many failed replays (a poison payload must not wedge the queue). */
   maxAttempts?: number;
   now?: () => Date;
@@ -83,12 +84,27 @@ const OUTBOX_KEY_PREFIX = "corridor.outbox.v1";
 export const OUTBOX_MAX_ATTEMPTS = 5;
 
 /**
- * Storage key for one user's queue. A signed-out app still has a key so a
- * mutation is never silently dropped, but it is a different one, so anonymous
- * work never replays as a signed-in driver either.
+ * Three distinct states, because two of them are easy to confuse and the
+ * confusion is a bug:
+ *
+ *  - `unresolved` — the stored session has not been read yet. There is no
+ *    correct key, so the queue must not be read, written or replayed at all.
+ *    Anything else would silently target the wrong user's queue on launch.
+ *  - `signed-out` — we know nobody is signed in. Its own key, so work queued
+ *    while signed out never replays as a signed-in driver.
+ *  - `user` — the signed-in driver's own queue.
  */
-export function outboxKeyFor(userId: string | null): string {
-  return `${OUTBOX_KEY_PREFIX}.${userId ?? "anonymous"}`;
+export type OutboxScope =
+  { state: "unresolved" } | { state: "signed-out" } | { state: "user"; userId: string };
+
+export const UNRESOLVED_SCOPE: OutboxScope = { state: "unresolved" };
+export const SIGNED_OUT_SCOPE: OutboxScope = { state: "signed-out" };
+export const userScope = (userId: string): OutboxScope => ({ state: "user", userId });
+
+/** Storage key for a scope, or `null` while the session is still unknown. */
+export function outboxKeyFor(scope: OutboxScope): string | null {
+  if (scope.state === "unresolved") return null;
+  return `${OUTBOX_KEY_PREFIX}.${scope.state === "user" ? scope.userId : "anonymous"}`;
 }
 
 /** Validate against the domain schema for `op`. Returns the parsed input or the reason it failed. */
@@ -107,6 +123,14 @@ export function validateOutboxInput<K extends OutboxOperation>(
       };
 }
 
+/** Thrown when something tries to queue work before we know whose queue it is. */
+export class OutboxScopeError extends Error {
+  constructor() {
+    super("The outbox has no user scope yet — the stored session is still being read");
+    this.name = "OutboxScopeError";
+  }
+}
+
 export class OutboxValidationError extends Error {
   constructor(
     readonly op: string,
@@ -121,7 +145,7 @@ export class Outbox {
   private readonly storage: OutboxStorage;
   private readonly send: OutboxSend;
   private readonly isOnline: () => boolean;
-  private readonly scope: () => string | null;
+  private readonly scope: () => OutboxScope;
   private readonly maxAttempts: number;
   private readonly now: () => Date;
   private readonly newId: () => string;
@@ -133,7 +157,7 @@ export class Outbox {
     this.storage = options.storage;
     this.send = options.send;
     this.isOnline = options.isOnline;
-    this.scope = options.scope ?? (() => null);
+    this.scope = options.scope ?? (() => SIGNED_OUT_SCOPE);
     this.maxAttempts = options.maxAttempts ?? OUTBOX_MAX_ATTEMPTS;
     this.now = options.now ?? (() => new Date());
     this.newId = options.newId ?? (() => crypto.randomUUID());
@@ -142,6 +166,8 @@ export class Outbox {
 
   /** Queue a mutation. Throws `OutboxValidationError` rather than persisting something the API would reject. */
   async enqueue<K extends OutboxOperation>(op: K, input: OutboxInput<K>): Promise<OutboxEntry> {
+    // Refuse rather than write to a key we would later fail to find.
+    if (!this.resolved()) throw new OutboxScopeError();
     const checked = validateOutboxInput(op, input);
     if (!checked.ok) throw new OutboxValidationError(op, checked.error);
     const entry: OutboxEntry = {
@@ -170,6 +196,7 @@ export class Outbox {
   /** Drop everything queued for the current scope. Returns how many were discarded. */
   async clear(): Promise<number> {
     return this.serialise(async () => {
+      if (!this.resolved()) return 0;
       const entries = await this.read();
       await this.write([]);
       return entries.length;
@@ -196,6 +223,9 @@ export class Outbox {
    */
   flush(): Promise<FlushResult> {
     return this.serialise(async () => {
+      // A launch-time flush must never run before the session is known: it would
+      // replay against the wrong key and leave the real queue untouched.
+      if (!this.resolved()) return { sent: 0, discarded: 0, remaining: 0, interrupted: true };
       const entries = await this.read();
       if (entries.length === 0 || !this.isOnline()) {
         return { sent: 0, discarded: 0, remaining: entries.length, interrupted: !this.isOnline() };
@@ -256,13 +286,20 @@ export class Outbox {
     return next;
   }
 
-  /** The storage key for whoever is signed in right now. */
-  private key(): string {
+  /** True once the stored session has been read and the key is knowable. */
+  private resolved(): boolean {
+    return this.scope().state !== "unresolved";
+  }
+
+  /** The storage key for whoever is signed in right now, or null if unknown. */
+  private key(): string | null {
     return outboxKeyFor(this.scope());
   }
 
   private async read(): Promise<OutboxEntry[]> {
-    const raw = await this.storage.getItem(this.key());
+    const key = this.key();
+    if (key === null) return [];
+    const raw = await this.storage.getItem(key);
     if (!raw) return [];
     try {
       const parsed: unknown = JSON.parse(raw);
@@ -275,7 +312,9 @@ export class Outbox {
   }
 
   private async write(entries: OutboxEntry[]): Promise<void> {
-    await this.storage.setItem(this.key(), JSON.stringify(entries));
+    const key = this.key();
+    if (key === null) return;
+    await this.storage.setItem(key, JSON.stringify(entries));
     this.onChange?.(entries);
   }
 }

@@ -34,11 +34,14 @@ vi.mock("../services/risk", async (importOriginal) => ({
 }));
 
 // The `movement.assigned` delivery itself is covered end to end in
-// notify-assigned.integration.test.ts; here we only prove the wiring.
-const notifyDriverAssigned = vi.fn();
+// notifications.integration.test.ts; here we only prove the wiring and, more
+// importantly, that delivery happens *after* the transaction commits.
+const resolveDriverAssignment = vi.fn();
+const notifyUser = vi.fn();
 vi.mock("../services/notifications", async (importOriginal) => ({
   ...(await importOriginal<typeof NotificationsModule>()),
-  notifyDriverAssigned: (...args: unknown[]) => notifyDriverAssigned(...args),
+  resolveDriverAssignment: (...args: unknown[]) => resolveDriverAssignment(...args),
+  notifyUser: (...args: unknown[]) => notifyUser(...args),
 }));
 
 const { movementRouter } = await import("./movement");
@@ -183,21 +186,28 @@ const caller = (options: MockContextOptions = {}) =>
 beforeEach(() => {
   writeAudit.mockReset();
   syncMovementRiskAlerts.mockReset().mockResolvedValue({ created: 0, resolved: 0 });
-  notifyDriverAssigned.mockReset().mockResolvedValue({ notified: 0, emailed: 0, pushed: 0 });
+  resolveDriverAssignment.mockReset().mockResolvedValue(null);
+  notifyUser.mockReset().mockResolvedValue({ notified: 1, emailed: 0, pushed: 0 });
 });
 
 describe("movement.update", () => {
+  const ASSIGNMENT = {
+    orgId: TEST_ORG_ID,
+    userId: "driver-user",
+    eventType: "movement.assigned" as const,
+    title: "You are on ACE-26-00042",
+  };
   const rowsWithDriver = (driverId: string | null) => ({
     movements: [movementRow({ driverId })],
     drivers: [{ id: DRIVER_ID, organizationId: TEST_ORG_ID, userId: "driver-user" }],
   });
 
-  it("notifies the driver when one is assigned", async () => {
+  it("resolves the assignment inside the transaction when a driver is assigned", async () => {
     const { caller: api } = caller({ rows: rowsWithDriver(null) });
     await api.update({ id: MOVEMENT_ID, driverId: DRIVER_ID });
 
-    expect(notifyDriverAssigned).toHaveBeenCalledTimes(1);
-    expect(notifyDriverAssigned.mock.calls[0]![2]).toMatchObject({
+    expect(resolveDriverAssignment).toHaveBeenCalledTimes(1);
+    expect(resolveDriverAssignment.mock.calls[0]![1]).toMatchObject({
       orgId: TEST_ORG_ID,
       driverId: DRIVER_ID,
       movementId: MOVEMENT_ID,
@@ -206,22 +216,55 @@ describe("movement.update", () => {
     });
   });
 
+  /**
+   * The reason the two halves are split: delivery needs a service-role
+   * connection, and taking one while the caller's RLS transaction is still open
+   * holds two connections from the same pool per request.
+   */
+  it("delivers only after the caller's transaction has committed", async () => {
+    const order: string[] = [];
+    resolveDriverAssignment.mockImplementation(async () => {
+      order.push("resolve");
+      return ASSIGNMENT;
+    });
+    notifyUser.mockImplementation(async () => {
+      order.push("notify");
+      return { notified: 1, emailed: 0, pushed: 0 };
+    });
+    const { caller: api } = caller({
+      rows: rowsWithDriver(null),
+      onCommit: () => order.push("commit"),
+    });
+
+    await api.update({ id: MOVEMENT_ID, driverId: DRIVER_ID });
+
+    expect(order).toEqual(["resolve", "commit", "notify"]);
+    expect(notifyUser).toHaveBeenCalledWith(expect.anything(), ASSIGNMENT);
+  });
+
+  it("sends nothing when the assignment resolves to no recipient", async () => {
+    resolveDriverAssignment.mockResolvedValue(null);
+    const { caller: api } = caller({ rows: rowsWithDriver(null) });
+    await api.update({ id: MOVEMENT_ID, driverId: DRIVER_ID });
+    expect(notifyUser).not.toHaveBeenCalled();
+  });
+
   it("stays quiet when the driver did not change", async () => {
     const { caller: api } = caller({ rows: rowsWithDriver(DRIVER_ID) });
     await api.update({ id: MOVEMENT_ID, driverId: DRIVER_ID });
-    expect(notifyDriverAssigned).not.toHaveBeenCalled();
+    expect(resolveDriverAssignment).not.toHaveBeenCalled();
   });
 
   it("stays quiet for a patch that does not touch the driver", async () => {
     const { caller: api } = caller({ rows: rowsWithDriver(null) });
     await api.update({ id: MOVEMENT_ID, tripNumber: "TRIP-9" });
-    expect(notifyDriverAssigned).not.toHaveBeenCalled();
+    expect(resolveDriverAssignment).not.toHaveBeenCalled();
   });
 
   it("stays quiet when the driver is unassigned", async () => {
     const { caller: api } = caller({ rows: rowsWithDriver(DRIVER_ID) });
     await api.update({ id: MOVEMENT_ID, driverId: null });
-    expect(notifyDriverAssigned).not.toHaveBeenCalled();
+    expect(resolveDriverAssignment).not.toHaveBeenCalled();
   });
 });
 

@@ -10,7 +10,12 @@ import {
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import { setActiveOrganizationId, trpc } from "./trpc";
-import { clearOutboxForSignOut, setOutboxScope, startOutboxSync } from "./outbox-client";
+import {
+  clearOutboxForSignOut,
+  resetOutboxScope,
+  setOutboxScope,
+  startOutboxSync,
+} from "./outbox-client";
 import { registerForPushNotifications } from "./push";
 
 interface Membership {
@@ -47,30 +52,42 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [permissions, setPermissions] = useState<string[]>([]);
   const [online, setOnline] = useState(true);
   const [pending, setPending] = useState(0);
+  /** False until the stored session has been read — gates the outbox. */
+  const [scopeReady, setScopeReady] = useState(false);
 
   useEffect(() => {
-    void supabase.auth.getSession().then(({ data }) => {
-      // Scope the outbox before anything can enqueue against it.
-      setOutboxScope(data.session?.user.id ?? null);
-      setSession(data.session);
-      setLoading(false);
-    });
-    const { data } = supabase.auth.onAuthStateChange((_event, next) => {
+    // Scope the outbox before anything can read, write or replay it.
+    const adopt = (next: Session | null) => {
       setOutboxScope(next?.user.id ?? null);
       setSession(next);
+      setScopeReady(true);
       setLoading(false);
-    });
-    return () => data.subscription.unsubscribe();
+    };
+    void supabase.auth.getSession().then(({ data }) => adopt(data.session));
+    const { data } = supabase.auth.onAuthStateChange((_event, next) => adopt(next));
+    return () => {
+      data.subscription.unsubscribe();
+      resetOutboxScope();
+    };
   }, []);
 
-  useEffect(
-    () =>
-      startOutboxSync(({ online: isOnline, pending: queued }) => {
-        setOnline(isOnline);
-        setPending(queued);
-      }),
-    [],
-  );
+  /**
+   * Connectivity tracking and the launch-time replay start only once the scope
+   * is known, and are re-armed on every sign-in/sign-out, so the first flush
+   * always targets the signed-in driver's own queue. Signed out there is no
+   * token to replay with, so the sync stays off.
+   */
+  const userId = session?.user.id ?? null;
+  useEffect(() => {
+    if (!scopeReady || !userId) {
+      setPending(0);
+      return;
+    }
+    return startOutboxSync(({ online: isOnline, pending: queued }) => {
+      setOnline(isOnline);
+      setPending(queued);
+    });
+  }, [scopeReady, userId]);
 
   // Resolve the driver's org once signed in: the header pins every later call
   // to it, and push registration needs an active org to attach the device to.

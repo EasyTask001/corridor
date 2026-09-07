@@ -52,6 +52,14 @@ export async function withRls<T>(
  * Service-role transaction: bypasses RLS (runs as the connection's own role).
  * Callers MUST filter by organization_id explicitly; cross-tenant-leak tests
  * cover every such path.
+ *
+ * NEVER call this from inside a `withRls` callback (or any other open
+ * transaction on the same pool). It takes a SECOND connection while the first
+ * is still held, so under load every outer transaction ends up waiting for an
+ * inner connection that no one can get and the pool deadlocks against itself.
+ * Work that needs the service role while a user transaction is open must
+ * either run after that transaction resolves, or be enqueued as a background
+ * job for the worker to pick up.
  */
 export async function withServiceRole<T>(
   db: DatabaseClient,

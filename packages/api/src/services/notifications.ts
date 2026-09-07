@@ -12,9 +12,22 @@
  * write a row the acting user has no RLS permission to write, in the same way
  * `writeSystemAudit` does.
  *
- * Push, on both paths, also needs the service role: `push_tokens_for` is granted
- * to `service_role` only (migration 0015), because a push token is a bearer
- * capability and must not be readable by any authenticated caller.
+ * ## Why push is never sent inline
+ *
+ * `push_tokens_for` is EXECUTE-granted to `service_role` only (migration 0015),
+ * because a push token is a bearer capability. Reaching it therefore needs a
+ * service-role transaction — and taking one *while the caller's RLS transaction
+ * is still open* would hold two connections from the same pool per request,
+ * which self-deadlocks under load (see the warning on `withServiceRole`).
+ *
+ * So neither path ever nests:
+ *
+ *  - `notifyOrganization` runs inside the caller's transaction and merely
+ *    **enqueues** a `notification.push` job with the ids of the rows it just
+ *    created. The worker delivers them under its own service role. The job
+ *    commits with the caller, so a rolled-back mutation pushes nothing.
+ *  - `notifyUser` opens the only transaction in play, and callers MUST invoke it
+ *    *after* their own transaction has resolved (see `movement.update`).
  */
 import {
   NOTIFICATION_EVENT_TYPES,
@@ -26,7 +39,7 @@ import { sendEmail, sendExpoPush, type ExpoPushMessage } from "@corridor/integra
 import {
   and,
   eq,
-  getDb,
+  inArray,
   schema,
   sql,
   withServiceRole,
@@ -34,6 +47,7 @@ import {
   type RlsTransaction,
 } from "@corridor/db";
 import { logIntegrationEvent } from "./customs";
+import { enqueueJob } from "./jobs";
 
 const { authUsers, drivers, notificationRules, notifications } = schema;
 
@@ -68,12 +82,7 @@ type PushTokenRow = Record<string, unknown> & {
  * 'email' or 'push', sends (or mock-sends) it — logged as an integration_event
  * the same way customs/Stripe calls are, for one consistent audit trail.
  */
-export async function notifyOrganization(
-  tx: RlsTransaction,
-  input: NotifyInput,
-  /** Service-role connection for the push step; defaults to the pooled client. */
-  db?: DatabaseClient,
-) {
+export async function notifyOrganization(tx: RlsTransaction, input: NotifyInput) {
   const permission = NOTIFICATION_EVENT_TYPES[input.eventType].permission;
   const rows = await tx.execute<NotifiedRow>(sql`
     select * from public.notify_organization(
@@ -86,22 +95,33 @@ export async function notifyOrganization(
     await deliverEmail(tx, input, r.email);
   }
 
-  const pushed = await deliverPush(
-    db,
-    input,
-    rows.filter((r) => r.channel?.includes("push")).map((r) => r.user_id),
-  );
+  // Push is handed to the worker rather than sent here: it needs the service
+  // role, and this code runs inside the caller's RLS transaction.
+  const pushTargets = rows.filter((r) => r.channel?.includes("push"));
+  if (pushTargets.length > 0) {
+    await enqueueJob(tx, {
+      orgId: input.orgId,
+      jobType: "notification.push",
+      // Only the row ids travel: the worker re-reads title, body and recipient
+      // from `notifications`, so a forged job cannot push arbitrary text.
+      payload: { notificationIds: pushTargets.map((r) => r.notification_id) },
+      maxAttempts: 2,
+    });
+  }
 
-  return { notified: rows.length, emailed: emailTargets.length, pushed };
+  return { notified: rows.length, emailed: emailTargets.length, queuedPush: pushTargets.length };
 }
 
 /**
  * Deliver a targeted event to one member. Returns `{ notified: 0 }` when the
  * recipient turned the event off; an unknown user id simply produces nothing.
  *
- * Everything runs under the service role, so callers MUST have established that
- * `userId` belongs to `orgId` — every caller here resolves the recipient from an
- * org-scoped row it already read under RLS.
+ * Everything runs under the service role, so:
+ *  - callers MUST have established that `userId` belongs to `orgId` — every
+ *    caller here resolves the recipient from an org-scoped row it already read
+ *    under RLS; and
+ *  - callers MUST NOT be inside their own transaction when they call it, or the
+ *    request holds two pooled connections at once.
  */
 export async function notifyUser(db: DatabaseClient, input: NotifyUserInput) {
   return withServiceRole(db, async (tx) => {
@@ -147,22 +167,27 @@ export async function notifyUser(db: DatabaseClient, input: NotifyUserInput) {
       }
     }
 
-    const pushed = channel.includes("push") ? await deliverPushInTx(tx, input, [input.userId]) : 0;
+    const pushed = channel.includes("push") ? await deliverPushInTx(tx, input) : 0;
 
     return { notified: 1, emailed, pushed };
   });
 }
 
 /**
- * `movement.assigned`: tell the driver a dispatcher just put them on a load.
+ * `movement.assigned`, phase 1 — decide, inside the caller's transaction,
+ * whether a notification is owed and to whom. Reads `drivers` under the
+ * caller's RLS, so it can only ever resolve a driver they can already see.
  *
- * Silent when the driver record has no linked auth user (a paper-only driver),
- * and silent when the driver *is* the acting user — nobody needs a notification
+ * Returns `null` when the driver record has no linked auth user (a paper-only
+ * driver) or when the driver *is* the acting user — nobody needs a notification
  * about their own edit.
+ *
+ * Phase 2 is `notifyUser`, which the caller runs once its transaction has
+ * committed. Splitting the two is what keeps a service-role connection from
+ * being taken while an RLS transaction is open.
  */
-export async function notifyDriverAssigned(
+export async function resolveDriverAssignment(
   tx: RlsTransaction,
-  db: DatabaseClient,
   input: {
     orgId: string;
     driverId: string;
@@ -170,24 +195,84 @@ export async function notifyDriverAssigned(
     movementNumber: string;
     actorUserId: string | null;
   },
-) {
+): Promise<NotifyUserInput | null> {
   const [driver] = await tx
     .select({ userId: drivers.userId })
     .from(drivers)
     .where(and(eq(drivers.id, input.driverId), eq(drivers.organizationId, input.orgId)))
     .limit(1);
-  if (!driver?.userId || driver.userId === input.actorUserId) {
-    return { notified: 0, emailed: 0, pushed: 0 };
-  }
+  if (!driver?.userId || driver.userId === input.actorUserId) return null;
 
-  return notifyUser(db, {
+  return {
     orgId: input.orgId,
     userId: driver.userId,
     eventType: "movement.assigned",
     title: `You are on ${input.movementNumber}`,
     body: "A dispatcher assigned this load to you.",
     linkPath: `/movements/${input.movementId}`,
+  };
+}
+
+/**
+ * Worker body for the `notification.push` job. Re-reads the rows the fan-out
+ * created — the job payload carries nothing but their ids — so the message text
+ * and the recipient always come from the database, never from the job.
+ *
+ * Already running under the service role (the worker's own transaction), which
+ * is what makes `push_tokens_for` reachable.
+ */
+export async function deliverQueuedPush(
+  tx: RlsTransaction,
+  orgId: string,
+  notificationIds: string[],
+) {
+  if (notificationIds.length === 0) return { pushed: 0, devices: 0 };
+
+  const rows = await tx
+    .select({
+      userId: notifications.userId,
+      type: notifications.type,
+      title: notifications.title,
+      body: notifications.body,
+      linkPath: notifications.linkPath,
+      channel: notifications.channel,
+    })
+    .from(notifications)
+    .where(
+      and(eq(notifications.organizationId, orgId), inArray(notifications.id, notificationIds)),
+    );
+
+  const targets = rows.filter((r) => r.channel?.includes("push"));
+  if (targets.length === 0) return { pushed: 0, devices: 0 };
+
+  const tokensByUser = await pushTokensByUser(tx, orgId, [
+    ...new Set(targets.map((r) => r.userId)),
+  ]);
+  const messages: ExpoPushMessage[] = targets.flatMap((row) =>
+    (tokensByUser.get(row.userId) ?? []).map((to) => ({
+      to,
+      title: row.title,
+      body: row.body ?? "",
+      data: { eventType: row.type, linkPath: row.linkPath },
+    })),
+  );
+  if (messages.length === 0) return { pushed: 0, devices: 0 };
+
+  const eventType = targets[0]!.type;
+  const started = Date.now();
+  const result = await sendExpoPush(messages);
+  await logIntegrationEvent(tx, {
+    orgId,
+    provider: "expo_push",
+    direction: "outbound",
+    operation: `notify:${eventType}`,
+    request: { notifications: targets.length, devices: messages.length },
+    response: { mode: result.mode, sent: result.sent },
+    success: !result.error,
+    error: result.error,
+    durationMs: Date.now() - started,
   });
+  return { pushed: result.sent, devices: messages.length };
 }
 
 // ---------------------------------------------------------------------------
@@ -215,32 +300,38 @@ async function deliverEmail(tx: RlsTransaction, input: NotifyInput, to: string) 
 }
 
 /**
- * Open a service-role transaction for the push step. The caller's transaction
- * cannot be reused: it runs as `authenticated`, and `push_tokens_for` is
- * EXECUTE-granted to `service_role` only so one member can never read another
- * member's handset tokens. The consequence is that the push (and its
- * integration_events row) commits independently of the caller's transaction —
- * acceptable, because an HTTP send cannot be rolled back either way.
+ * Recipient → their registered Expo tokens, via the `service_role`-only
+ * `push_tokens_for`. The transaction handed in must already hold the service
+ * role: either the worker's, or `notifyUser`'s own — never one nested inside a
+ * caller's RLS transaction.
  */
-async function deliverPush(db: DatabaseClient | undefined, input: NotifyInput, userIds: string[]) {
-  if (userIds.length === 0) return 0;
-  const client = db ?? getDb();
-  return withServiceRole(client, (tx) => deliverPushInTx(tx, input, userIds));
-}
-
-/** The push body itself, on a transaction that already holds the service role. */
-async function deliverPushInTx(tx: RlsTransaction, input: NotifyInput, userIds: string[]) {
+async function pushTokensByUser(
+  tx: RlsTransaction,
+  orgId: string,
+  userIds: string[],
+): Promise<Map<string, string[]>> {
+  const byUser = new Map<string, string[]>();
+  if (userIds.length === 0) return byUser;
   const idList = sql.join(
     userIds.map((id) => sql`${id}::uuid`),
     sql`, `,
   );
   const devices = await tx.execute<PushTokenRow>(sql`
-    select * from public.push_tokens_for(${input.orgId}::uuid, array[${idList}])
+    select * from public.push_tokens_for(${orgId}::uuid, array[${idList}])
   `);
-  if (devices.length === 0) return 0;
+  for (const device of devices) {
+    byUser.set(device.user_id, [...(byUser.get(device.user_id) ?? []), device.expo_push_token]);
+  }
+  return byUser;
+}
 
-  const messages: ExpoPushMessage[] = devices.map((d) => ({
-    to: d.expo_push_token,
+/** The push body for a single targeted event, on a service-role transaction. */
+async function deliverPushInTx(tx: RlsTransaction, input: NotifyUserInput) {
+  const tokens = (await pushTokensByUser(tx, input.orgId, [input.userId])).get(input.userId) ?? [];
+  if (tokens.length === 0) return 0;
+
+  const messages: ExpoPushMessage[] = tokens.map((to) => ({
+    to,
     title: input.title,
     body: input.body ?? "",
     data: { eventType: input.eventType, linkPath: input.linkPath ?? null },
@@ -253,11 +344,11 @@ async function deliverPushInTx(tx: RlsTransaction, input: NotifyInput, userIds: 
     provider: "expo_push",
     direction: "outbound",
     operation: `notify:${input.eventType}`,
-    request: { recipients: userIds.length, devices: devices.length, title: input.title },
+    request: { recipients: 1, devices: messages.length, title: input.title },
     response: { mode: result.mode, sent: result.sent },
     success: !result.error,
     error: result.error,
     durationMs: Date.now() - started,
   });
-  return devices.length;
+  return messages.length;
 }

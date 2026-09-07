@@ -75,6 +75,11 @@ unsent mutations can never replay under the next driver's token. Sign-out
 additionally drains what it can and then clears the queue unconditionally,
 logging a warning with the count of anything discarded.
 
+The scope has a third state, `unresolved`, held until the stored Supabase
+session has actually been read. While unresolved the outbox refuses to enqueue
+and no-ops on flush and clear, and connectivity tracking has not started yet —
+so the launch-time replay can only ever run once it knows whose queue it is.
+
 **Uploads (`src/lib/upload.ts`).** Reserve + sign and the direct PUT need a live
 connection by nature, so a capture with no signal fails fast rather than
 pretending it was stored; only `documents.finalizeUpload` goes through the
@@ -102,10 +107,16 @@ The event drivers actually receive is **`movement.assigned`** — emitted by
 delivered only to the auth user linked to that driver (`drivers.user_id`),
 never to the dispatcher who made the change, and defaulting to `in_app + push`.
 Because it is targeted at one recipient rather than fanned out, it goes through
-`notifyUser` in a service-role transaction rather than `notify_organization`.
+`notifyUser` in a service-role transaction rather than `notify_organization` —
+dispatched by the router _after_ its own transaction commits.
 
 Push tokens are treated as bearer capabilities: `push_tokens_for` (migration 0015) is `EXECUTE`-granted to `service_role` only, so no authenticated caller —
-in this org or any other — can read another member's handset tokens.
+in this org or any other — can read another member's handset tokens. Reaching
+the service role while a user's RLS transaction is open would hold two pooled
+connections per request, so nothing pushes inline: the org fan-out enqueues a
+`notification.push` job (migration 0016) for the worker to deliver, and
+`movement.assigned` is dispatched by the router only after its transaction has
+committed.
 
 ## Secrets
 

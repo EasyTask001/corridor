@@ -295,6 +295,8 @@ export interface MockContextOptions extends FakeDbOptions {
   /** Drop the active organization (to exercise the `orgProcedure` guard). */
   withoutOrg?: boolean;
   supabase?: Partial<SupabaseClient>;
+  /** Called when an `ctx.rls(...)` callback resolves — i.e. at "commit". */
+  onCommit?: () => void;
 }
 
 export function createTestSession(options: MockContextOptions = {}): Session {
@@ -335,7 +337,14 @@ export function createMockContext(options: MockContextOptions = {}): MockContext
     session,
     supabase: (options.supabase ?? {}) as SupabaseClient,
     db: {} as Context["db"],
-    rls: (fn) => fn(db.tx),
+    // Modelled as a real transaction boundary: `onCommit` fires when the
+    // callback resolves, which is what lets a test assert that post-commit work
+    // (notification delivery, cache invalidation) really happens afterwards.
+    rls: async (fn) => {
+      const result = await fn(db.tx);
+      options.onCommit?.();
+      return result;
+    },
   };
   return { ctx, db, session, orgId: options.orgId ?? TEST_ORG_ID };
 }
