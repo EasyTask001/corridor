@@ -17,6 +17,7 @@ import {
 import type { MovementSuggestionPayload } from "@corridor/domain";
 import { authUsers, organizations } from "./core";
 import { sourceDocuments } from "./documents";
+import { ports } from "./reference";
 import { drivers, partners, trailers, trucks } from "./registry";
 
 /**
@@ -60,7 +61,11 @@ export const movements = pgTable(
     movementNumber: text("movement_number").notNull(),
     tripNumber: text("trip_number"),
     status: text("status", { enum: MOVEMENT_STATUSES }).notNull().default("draft"),
-    crossingPoint: jsonb("crossing_point").$type<{ code: string; name?: string }>(),
+    portId: uuid("port_id").references(() => ports.id),
+    /** Snapshot of the org's carrier code at the time it was set — not an FK,
+     * see migration 0018: the control number is built from this text and
+     * must not move if the org edits its codes later. */
+    carrierCode: text("carrier_code"),
     scheduledCrossingAt: timestamp("scheduled_crossing_at", { withTimezone: true }),
     driverId: uuid("driver_id").references(() => drivers.id, { onDelete: "restrict" }),
     truckId: uuid("truck_id").references(() => trucks.id, { onDelete: "restrict" }),
@@ -91,6 +96,9 @@ export const movements = pgTable(
     index("movements_trailer_idx")
       .on(t.trailerId)
       .where(sql`${t.trailerId} is not null`),
+    index("movements_port_idx")
+      .on(t.portId)
+      .where(sql`${t.portId} is not null`),
     unique("movements_organization_id_movement_number_key").on(t.organizationId, t.movementNumber),
   ],
 );

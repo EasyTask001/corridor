@@ -47,6 +47,7 @@ export const organizations = pgTable("organizations", {
   canadianCarrierCode: text("canadian_carrier_code"),
   usDotNumber: text("us_dot_number"),
   mcNumber: text("mc_number"),
+  filerCode: text("filer_code"),
   billingEmail: citext("billing_email"),
   stripeCustomerId: text("stripe_customer_id").unique(),
   subscriptionPlan: text("subscription_plan", {

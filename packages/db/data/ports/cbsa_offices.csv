@@ -1,0 +1,16 @@
+# source: CBSA designated commercial land-border office codes. This is a
+# high-confidence subset, not the full CBSA office list. Validate against the
+# current published CBSA office list before relying on this for production
+# filings.
+#
+# The six codes also inline-seeded by migration 0018 (0453, 0440, 0410, 0427,
+# 0813, 0351) keep the exact same `name` here as that migration, since this
+# importer upserts by (regime, kind, code) and would otherwise overwrite them.
+regime,kind,code,name,state_province,country,parent_code
+ACI,cbsa_office,0351,Lacolle — Route 15,QC,CA,
+ACI,cbsa_office,0410,Fort Erie — Peace Bridge,ON,CA,
+ACI,cbsa_office,0427,Queenston — Lewiston Bridge,ON,CA,
+ACI,cbsa_office,0440,Sarnia — Blue Water Bridge,ON,CA,
+ACI,cbsa_office,0453,Windsor — Ambassador Bridge,ON,CA,
+ACI,cbsa_office,0502,Emerson,MB,CA,
+ACI,cbsa_office,0813,Pacific Highway,BC,CA,

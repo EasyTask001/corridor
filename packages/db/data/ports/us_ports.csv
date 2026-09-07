@@ -1,0 +1,22 @@
+# source: CBP Schedule D (19 CFR) port-of-entry codes. This is a high-confidence
+# subset covering the best-documented Canada-border land crossings, not the
+# full Schedule D list (which also covers airports and seaports Corridor's
+# truck-manifest workflow never files against). Validate against the current
+# published CBP Schedule D list before relying on this for production filings.
+#
+# The six codes also inline-seeded by migration 0018 (3801, 3802, 0901, 0712,
+# 3004, 0209) keep the exact same `name` here as that migration, since this
+# importer upserts by (regime, kind, code) and would otherwise overwrite them.
+regime,kind,code,name,state_province,country,parent_code
+ACE,port_of_entry,0101,Portland,ME,US,
+ACE,port_of_entry,0209,Champlain — Rouses Point,NY,US,
+ACE,port_of_entry,0712,Lewiston — Queenston Bridge,NY,US,
+ACE,port_of_entry,0901,Buffalo — Peace Bridge,NY,US,
+ACE,port_of_entry,3001,Sumas,WA,US,
+ACE,port_of_entry,3004,Blaine — Pacific Highway,WA,US,
+ACE,port_of_entry,3301,Sweetgrass,MT,US,
+ACE,port_of_entry,3401,Pembina,ND,US,
+ACE,port_of_entry,3402,Neche,ND,US,
+ACE,port_of_entry,3701,International Falls,MN,US,
+ACE,port_of_entry,3801,Detroit — Ambassador Bridge,MI,US,
+ACE,port_of_entry,3802,Port Huron — Blue Water Bridge,MI,US,

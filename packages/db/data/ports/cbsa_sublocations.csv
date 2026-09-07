@@ -1,0 +1,8 @@
+# source: CBSA sublocation codes identify a specific facility under an office,
+# not the office itself — they are not part of the published office list.
+# These are illustrative starter rows for the demo tenant's offices (Windsor,
+# Fort Erie); replace with your own facility's sublocation code before
+# production use.
+regime,kind,code,name,state_province,country,parent_code
+ACI,sublocation,045301,AMBASSADOR BRIDGE COMMERCIAL,ON,CA,0453
+ACI,sublocation,041001,PEACE BRIDGE COMMERCIAL,ON,CA,0410
