@@ -12,6 +12,7 @@ import {
 } from "@corridor/domain";
 import { useTRPC } from "@/lib/trpc/client";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { useRealtimeClient } from "@/lib/supabase/use-realtime-client";
 
 type List = inferRouterOutputs<AppRouter>["documents"]["list"];
 
@@ -68,19 +69,23 @@ export function DocumentsPanel({
   const { data } = useQuery({
     ...listOpts,
     initialData: initial,
+    // Realtime below is the live path. This is reconciliation only — it catches
+    // a dropped socket or a throttled background tab while the worker is
+    // extracting, and stops entirely once nothing is in flight.
     refetchInterval: (q) =>
       q.state.data?.rows.some(
         (r) => r.uploadStatus === "uploaded" || r.uploadStatus === "processing",
       )
-        ? 2500
+        ? 15_000
         : false,
   });
   const invalidate = () => qc.invalidateQueries({ queryKey: trpc.documents.pathKey() });
 
   // Realtime: flip rows as the worker updates them (polling above reconciles).
+  const realtime = useRealtimeClient();
   useEffect(() => {
-    const supabase = createSupabaseBrowserClient();
-    const ch = supabase
+    if (!realtime) return;
+    const ch = realtime
       .channel("documents")
       .on(
         "postgres_changes",
@@ -89,10 +94,10 @@ export function DocumentsPanel({
       )
       .subscribe();
     return () => {
-      void supabase.removeChannel(ch);
+      void realtime.removeChannel(ch);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [realtime]);
 
   const getUploadUrl = useMutation(trpc.documents.getUploadUrl.mutationOptions());
   const finalize = useMutation(

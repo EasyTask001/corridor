@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@corridor/api";
 import { useTRPC } from "@/lib/trpc/client";
+import { markedRead } from "@/components/notifications/mark-read";
 
 type List = inferRouterOutputs<AppRouter>["notifications"]["list"];
 
@@ -20,11 +21,47 @@ export function NotificationsList({ initial }: { initial: List }) {
   });
 
   const invalidate = () => qc.invalidateQueries({ queryKey: trpc.notifications.pathKey() });
+
+  /**
+   * Optimistic mark-read: the row must stop looking unread the instant it is
+   * clicked (often while the click also navigates away). `onSettled`
+   * invalidation reconciles with the server's `read_at`.
+   */
+  const snapshot = async () => {
+    await qc.cancelQueries({ queryKey: listOpts.queryKey });
+    return { list: qc.getQueryData(listOpts.queryKey) };
+  };
+  const rollback = (ctx?: { list?: List }) => {
+    if (ctx?.list !== undefined) qc.setQueryData(listOpts.queryKey, ctx.list);
+  };
+  const patchRows = (fn: (rows: List["rows"]) => List["rows"]) =>
+    qc.setQueryData(listOpts.queryKey, (old) => (old ? { ...old, rows: fn(old.rows) } : undefined));
+
   const markRead = useMutation(
-    trpc.notifications.markRead.mutationOptions({ onSuccess: invalidate }),
+    trpc.notifications.markRead.mutationOptions({
+      onMutate: async ({ id }) => {
+        const ctx = await snapshot();
+        patchRows((rows) =>
+          unreadOnly
+            ? rows.filter((r) => r.id !== id)
+            : rows.map((r) => (r.id === id ? markedRead(r) : r)),
+        );
+        return ctx;
+      },
+      onError: (_e, _v, ctx) => rollback(ctx),
+      onSettled: invalidate,
+    }),
   );
   const markAllRead = useMutation(
-    trpc.notifications.markAllRead.mutationOptions({ onSuccess: invalidate }),
+    trpc.notifications.markAllRead.mutationOptions({
+      onMutate: async () => {
+        const ctx = await snapshot();
+        patchRows((rows) => (unreadOnly ? [] : rows.map(markedRead)));
+        return ctx;
+      },
+      onError: (_e, _v, ctx) => rollback(ctx),
+      onSettled: invalidate,
+    }),
   );
 
   return (

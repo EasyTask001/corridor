@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@corridor/api";
 import { useTRPC } from "@/lib/trpc/client";
@@ -45,13 +45,43 @@ export function Timeline({
   onChanged: () => void;
 }) {
   const trpc = useTRPC();
+  const qc = useQueryClient();
   const [body, setBody] = useState("");
+  const getKey = trpc.movement.get.queryKey({ id: movementId });
+
+  /**
+   * The note shows up in the timeline as soon as it is posted — the round trip
+   * also enqueues an embedding job, so waiting for it is a visible stall. The
+   * placeholder carries a client-side id and no actor name; `onChanged()` in
+   * `onSettled` refetches and replaces it with the server's row.
+   */
   const addNote = useMutation(
     trpc.movement.addNote.mutationOptions({
-      onSuccess: () => {
+      onMutate: async (vars) => {
+        await qc.cancelQueries({ queryKey: getKey });
+        const previous = qc.getQueryData(getKey);
+        const optimistic: Event = {
+          id: `optimistic-${crypto.randomUUID()}`,
+          eventType: "note",
+          fromStatus: null,
+          toStatus: null,
+          payload: { body: vars.body },
+          actorType: "user",
+          actorId: null,
+          actorName: null,
+          occurredAt: new Date(),
+        };
+        qc.setQueryData(getKey, (old) =>
+          old ? { ...old, events: [optimistic, ...old.events] } : undefined,
+        );
         setBody("");
-        onChanged();
+        return { previous, body: vars.body };
       },
+      onError: (_e, _v, ctx) => {
+        if (ctx?.previous !== undefined) qc.setQueryData(getKey, ctx.previous);
+        if (ctx?.body) setBody(ctx.body); // give the text back to the user
+      },
+      onSettled: onChanged,
     }),
   );
 

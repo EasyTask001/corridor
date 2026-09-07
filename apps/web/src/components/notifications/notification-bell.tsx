@@ -3,8 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { inferRouterOutputs } from "@trpc/server";
+import type { AppRouter } from "@corridor/api";
 import { useTRPC } from "@/lib/trpc/client";
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { useRealtimeClient } from "@/lib/supabase/use-realtime-client";
+import { markedRead } from "./mark-read";
+
+type List = inferRouterOutputs<AppRouter>["notifications"]["list"];
 
 function timeAgo(date: string | Date) {
   const s = Math.max(0, (Date.now() - new Date(date).getTime()) / 1000);
@@ -21,7 +26,9 @@ export function NotificationBell() {
   const ref = useRef<HTMLDivElement>(null);
 
   const unreadOpts = trpc.notifications.unreadCount.queryOptions();
-  const { data: unread = 0 } = useQuery({ ...unreadOpts, refetchInterval: 30_000 });
+  // Realtime delivers the INSERT; this is the reconciliation floor for a
+  // dropped socket or a tab the browser has been throttling.
+  const { data: unread = 0 } = useQuery({ ...unreadOpts, refetchInterval: 60_000 });
   const listOpts = trpc.notifications.list.queryOptions({
     limit: 10,
     offset: 0,
@@ -33,16 +40,61 @@ export function NotificationBell() {
     qc.invalidateQueries({ queryKey: unreadOpts.queryKey });
     qc.invalidateQueries({ queryKey: trpc.notifications.list.pathKey() });
   };
+
+  /** Snapshot both caches, apply `patch`, and hand back the rollback state. */
+  const optimistic = async (patch: () => void) => {
+    await Promise.all([
+      qc.cancelQueries({ queryKey: unreadOpts.queryKey }),
+      qc.cancelQueries({ queryKey: listOpts.queryKey }),
+    ]);
+    const previous = {
+      unread: qc.getQueryData(unreadOpts.queryKey),
+      list: qc.getQueryData(listOpts.queryKey),
+    };
+    patch();
+    return previous;
+  };
+  const rollback = (ctx?: { unread?: number; list?: List }) => {
+    if (ctx?.unread !== undefined) qc.setQueryData(unreadOpts.queryKey, ctx.unread);
+    if (ctx?.list !== undefined) qc.setQueryData(listOpts.queryKey, ctx.list);
+  };
+
   const markRead = useMutation(
-    trpc.notifications.markRead.mutationOptions({ onSuccess: invalidate }),
+    trpc.notifications.markRead.mutationOptions({
+      onMutate: ({ id }) =>
+        optimistic(() => {
+          const row = qc.getQueryData(listOpts.queryKey)?.rows.find((r) => r.id === id);
+          if (!row || !row.readAt) {
+            qc.setQueryData(unreadOpts.queryKey, (n) => Math.max(0, (n ?? 1) - 1));
+          }
+          qc.setQueryData(listOpts.queryKey, (old) =>
+            old
+              ? { ...old, rows: old.rows.map((r) => (r.id === id ? markedRead(r) : r)) }
+              : undefined,
+          );
+        }),
+      onError: (_e, _v, ctx) => rollback(ctx),
+      onSettled: invalidate,
+    }),
   );
   const markAllRead = useMutation(
-    trpc.notifications.markAllRead.mutationOptions({ onSuccess: invalidate }),
+    trpc.notifications.markAllRead.mutationOptions({
+      onMutate: () =>
+        optimistic(() => {
+          qc.setQueryData(unreadOpts.queryKey, 0);
+          qc.setQueryData(listOpts.queryKey, (old) =>
+            old ? { ...old, rows: old.rows.map(markedRead) } : undefined,
+          );
+        }),
+      onError: (_e, _v, ctx) => rollback(ctx),
+      onSettled: invalidate,
+    }),
   );
 
+  const realtime = useRealtimeClient();
   useEffect(() => {
-    const supabase = createSupabaseBrowserClient();
-    const ch = supabase
+    if (!realtime) return;
+    const ch = realtime
       .channel("notifications")
       .on(
         "postgres_changes",
@@ -51,10 +103,10 @@ export function NotificationBell() {
       )
       .subscribe();
     return () => {
-      void supabase.removeChannel(ch);
+      void realtime.removeChannel(ch);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [realtime]);
 
   useEffect(() => {
     if (!open) return;

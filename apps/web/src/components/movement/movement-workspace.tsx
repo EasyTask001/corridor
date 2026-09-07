@@ -57,17 +57,10 @@ export function MovementWorkspace({
 
   const getOpts = trpc.movement.get.queryOptions({ id });
   const validateOpts = trpc.movement.validate.queryOptions({ id });
-  // Realtime pushes deltas; polling while a manifest is in flight reconciles
-  // anything missed (dropped socket, tab throttling) — the plan's "seeded from
-  // server state, reconciled with realtime" model.
-  const { data: m = initial } = useQuery({
-    ...getOpts,
-    initialData: initial,
-    refetchInterval: (q) => {
-      const s = q.state.data?.status ?? initial.status;
-      return s === "sent" || s === "accepted" || s === "held" ? 4000 : false;
-    },
-  });
+  // Seeded from the server render, then reconciled by Realtime: the socket is
+  // authenticated (see use-realtime-client.ts), and every mutation on this page
+  // invalidates on settle, so the timeline needs no timer of its own.
+  const { data: m = initial } = useQuery({ ...getOpts, initialData: initial });
   const { data: validation = initialValidation } = useQuery({
     ...validateOpts,
     initialData: initialValidation,

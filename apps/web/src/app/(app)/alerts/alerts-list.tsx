@@ -37,7 +37,37 @@ export function AlertsList({ canManage }: { canManage: boolean }) {
     qc.invalidateQueries({ queryKey: trpc.alerts.list.queryKey() });
     qc.invalidateQueries({ queryKey: trpc.alerts.summary.queryKey() });
   };
-  const setStatus = useMutation(trpc.alerts.setStatus.mutationOptions({ onSuccess: invalidate }));
+
+  /**
+   * Acknowledging or resolving is a one-click action on a long list, so it
+   * lands immediately: the row takes its new status and leaves the tab if the
+   * tab no longer covers it. A failed mutation puts the snapshot back and the
+   * `onSettled` invalidation reconciles with the server either way.
+   */
+  const setStatus = useMutation(
+    trpc.alerts.setStatus.mutationOptions({
+      onMutate: async ({ id, status }) => {
+        await qc.cancelQueries({ queryKey: listOpts.queryKey });
+        const previous = qc.getQueryData(listOpts.queryKey);
+        const visible = TABS[tab]!.status;
+        qc.setQueryData(listOpts.queryKey, (old) =>
+          old
+            ? {
+                ...old,
+                rows: old.rows
+                  .map((r) => (r.id === id ? { ...r, status } : r))
+                  .filter((r) => visible.includes(r.status)),
+              }
+            : undefined,
+        );
+        return { previous };
+      },
+      onError: (_e, _v, ctx) => {
+        if (ctx?.previous !== undefined) qc.setQueryData(listOpts.queryKey, ctx.previous);
+      },
+      onSettled: invalidate,
+    }),
+  );
   const rescan = useMutation(trpc.alerts.rescan.mutationOptions({ onSuccess: invalidate }));
 
   const entityLink = (a: NonNullable<typeof data>["rows"][number]) => {

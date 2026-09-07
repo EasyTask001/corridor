@@ -67,7 +67,7 @@ export default async function MovementsPage({
           <p className="text-sm text-ink-500">ACE (US-bound) and ACI (Canada-bound) e-manifests.</p>
         </div>
         {canWrite && (
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             <form action={createMovement}>
               <input type="hidden" name="regime" value="ACE" />
               <button className="btn-primary">New ACE movement</button>
@@ -76,6 +76,9 @@ export default async function MovementsPage({
               <input type="hidden" name="regime" value="ACI" />
               <button className="btn-signal">New ACI movement</button>
             </form>
+            <Link href="/movements/new" className="btn-secondary">
+              New movement…
+            </Link>
           </div>
         )}
       </header>

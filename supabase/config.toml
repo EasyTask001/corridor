@@ -279,6 +279,32 @@ max_frequency = "5s"
 # enabled = true
 # uri = "pg-functions://postgres/auth/before-user-created-hook"
 
+# --- Corridor: Auth → app webhook -------------------------------------------
+# `POST /api/webhooks/supabase-auth` keeps public.user_profiles in step with
+# Auth-side changes (display-name edits, deletes) that the on_auth_user_created
+# trigger in migration 0001 does not cover. It is a *complement* to that
+# trigger, never a replacement: sign-up must not depend on an HTTP hop.
+#
+# Wire it up by pointing an Auth hook at the route and sharing the secret:
+#
+#   [auth.hook.before_user_created]
+#   enabled = true
+#   uri = "http://host.docker.internal:3000/api/webhooks/supabase-auth"
+#   secret = "env(SUPABASE_AUTH_WEBHOOK_SECRET)"
+#
+# (from inside the Auth container, `host.docker.internal` is the Next.js dev
+# server on the host; use the deployed origin in the cloud, where the same
+# hooks live under Authentication → Hooks in the dashboard.)
+#
+# The secret is a Standard Webhooks secret — `whsec_` followed by base64 — and
+# the route verifies `webhook-id` / `webhook-timestamp` / `webhook-signature`
+# over `${id}.${timestamp}.${body}` with a 5-minute replay window. With
+# SUPABASE_AUTH_WEBHOOK_SECRET unset the route answers 503 and processes
+# nothing, so leaving this commented out is a supported configuration.
+#
+# Generate one: `openssl rand -base64 24 | sed 's/^/whsec_/'`
+# -----------------------------------------------------------------------------
+
 # This hook runs before a token is issued and allows you to add additional claims based on the authentication method used.
 # [auth.hook.custom_access_token]
 # enabled = true
