@@ -10,6 +10,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PermissionKey } from "@corridor/domain";
 import type * as AuditModule from "../services/audit";
+import type * as NotificationsModule from "../services/notifications";
 import type * as RiskModule from "../services/risk";
 import {
   TEST_ORG_ID,
@@ -30,6 +31,14 @@ const syncMovementRiskAlerts = vi.fn();
 vi.mock("../services/risk", async (importOriginal) => ({
   ...(await importOriginal<typeof RiskModule>()),
   syncMovementRiskAlerts: (...args: unknown[]) => syncMovementRiskAlerts(...args),
+}));
+
+// The `movement.assigned` delivery itself is covered end to end in
+// notify-assigned.integration.test.ts; here we only prove the wiring.
+const notifyDriverAssigned = vi.fn();
+vi.mock("../services/notifications", async (importOriginal) => ({
+  ...(await importOriginal<typeof NotificationsModule>()),
+  notifyDriverAssigned: (...args: unknown[]) => notifyDriverAssigned(...args),
 }));
 
 const { movementRouter } = await import("./movement");
@@ -174,6 +183,46 @@ const caller = (options: MockContextOptions = {}) =>
 beforeEach(() => {
   writeAudit.mockReset();
   syncMovementRiskAlerts.mockReset().mockResolvedValue({ created: 0, resolved: 0 });
+  notifyDriverAssigned.mockReset().mockResolvedValue({ notified: 0, emailed: 0, pushed: 0 });
+});
+
+describe("movement.update", () => {
+  const rowsWithDriver = (driverId: string | null) => ({
+    movements: [movementRow({ driverId })],
+    drivers: [{ id: DRIVER_ID, organizationId: TEST_ORG_ID, userId: "driver-user" }],
+  });
+
+  it("notifies the driver when one is assigned", async () => {
+    const { caller: api } = caller({ rows: rowsWithDriver(null) });
+    await api.update({ id: MOVEMENT_ID, driverId: DRIVER_ID });
+
+    expect(notifyDriverAssigned).toHaveBeenCalledTimes(1);
+    expect(notifyDriverAssigned.mock.calls[0]![2]).toMatchObject({
+      orgId: TEST_ORG_ID,
+      driverId: DRIVER_ID,
+      movementId: MOVEMENT_ID,
+      movementNumber: "ACE-26-00042",
+      actorUserId: TEST_USER_ID,
+    });
+  });
+
+  it("stays quiet when the driver did not change", async () => {
+    const { caller: api } = caller({ rows: rowsWithDriver(DRIVER_ID) });
+    await api.update({ id: MOVEMENT_ID, driverId: DRIVER_ID });
+    expect(notifyDriverAssigned).not.toHaveBeenCalled();
+  });
+
+  it("stays quiet for a patch that does not touch the driver", async () => {
+    const { caller: api } = caller({ rows: rowsWithDriver(null) });
+    await api.update({ id: MOVEMENT_ID, tripNumber: "TRIP-9" });
+    expect(notifyDriverAssigned).not.toHaveBeenCalled();
+  });
+
+  it("stays quiet when the driver is unassigned", async () => {
+    const { caller: api } = caller({ rows: rowsWithDriver(DRIVER_ID) });
+    await api.update({ id: MOVEMENT_ID, driverId: null });
+    expect(notifyDriverAssigned).not.toHaveBeenCalled();
+  });
 });
 
 describe("movement.submit", () => {

@@ -1,20 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   Outbox,
-  OUTBOX_STORAGE_KEY,
   OutboxValidationError,
+  outboxKeyFor,
   validateOutboxInput,
   type OutboxEntry,
   type OutboxStorage,
 } from "./outbox";
 
+const ANON_KEY = outboxKeyFor(null);
+
 /** In-memory stand-in for AsyncStorage. */
 function memoryStorage(initial: Record<string, string> = {}) {
   const map = new Map(Object.entries(initial));
-  const storage: OutboxStorage & { snapshot: () => OutboxEntry[] } = {
+  const storage: OutboxStorage & {
+    snapshot: (userId?: string | null) => OutboxEntry[];
+    keys: () => string[];
+  } = {
     getItem: async (key) => map.get(key) ?? null,
     setItem: async (key, value) => void map.set(key, value),
-    snapshot: () => JSON.parse(map.get(OUTBOX_STORAGE_KEY) ?? "[]") as OutboxEntry[],
+    snapshot: (userId = null) => JSON.parse(map.get(outboxKeyFor(userId)) ?? "[]") as OutboxEntry[],
+    keys: () => [...map.keys()],
   };
   return storage;
 }
@@ -35,6 +41,7 @@ function build(
     storage,
     send,
     isOnline: overrides.isOnline ?? (() => online.value),
+    ...(overrides.scope ? { scope: overrides.scope } : {}),
     maxAttempts: overrides.maxAttempts ?? 3,
     now: () => new Date("2026-09-07T00:00:00.000Z"),
     newId: () => `id-${(ids += 1)}`,
@@ -159,7 +166,7 @@ describe("Outbox.flush", () => {
   it("drops a persisted payload that no longer validates and never sends it", async () => {
     // Written by an older build: `documentId` was a plain string back then.
     const storage = memoryStorage({
-      [OUTBOX_STORAGE_KEY]: JSON.stringify([
+      [ANON_KEY]: JSON.stringify([
         {
           id: "stale",
           op: "documents.finalizeUpload",
@@ -184,7 +191,7 @@ describe("Outbox.flush", () => {
   });
 
   it("survives corrupt storage", async () => {
-    const storage = memoryStorage({ [OUTBOX_STORAGE_KEY]: "{not json" });
+    const storage = memoryStorage({ [ANON_KEY]: "{not json" });
     const { outbox } = build({ storage });
     expect(await outbox.pending()).toEqual([]);
   });
@@ -228,5 +235,91 @@ describe("Outbox.submit", () => {
     expect(send).not.toHaveBeenCalled();
     expect(result.remaining).toBe(1);
     expect(storage.snapshot()).toHaveLength(1);
+  });
+});
+
+describe("per-user scoping", () => {
+  const DRIVER_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const DRIVER_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+  it("writes each user's queue under its own key", async () => {
+    const storage = memoryStorage();
+    let user: string | null = DRIVER_A;
+    const { outbox, online } = build({ storage, scope: () => user });
+    online.value = false;
+
+    await outbox.enqueue("notifications.markRead", { id: NOTE });
+    user = DRIVER_B;
+    await outbox.enqueue("documents.finalizeUpload", { documentId: DOC });
+
+    expect(storage.snapshot(DRIVER_A).map((e) => e.op)).toEqual(["notifications.markRead"]);
+    expect(storage.snapshot(DRIVER_B).map((e) => e.op)).toEqual(["documents.finalizeUpload"]);
+    expect(storage.keys().sort()).toEqual([outboxKeyFor(DRIVER_A), outboxKeyFor(DRIVER_B)].sort());
+  });
+
+  it("never replays one driver's queue for the next driver on the handset", async () => {
+    const storage = memoryStorage();
+    let user: string | null = DRIVER_A;
+    const { outbox, send, online } = build({ storage, scope: () => user });
+    online.value = false;
+    await outbox.enqueue("notifications.markRead", { id: NOTE });
+
+    // Driver A signs out without a connection, Driver B signs in.
+    user = DRIVER_B;
+    online.value = true;
+    const result = await outbox.flush();
+
+    expect(send).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ sent: 0, remaining: 0 });
+    // A's work is still on disk under A's key, untouched.
+    expect(storage.snapshot(DRIVER_A)).toHaveLength(1);
+  });
+
+  it("clear() empties only the current scope and reports the count", async () => {
+    const storage = memoryStorage();
+    let user: string | null = DRIVER_A;
+    const { outbox, online } = build({ storage, scope: () => user });
+    online.value = false;
+    await outbox.enqueue("notifications.markRead", { id: NOTE });
+    user = DRIVER_B;
+    await outbox.enqueue("documents.finalizeUpload", { documentId: DOC });
+
+    expect(await outbox.clear()).toBe(1);
+    expect(storage.snapshot(DRIVER_B)).toEqual([]);
+    expect(storage.snapshot(DRIVER_A)).toHaveLength(1);
+  });
+});
+
+describe("Outbox.drainAndClear", () => {
+  it("delivers what it can, then empties the queue", async () => {
+    const { outbox, send, storage } = build();
+    await outbox.enqueue("notifications.markRead", { id: NOTE });
+    const result = await outbox.drainAndClear();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ sent: 1, discarded: 0 });
+    expect(storage.snapshot()).toEqual([]);
+  });
+
+  it("still empties the queue when offline, reporting what was thrown away", async () => {
+    const { outbox, send, online, storage } = build();
+    online.value = false;
+    await outbox.enqueue("notifications.markRead", { id: NOTE });
+    await outbox.enqueue("documents.finalizeUpload", { documentId: DOC });
+
+    const result = await outbox.drainAndClear();
+    expect(send).not.toHaveBeenCalled();
+    expect(result).toEqual({ sent: 0, discarded: 2 });
+    expect(storage.snapshot()).toEqual([]);
+  });
+
+  it("empties the queue even when the transport is failing", async () => {
+    const send = vi.fn(async () => {
+      throw new Error("502");
+    });
+    const { outbox, storage } = build({ send });
+    await outbox.enqueue("notifications.markRead", { id: NOTE });
+    const result = await outbox.drainAndClear();
+    expect(result).toEqual({ sent: 0, discarded: 1 });
+    expect(storage.snapshot()).toEqual([]);
   });
 });

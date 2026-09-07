@@ -49,12 +49,18 @@ grant select, insert, update, delete on public.user_devices to service_role;
 
 -- -----------------------------------------------------------------------------
 -- push_tokens_for: the push counterpart of notify_organization()'s `email`
--- column. SECURITY DEFINER for the same reason — the fan-out runs inside the
--- acting user's RLS transaction (or a service-role job) and must reach the
--- recipients' tokens without either being able to select the rows directly.
+-- column. SECURITY DEFINER so the notification fan-out can reach a recipient's
+-- tokens even though `user_devices` is user-scoped.
+--
+-- A push token is a bearer capability: whoever holds it can send that handset a
+-- notification. It is therefore NOT exposed to `authenticated` — the default
+-- PUBLIC grant is revoked and only `service_role` may execute it, so the
+-- function cannot be called from PostgREST with an arbitrary p_organization_id.
+-- The fan-out (`packages/api/src/services/notifications.ts`) accordingly runs
+-- its push step in a service-role transaction rather than the caller's.
 --
 -- Only tokens of *active members of the given organization* are returned, and
--- only for the user ids the caller was just handed by notify_organization().
+-- only for the user ids passed in.
 -- -----------------------------------------------------------------------------
 
 create or replace function public.push_tokens_for(
@@ -77,4 +83,5 @@ as $$
     and d.user_id = any(p_user_ids);
 $$;
 
-grant execute on function public.push_tokens_for(uuid, uuid[]) to authenticated, service_role;
+revoke all on function public.push_tokens_for(uuid, uuid[]) from public, anon, authenticated;
+grant execute on function public.push_tokens_for(uuid, uuid[]) to service_role;

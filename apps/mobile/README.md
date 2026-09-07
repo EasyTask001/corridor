@@ -69,6 +69,12 @@ React Native (storage, connectivity and transport are injected by
 replay path. Queued operations are limited to idempotent ones, because a replay
 can happen twice if the app is killed between the send and the removal.
 
+The queue is keyed **per user** (`corridor.outbox.v1.<auth user id>`) and the
+scope follows every auth state change, so on a shared handset one driver's
+unsent mutations can never replay under the next driver's token. Sign-out
+additionally drains what it can and then clears the queue unconditionally,
+logging a warning with the count of anything discarded.
+
 **Uploads (`src/lib/upload.ts`).** Reserve + sign and the direct PUT need a live
 connection by nature, so a capture with no signal fails fast rather than
 pretending it was stored; only `documents.finalizeUpload` goes through the
@@ -86,10 +92,20 @@ accepts, so no allow-list had to be widened for an SVG.
 which is stored by `notifications.registerDevice` in `user_devices`
 (migration 0015, user-scoped RLS). The server-side fan-out in
 `packages/api/src/services/notifications.ts` sends to every device of a
-recipient whose notification rule includes the `push` channel — turn that on
-per event type under **Settings → Notifications** in the web app. Sends are
-mocked unless `EXPO_PUSH_ENABLED=true`, and either way they are recorded in
+recipient whose notification rule includes the `push` channel — adjustable per
+event type under **Settings → Notifications** in the web app. Sends are mocked
+unless `EXPO_PUSH_ENABLED=true`, and either way they are recorded in
 `integration_events` with provider `expo_push`.
+
+The event drivers actually receive is **`movement.assigned`** — emitted by
+`movement.update` when a dispatcher sets or changes a movement's driver,
+delivered only to the auth user linked to that driver (`drivers.user_id`),
+never to the dispatcher who made the change, and defaulting to `in_app + push`.
+Because it is targeted at one recipient rather than fanned out, it goes through
+`notifyUser` in a service-role transaction rather than `notify_organization`.
+
+Push tokens are treated as bearer capabilities: `push_tokens_for` (migration 0015) is `EXECUTE`-granted to `service_role` only, so no authenticated caller —
+in this org or any other — can read another member's handset tokens.
 
 ## Secrets
 

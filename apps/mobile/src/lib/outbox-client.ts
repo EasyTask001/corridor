@@ -10,6 +10,8 @@ import { trpc } from "./trpc";
 
 /** Optimistic: assume a connection until NetInfo says otherwise. */
 let online = true;
+/** auth.users.id of the signed-in driver; set by the session provider. */
+let scope: string | null = null;
 
 export const isOnline = () => online;
 
@@ -30,7 +32,32 @@ export const outbox = new Outbox({
   storage: AsyncStorage,
   send,
   isOnline,
+  scope: () => scope,
 });
+
+/**
+ * Point the queue at a user. Called on every auth state change so the storage
+ * key follows the session — a queue written by the previous driver on a shared
+ * handset is simply not visible to the next one.
+ */
+export function setOutboxScope(userId: string | null) {
+  scope = userId;
+}
+
+/**
+ * Sign-out: drain what we can, then drop the rest. Anything discarded is
+ * logged with its count, because it is unsent work the driver may need to redo.
+ */
+export async function clearOutboxForSignOut() {
+  const result = await outbox.drainAndClear();
+  if (result.discarded > 0) {
+    console.warn(
+      `[corridor] discarded ${result.discarded} unsent mutation(s) on sign-out (${result.sent} were delivered first)`,
+    );
+  }
+  setOutboxScope(null);
+  return result;
+}
 
 /**
  * Track connectivity and replay the queue on the rising edge. Returns the

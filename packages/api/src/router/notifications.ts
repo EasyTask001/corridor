@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull, schema, sql } from "@corridor/db";
 import {
   NOTIFICATION_EVENT_TYPES,
+  defaultChannelFor,
   notificationListInput,
   notificationMarkReadInput,
   notificationRuleInput,
@@ -152,7 +153,7 @@ export const notificationsRouter = router({
             label: def.label,
             description: def.description,
             enabled: existing?.enabled ?? true,
-            channel: existing?.channel ?? ["in_app"],
+            channel: existing?.channel ?? defaultChannelFor(eventType),
             filters: existing?.filters ?? {},
           };
         });

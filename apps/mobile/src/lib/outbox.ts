@@ -56,6 +56,12 @@ export interface OutboxOptions {
   send: OutboxSend;
   /** Latest known connectivity, from NetInfo on a device. */
   isOnline: () => boolean;
+  /**
+   * auth.users.id of the signed-in driver, or null when nobody is. The queue is
+   * stored under a per-user key so that on a shared handset one driver's
+   * unsent mutations can never be replayed with another driver's token.
+   */
+  scope?: () => string | null;
   /** Entries are discarded after this many failed replays (a poison payload must not wedge the queue). */
   maxAttempts?: number;
   now?: () => Date;
@@ -73,8 +79,17 @@ export interface FlushResult {
   interrupted: boolean;
 }
 
-export const OUTBOX_STORAGE_KEY = "corridor.outbox.v1";
+const OUTBOX_KEY_PREFIX = "corridor.outbox.v1";
 export const OUTBOX_MAX_ATTEMPTS = 5;
+
+/**
+ * Storage key for one user's queue. A signed-out app still has a key so a
+ * mutation is never silently dropped, but it is a different one, so anonymous
+ * work never replays as a signed-in driver either.
+ */
+export function outboxKeyFor(userId: string | null): string {
+  return `${OUTBOX_KEY_PREFIX}.${userId ?? "anonymous"}`;
+}
 
 /** Validate against the domain schema for `op`. Returns the parsed input or the reason it failed. */
 export function validateOutboxInput<K extends OutboxOperation>(
@@ -106,6 +121,7 @@ export class Outbox {
   private readonly storage: OutboxStorage;
   private readonly send: OutboxSend;
   private readonly isOnline: () => boolean;
+  private readonly scope: () => string | null;
   private readonly maxAttempts: number;
   private readonly now: () => Date;
   private readonly newId: () => string;
@@ -117,6 +133,7 @@ export class Outbox {
     this.storage = options.storage;
     this.send = options.send;
     this.isOnline = options.isOnline;
+    this.scope = options.scope ?? (() => null);
     this.maxAttempts = options.maxAttempts ?? OUTBOX_MAX_ATTEMPTS;
     this.now = options.now ?? (() => new Date());
     this.newId = options.newId ?? (() => crypto.randomUUID());
@@ -150,8 +167,26 @@ export class Outbox {
     return (await this.pending()).length;
   }
 
-  async clear(): Promise<void> {
-    await this.serialise(() => this.write([]));
+  /** Drop everything queued for the current scope. Returns how many were discarded. */
+  async clear(): Promise<number> {
+    return this.serialise(async () => {
+      const entries = await this.read();
+      await this.write([]);
+      return entries.length;
+    });
+  }
+
+  /**
+   * Sign-out handshake: try to drain the queue first when there is a
+   * connection, then clear whatever is left unconditionally — the next driver
+   * on this handset must never inherit it.
+   */
+  async drainAndClear(): Promise<{ sent: number; discarded: number }> {
+    const flushed = this.isOnline()
+      ? await this.flush()
+      : { sent: 0, discarded: 0, remaining: 0, interrupted: true };
+    const discarded = await this.clear();
+    return { sent: flushed.sent, discarded };
   }
 
   /**
@@ -221,8 +256,13 @@ export class Outbox {
     return next;
   }
 
+  /** The storage key for whoever is signed in right now. */
+  private key(): string {
+    return outboxKeyFor(this.scope());
+  }
+
   private async read(): Promise<OutboxEntry[]> {
-    const raw = await this.storage.getItem(OUTBOX_STORAGE_KEY);
+    const raw = await this.storage.getItem(this.key());
     if (!raw) return [];
     try {
       const parsed: unknown = JSON.parse(raw);
@@ -235,7 +275,7 @@ export class Outbox {
   }
 
   private async write(entries: OutboxEntry[]): Promise<void> {
-    await this.storage.setItem(OUTBOX_STORAGE_KEY, JSON.stringify(entries));
+    await this.storage.setItem(this.key(), JSON.stringify(entries));
     this.onChange?.(entries);
   }
 }

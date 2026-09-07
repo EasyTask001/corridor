@@ -10,7 +10,7 @@ import {
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import { setActiveOrganizationId, trpc } from "./trpc";
-import { startOutboxSync } from "./outbox-client";
+import { clearOutboxForSignOut, setOutboxScope, startOutboxSync } from "./outbox-client";
 import { registerForPushNotifications } from "./push";
 
 interface Membership {
@@ -50,10 +50,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void supabase.auth.getSession().then(({ data }) => {
+      // Scope the outbox before anything can enqueue against it.
+      setOutboxScope(data.session?.user.id ?? null);
       setSession(data.session);
       setLoading(false);
     });
     const { data } = supabase.auth.onAuthStateChange((_event, next) => {
+      setOutboxScope(next?.user.id ?? null);
       setSession(next);
       setLoading(false);
     });
@@ -107,6 +110,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    // Drain then clear *before* the token goes away: whatever is left must not
+    // be inherited by the next driver to sign in on this handset.
+    await clearOutboxForSignOut();
+    setPending(0);
     await supabase.auth.signOut();
     setActiveOrganizationId(null);
   }, []);

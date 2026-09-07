@@ -212,6 +212,18 @@ export const movementRouter = router({
           .where(eq(movements.id, id))
           .returning();
         await writeAudit(tx, ctx.orgId, "movement.update", "movement", id, m, row!);
+        // Assigning (or reassigning) a driver is the one patch a driver needs to
+        // hear about — targeted at that driver, never fanned out to the org.
+        if (patch.driverId && patch.driverId !== m.driverId) {
+          const { notifyDriverAssigned } = await import("../services/notifications");
+          await notifyDriverAssigned(tx, ctx.db, {
+            orgId: ctx.orgId,
+            driverId: patch.driverId,
+            movementId: id,
+            movementNumber: row!.movementNumber,
+            actorUserId: ctx.session.user.id,
+          });
+        }
         return row!;
       }),
     ),

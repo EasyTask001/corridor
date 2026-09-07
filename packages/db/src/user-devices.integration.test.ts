@@ -157,15 +157,23 @@ describe("user_devices RLS", () => {
 });
 
 describe("push_tokens_for", () => {
-  const tokensFor = (actor: Actor, orgId: string, userIds: string[]) =>
-    withRls(db, as(actor), (tx) =>
+  const sqlFor = (orgId: string, userIds: string[]) =>
+    sql`select * from public.push_tokens_for(${orgId}::uuid, array[${sql.join(
+      userIds.map((id) => sql`${id}::uuid`),
+      sql`, `,
+    )}])`;
+
+  /** The fan-out's real call path: a service-role transaction. */
+  const asServiceRole = (orgId: string, userIds: string[]) =>
+    withServiceRole(db, (tx) =>
       tx.execute<{ user_id: string; expo_push_token: string; platform: string }>(
-        sql`select * from public.push_tokens_for(${orgId}::uuid, array[${sql.join(
-          userIds.map((id) => sql`${id}::uuid`),
-          sql`, `,
-        )}])`,
+        sqlFor(orgId, userIds),
       ),
     );
+
+  /** What a member could attempt through PostgREST if the grant were wrong. */
+  const asMember = (actor: Actor, orgId: string, userIds: string[]) =>
+    withRls(db, as(actor), (tx) => tx.execute(sqlFor(orgId, userIds)));
 
   it("returns every device of the requested recipients in that org", async () => {
     const one = tokenFor("phone-1");
@@ -173,15 +181,14 @@ describe("push_tokens_for", () => {
     await register(dispatcherA, one);
     await register(dispatcherA, two);
 
-    const rows = await tokensFor(ownerA, ownerA.orgId, [dispatcherA.userId]);
+    const rows = await asServiceRole(ownerA.orgId, [dispatcherA.userId]);
     expect(rows.map((r) => r.expo_push_token).sort()).toEqual([one, two].sort());
   });
 
   it("never crosses an organization boundary", async () => {
     await register(dispatcherA, tokenFor("org-a"));
     // Asking org B for an org-A member's tokens yields nothing.
-    const rows = await tokensFor(ownerB, ownerB.orgId, [dispatcherA.userId]);
-    expect(rows).toEqual([]);
+    expect(await asServiceRole(ownerB.orgId, [dispatcherA.userId])).toEqual([]);
   });
 
   it("skips members who are no longer active", async () => {
@@ -193,8 +200,7 @@ describe("push_tokens_for", () => {
         .where(eq(organizationMembers.userId, dispatcherA.userId)),
     );
     try {
-      const rows = await tokensFor(ownerA, ownerA.orgId, [dispatcherA.userId]);
-      expect(rows).toEqual([]);
+      expect(await asServiceRole(ownerA.orgId, [dispatcherA.userId])).toEqual([]);
     } finally {
       await withServiceRole(db, (tx) =>
         tx
@@ -203,5 +209,20 @@ describe("push_tokens_for", () => {
           .where(eq(organizationMembers.userId, dispatcherA.userId)),
       );
     }
+  });
+
+  // A push token is a bearer capability — whoever holds it can push to that
+  // handset. EXECUTE is therefore revoked from `authenticated` (migration 0015),
+  // so no member can reach it, in their own org or anyone else's.
+  it("is not executable by a member of the same organization", async () => {
+    await register(dispatcherA, tokenFor("same-org"));
+    const message = await rejection(asMember(ownerA, ownerA.orgId, [dispatcherA.userId]));
+    expect(message).toMatch(/permission denied for function push_tokens_for/i);
+  });
+
+  it("is not executable by a member of another organization", async () => {
+    await register(dispatcherA, tokenFor("cross-org"));
+    const message = await rejection(asMember(ownerB, ownerA.orgId, [dispatcherA.userId]));
+    expect(message).toMatch(/permission denied for function push_tokens_for/i);
   });
 });
