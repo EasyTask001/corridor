@@ -4,3 +4,7 @@ dist
 .turbo
 pnpm-lock.yaml
 supabase/.temp
+
+# Historical planning artefacts: hand-wrapped SQL/TS fragments inside prose that
+# Prettier re-indents into nonsense. They are a record, not living documents.
+docs/plans

@@ -6,24 +6,53 @@ node_modules/
 .next/
 dist/
 out/
+build/
 .turbo/
 *.tsbuildinfo
 
 # env
+# `.env.*` on purpose: any new dotenv variant is ignored by default rather than
+# waiting for someone to remember to add it. `.env.example` is the one file we
+# do track — it documents the variable names, never a value.
 .env
 .env.*
 !.env.example
 
 # supabase local
+# supabase/config.toml is TRACKED: `supabase db reset` and CI both read it.
 supabase/.branches/
 supabase/.temp/
+
+# generated: `pnpm db:types` writes this from the running local database
+packages/db/src/supabase-types.ts
+
+# expo
+apps/mobile/.expo/
+apps/mobile/.expo-shared/
 
 # test artifacts
 coverage/
 playwright-report/
 test-results/
+.nyc_output/
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
 
 # misc
 .DS_Store
 .vercel
+.eslintcache
+.stylelintcache
 .claude/

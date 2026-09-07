@@ -1,12 +1,13 @@
 # Security review
 
 Reviewed at `117531d` (gap-closure Tasks 1–8 landed), against the §10 checklist
-in the build plan. Every claim below is a file reference or a query you can
+in the build plan; §9b and finding C1 were added by the whole-branch review that
+followed Task 11 and fixed in `eb72589`. Every claim below is a file reference or a query you can
 re-run; nothing here is asserted from memory.
 
 Scope: the Next.js app (`apps/web`), the tRPC API (`packages/api`), the database
-and its policies (`supabase/migrations/0001`–`0014`). Out of scope: the Expo app
-(`apps/mobile`, a stub), and the mock customs gateways, which never see a real
+and its policies (`supabase/migrations/0001`–`0017`). Out of scope: the Expo app
+(`apps/mobile`), and the mock customs gateways, which never see a real
 credential.
 
 ## How to re-run the checks
@@ -232,6 +233,49 @@ extension functions or SECURITY **INVOKER** trigger guards (`movements_guard`,
 `movement_events_immutable`, `set_updated_at`, `reject_modification`, …), which
 run with the caller's own privileges and are not an escalation path.
 
+## 9b. Definer functions granted to `authenticated` re-check the caller
+
+Pinning `search_path` (§9) closes escalation _through_ a definer; it says nothing
+about who may call one. A SECURITY DEFINER function that is EXECUTE-granted to
+`authenticated` and takes an organization id as an argument is, by construction,
+a hole in RLS unless it re-derives authorisation itself. Every such function,
+and what it checks:
+
+| Function                                            | Reachable by     | Caller check                                                                                                                                                               | ✅  |
+| --------------------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
+| `notify_organization`                               | authenticated    | `is_org_member(p_organization_id)` when `auth.uid()` is set (0017)                                                                                                         | ✅  |
+| `record_usage`                                      | authenticated    | `is_org_member(p_org)` when `auth.uid()` is set (0013)                                                                                                                     | ✅  |
+| `log_audit`                                         | authenticated    | `is_org_member(p_organization_id)`, unconditional (0002)                                                                                                                   | ✅  |
+| `next_movement_number`                              | authenticated    | `is_org_member(p_org_id)`, unconditional (0003)                                                                                                                            | ✅  |
+| `store_integration_secret`                          | authenticated    | `has_permission(p_org, 'integrations.manage')` (0012)                                                                                                                      | ✅  |
+| `delete_integration_secret`                         | authenticated    | `has_permission(p_org, 'integrations.manage')` (0012)                                                                                                                      | ✅  |
+| `match_org_knowledge`                               | authenticated    | `has_permission(p_organization_id, 'copilot.use')` (0007)                                                                                                                  | ✅  |
+| `is_assigned_movement`                              | authenticated    | Takes no org id; the body is scoped to `d.user_id = auth.uid()` (0009)                                                                                                     | ✅  |
+| `current_user_permissions`                          | authenticated    | Takes an org id but returns only the **caller's own** rows (`m.user_id = auth.uid()`)                                                                                      | ✅  |
+| `create_organization_with_owner`                    | authenticated    | Takes no org id — it creates one and makes the caller its Owner (0001)                                                                                                     | ✅  |
+| `accept_invitation`                                 | authenticated    | Requires `auth.uid()`, and the token's `invited_email` must equal the caller's email (0001)                                                                                | ✅  |
+| `match_regulations`                                 | authenticated    | No org id: the regulation corpus is global, read-only, and identical for every tenant                                                                                      | ✅  |
+| `sso_provider_for_email` / `sso_enforced_for_email` | anon (by design) | Unauthenticated by necessity (the login page has no session yet); each returns a single scalar — a provider id or a boolean — and never a row, a member list, or an org id | ✅  |
+| `read_integration_secret`                           | service_role     | EXECUTE revoked from `public`, `anon` **and** `authenticated` (0012)                                                                                                       | ✅  |
+| `push_tokens_for`                                   | service_role     | EXECUTE granted to `service_role` only (0015)                                                                                                                              | ✅  |
+| `claim_jobs`                                        | service_role     | EXECUTE revoked from `public`/`authenticated` (0004, 0011, 0013)                                                                                                           | ✅  |
+
+Re-runnable:
+
+```sql
+select p.proname, p.prosecdef, r.rolname, has_function_privilege('authenticated', p.oid, 'execute')
+from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+join pg_roles r on r.oid = p.proowner
+where n.nspname = 'public' and p.prosecdef;
+```
+
+The remaining definers in `public` are trigger functions (`movements_guard`,
+`movement_children_guard`, `movement_events_guard`, `movement_suggestions_guard`,
+`organization_member_role_scope_guard`, `sync_org_subscription`,
+`handle_new_auth_user`, `movement_events_immutable`) or the RLS helpers
+themselves (`is_org_member`, `has_permission`, `current_user_org_ids`), which
+derive everything from `auth.uid()` and are the check rather than a bypass of it.
+
 ## 10. Other controls confirmed
 
 - **SSO enforcement fails closed.** `GET /api/auth/sso` is only a hint and fails
@@ -258,8 +302,29 @@ warning --fail-on warning` reports "No schema errors found", and it now runs in
 
 ## Findings
 
-Nothing here is a live exploit. They are ordered by how much they would matter
+One live cross-tenant exploit was found and fixed (C1 below). The rest are not
+exploitable as the system stands, and are ordered by how much they would matter
 if the surrounding assumption ever stopped holding.
+
+**C1 — `notify_organization()` had no caller check: cross-tenant member-email
+disclosure and notification injection (critical). FIXED in `eb72589`
+(`supabase/migrations/0017_notify_organization_guard.sql`).** The function is
+SECURITY DEFINER, `EXECUTE`-granted to `authenticated` (0006, re-created in
+0011), takes `p_organization_id` from its caller, returns every matching
+member's email address, and inserts into `notifications` — a table
+`authenticated` has no INSERT policy on. Any signed-in user could therefore call
+it through PostgREST with **another tenant's** organization id and (a) enumerate
+that tenant's member emails and (b) plant arbitrary notification rows, with an
+arbitrary `link_path`, in those users' inboxes. 0017 re-creates it (converted to
+plpgsql) with the guard `record_usage` already used: `is_org_member()` is
+re-checked whenever `auth.uid()` is non-null, which leaves the service-role
+worker path — which has no JWT and hence no `auth.uid()` — working unchanged.
+`anon` also loses the EXECUTE that Supabase's default privileges had granted.
+Regression coverage: the "caller guard (0017)" block in
+`packages/db/src/notifications.integration.test.ts` asserts SQLSTATE 42501 with
+zero rows inserted for a foreign member, and that both a real member and the
+service role still succeed. §9b above is the re-audit of every other definer
+reachable by `authenticated`; no second instance was found.
 
 **F1 — `/api/jobs/process` is unauthenticated when `CRON_SECRET` is unset
 (low). RESOLVED in 5a89236.** `apps/web/src/app/api/jobs/process/route.ts:22-25`
