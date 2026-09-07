@@ -62,6 +62,9 @@ describe("buildManifest", () => {
     expect(() =>
       buildManifest({ ...src, movement: { ...src.movement, port: null } }),
     ).toThrow(/port/);
+    expect(() =>
+      buildManifest({ ...src, movement: { ...src.movement, carrierCode: null } }),
+    ).toThrow(/carrier code/);
   });
 });
 

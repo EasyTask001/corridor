@@ -10,6 +10,7 @@ const TODAY = "2026-09-06";
 const ready: MovementForValidation = {
   regime: "ACE",
   port: { code: "3801" },
+  carrierCode: "PFTR",
   scheduledCrossingAt: "2026-09-08T14:00:00Z",
   driver: {
     licenseExpiry: "2027-01-01",
@@ -47,14 +48,15 @@ describe("validateForTransmit", () => {
     expect(hasBlockingIssues(issues)).toBe(false);
   });
 
-  it("blocks on missing driver, truck, crossing and cargo", () => {
+  it("blocks on missing driver, truck, crossing, carrier code and cargo", () => {
     const issues = validateForTransmit(
-      { ...ready, driver: null, truck: null, port: null, cargo: [] },
+      { ...ready, driver: null, truck: null, port: null, carrierCode: null, cargo: [] },
       TODAY,
     );
     expect(issues.filter((i) => i.severity === "blocking").map((i) => i.code)).toEqual(
       expect.arrayContaining([
         "crossing_point_missing",
+        "carrier_code_missing",
         "truck_missing",
         "driver_missing",
         "cargo_missing",

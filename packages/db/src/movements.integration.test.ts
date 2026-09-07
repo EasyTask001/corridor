@@ -5,7 +5,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient } from "@supabase/supabase-js";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { MOVEMENT_TRANSITIONS, movementStatus } from "@corridor/domain";
 import { createDb } from "./client";
 import { withRls } from "./rls";
@@ -17,6 +17,9 @@ import {
   movementSuggestions,
   movements,
   organizationMembers,
+  permissions,
+  rolePermissions,
+  roles,
   seals,
 } from "./schema";
 
@@ -437,6 +440,94 @@ describe("movements RLS", () => {
       // cascades to cargo / seals / amendments
       await db.delete(movements).where(eq(movements.id, foreign!.id));
     }
+  });
+});
+
+/**
+ * movements_guard()'s trigger-level checks (0008_security_hardening.sql:43-133,
+ * carried forward by 0018 with only the manifest-changed expression touched
+ * for port_id/carrier_code). These specifically catch a body-level regression
+ * that the RLS policies alone would not: the movements_update policy's USING
+ * clause is a single OR across movement.write/transmit_to_customs/amend/cancel,
+ * so a caller holding only movement.write reaches the trigger for a
+ * transition it has no business making, and the "movement identity fields are
+ * immutable" check runs on every UPDATE a full-write caller can otherwise make.
+ */
+describe("movements_guard() permission + identity checks (0008)", () => {
+  it("a caller holding only movement.write (and movement.read) cannot flip status to sent — that transition needs movement.transmit_to_customs", async () => {
+    const roleName = `Write-only test role ${Date.now()}`;
+    const [tempRole] = await db
+      .insert(roles)
+      .values({ organizationId: dispatcherA.orgId, name: roleName, isSystem: false })
+      .returning({ id: roles.id });
+    // movement.read too — createDraft()'s `.returning()` needs the movements
+    // select policy to pass for the just-inserted row, same as any real
+    // custom role that can create movements would also be able to read them.
+    const grantedPermissions = await db
+      .select({ id: permissions.id })
+      .from(permissions)
+      .where(inArray(permissions.key, ["movement.write", "movement.read"]));
+    expect(grantedPermissions).toHaveLength(2);
+    await db
+      .insert(rolePermissions)
+      .values(grantedPermissions.map((p) => ({ roleId: tempRole!.id, permissionId: p.id })));
+
+    const [membership] = await db
+      .select({ id: organizationMembers.id, roleId: organizationMembers.roleId })
+      .from(organizationMembers)
+      .where(eq(organizationMembers.userId, dispatcherA.userId));
+
+    try {
+      await db
+        .update(organizationMembers)
+        .set({ roleId: tempRole!.id })
+        .where(eq(organizationMembers.id, membership!.id));
+
+      const m = await createDraft(dispatcherA);
+      const msg = await rejection(
+        withRls(db, as(dispatcherA), (tx) =>
+          tx.update(movements).set({ status: "sent" }).where(eq(movements.id, m.id)).returning(),
+        ),
+      );
+      expect(msg).toMatch(/permission denied: movement\.transmit_to_customs required/);
+
+      // Read-only (no write permission at all) is refused earlier, by the
+      // movements_update RLS policy itself — 0 rows, not an exception. Both
+      // layers have to hold for the transition to be genuinely blocked.
+      const readOnlyAttempt = await withRls(db, as(readOnlyA), (tx) =>
+        tx
+          .update(movements)
+          .set({ status: "sent" })
+          .where(eq(movements.id, m.id))
+          .returning({ id: movements.id }),
+      );
+      expect(readOnlyAttempt).toHaveLength(0);
+    } finally {
+      await db
+        .update(organizationMembers)
+        .set({ roleId: membership!.roleId })
+        .where(eq(organizationMembers.id, membership!.id));
+      await db.delete(rolePermissions).where(eq(rolePermissions.roleId, tempRole!.id));
+      await db.delete(roles).where(eq(roles.id, tempRole!.id));
+    }
+  });
+
+  it("movement_number (and the rest of a movement's identity) is immutable even for a full-write caller", async () => {
+    const m = await createDraft(dispatcherA);
+    const msg = await rejection(
+      withRls(db, as(dispatcherA), (tx) =>
+        tx
+          .update(movements)
+          .set({ movementNumber: `${m.movementNumber}-TAMPERED` })
+          .where(eq(movements.id, m.id))
+          .returning(),
+      ),
+    );
+    expect(msg).toMatch(/movement identity fields are immutable/);
+
+    // Unchanged in the DB — the statement was rejected, not silently ignored.
+    const [unchanged] = await db.select().from(movements).where(eq(movements.id, m.id));
+    expect(unchanged!.movementNumber).toBe(m.movementNumber);
   });
 });
 

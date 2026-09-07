@@ -1,5 +1,0 @@
-# source: CBP in-bond destination port codes (same Schedule D numbering used
-# for ports of entry). Minimal illustrative subset — extend with the inland
-# ports your lanes actually bond freight to.
-regime,kind,code,name,state_province,country,parent_code
-ACE,in_bond_destination,3901,CHICAGO,IL,US,

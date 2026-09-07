@@ -174,12 +174,31 @@ export function MovementWorkspace({
   const shippers = options.partners.filter((p) => p.type === "shipper" || p.type === "both");
   const consignees = options.partners.filter((p) => p.type === "consignee" || p.type === "both");
 
+  const pickableFromMovement = (): PickablePort | null =>
+    m.port
+      ? { id: m.portId!, code: m.port.code, name: m.port.name, stateProvince: m.port.stateProvince }
+      : null;
+
   const [tripPortId, setTripPortId] = useState<string | null>(m.portId);
-  const [tripPort, setTripPort] = useState<PickablePort | null>(
-    m.port ? { id: m.portId!, code: m.port.code, name: m.port.name, stateProvince: null } : null,
-  );
+  const [tripPort, setTripPort] = useState<PickablePort | null>(pickableFromMovement);
   const [amendPortId, setAmendPortId] = useState<string | null>(m.portId);
-  const [amendPort, setAmendPort] = useState<PickablePort | null>(tripPort);
+  const [amendPort, setAmendPort] = useState<PickablePort | null>(pickableFromMovement);
+
+  // `m.portId` can change out from under this component without a remount —
+  // accepting an AI suggestion sets it server-side, `m` refetches — so the
+  // picker state (seeded once at mount) has to re-seed whenever that happens,
+  // or saving the trip step with a stale local portId would silently null out
+  // a port the server already set. This is React's documented
+  // "adjust state during render" pattern (not an effect, so it commits in the
+  // same render — no setState-in-effect lint issue, no extra flicker).
+  const [trackedPortId, setTrackedPortId] = useState(m.portId);
+  if (m.portId !== trackedPortId) {
+    setTrackedPortId(m.portId);
+    setTripPortId(m.portId);
+    setTripPort(pickableFromMovement());
+    setAmendPortId(m.portId);
+    setAmendPort(pickableFromMovement());
+  }
 
   // -------------------------------------------------------------------------
   // step panels
@@ -222,6 +241,7 @@ export function MovementWorkspace({
       </Field>
       <Field label="Port of entry" htmlFor="port">
         <PortPicker
+          key={m.portId ?? "none"}
           id="port"
           regime={m.regime}
           kind={m.regime === "ACE" ? "port_of_entry" : "cbsa_office"}
@@ -836,6 +856,7 @@ export function MovementWorkspace({
             </Field>
             <Field label="Port of entry" htmlFor="amendPort">
               <PortPicker
+                key={m.portId ?? "none"}
                 id="amendPort"
                 regime={m.regime}
                 kind={m.regime === "ACE" ? "port_of_entry" : "cbsa_office"}

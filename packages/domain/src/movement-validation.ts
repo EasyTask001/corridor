@@ -20,6 +20,8 @@ export interface MovementForValidation {
   regime: Regime;
   /** The port of entry / CBSA office, or null when not yet selected. */
   port: { code: string } | null;
+  /** The carrier code this movement files under (migration 0018). */
+  carrierCode: string | null;
   scheduledCrossingAt: string | null;
   driver: {
     licenseExpiry: string | null;
@@ -73,6 +75,12 @@ export function validateForTransmit(
   // --- trip ---
   if (!m.port)
     block("crossing_point_missing", "Select a port of entry / CBSA office.", "trip");
+  if (!m.carrierCode)
+    block(
+      "carrier_code_missing",
+      "No carrier code — add one on the organization settings page or select one for this trip.",
+      "trip",
+    );
   if (!m.scheduledCrossingAt)
     block("eta_missing", "Provide the estimated crossing date and time.", "trip");
   else if (daysBetween(today, m.scheduledCrossingAt.slice(0, 10)) < 0)

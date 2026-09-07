@@ -6,8 +6,9 @@ export interface ManifestPayload {
   carrier: {
     /** The movement's own carrier code (migration 0018) — a snapshot, not
      * necessarily the org's current default, since a tenant may file under
-     * more than one ACE/ACI code. */
-    code: string | null;
+     * more than one ACE/ACI code. buildManifest refuses to build a manifest
+     * without one. */
+    code: string;
     filerCode: string | null;
     usDotNumber: string | null;
     name: string;

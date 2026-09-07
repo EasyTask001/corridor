@@ -3,9 +3,11 @@
  *
  *   * ports is a shared, non-tenant catalogue: every org sees the same active
  *     rows.
- *   * organization_carrier_codes is tenant data: readable with
- *     `organization.read`, writable only with `organization.manage`, and
- *     invisible across tenants like every other RLS-scoped table.
+ *   * organization_carrier_codes is tenant data: readable by any active org
+ *     member (movement.options needs it for every dispatcher, regardless of
+ *     whether their role also holds organization.read), writable only with
+ *     `organization.manage`, and invisible across tenants like every other
+ *     RLS-scoped table.
  *   * the partial unique index allows only one default code per org + regime.
  *
  *   pnpm db:reset && pnpm db:seed && pnpm --filter @corridor/db test:integration
@@ -13,7 +15,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient } from "@supabase/supabase-js";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createDb } from "./client";
 import { withRls, withServiceRole } from "./rls";
 import { organizationCarrierCodes, organizationMembers, ports } from "./schema";
@@ -34,6 +36,7 @@ interface Actor {
 
 let ownerA: Actor;
 let readOnlyA: Actor;
+let driverA: Actor;
 let ownerB: Actor;
 
 async function actorFor(email: string): Promise<Actor> {
@@ -54,9 +57,13 @@ async function actorFor(email: string): Promise<Actor> {
 }
 
 beforeAll(async () => {
-  [ownerA, readOnlyA, ownerB] = await Promise.all([
+  [ownerA, readOnlyA, driverA, ownerB] = await Promise.all([
     actorFor("owner@pathfinder.demo"),
     actorFor("readonly@pathfinder.demo"),
+    // driver_portal (see role.ts) grants only movement.read_assigned +
+    // document.upload — no organization.read — which is exactly the shape a
+    // custom role with movement.read-but-not-organization.read would have.
+    actorFor("driver@pathfinder.demo"),
     actorFor("owner@northbound.demo"),
   ]);
   expect(ownerA.orgId).not.toBe(ownerB.orgId);
@@ -84,16 +91,27 @@ async function rejection(p: Promise<unknown>): Promise<string> {
 
 describe("ports (global reference table)", () => {
   it("is readable by every organization — the seeded crossing points show up for both", async () => {
-    const seenByA = await withRls(db, as(ownerA), (tx) =>
-      tx.select().from(ports).where(eq(ports.code, "3801")),
-    );
-    const seenByB = await withRls(db, as(ownerB), (tx) =>
-      tx.select().from(ports).where(eq(ports.code, "3801")),
-    );
+    // 3801 (Detroit) exists as both a port_of_entry and an in_bond_destination
+    // (CBP in-bond destinations reuse Schedule D port codes — see
+    // import-ports.ts), so this pins the kind too.
+    const cond = and(eq(ports.code, "3801"), eq(ports.kind, "port_of_entry"));
+    const seenByA = await withRls(db, as(ownerA), (tx) => tx.select().from(ports).where(cond));
+    const seenByB = await withRls(db, as(ownerB), (tx) => tx.select().from(ports).where(cond));
     expect(seenByA).toHaveLength(1);
     expect(seenByB).toHaveLength(1);
     expect(seenByA[0]!.id).toBe(seenByB[0]!.id);
     expect(seenByA[0]).toMatchObject({ regime: "ACE", kind: "port_of_entry", country: "US" });
+  });
+
+  it("the full Schedule D port list and CBSA office list are loaded (gap 7 floor)", async () => {
+    const usPorts = await withRls(db, as(ownerA), (tx) =>
+      tx.select().from(ports).where(eq(ports.kind, "port_of_entry")),
+    );
+    const cbsaOffices = await withRls(db, as(ownerA), (tx) =>
+      tx.select().from(ports).where(eq(ports.kind, "cbsa_office")),
+    );
+    expect(usPorts.length).toBeGreaterThanOrEqual(150);
+    expect(cbsaOffices.length).toBeGreaterThanOrEqual(90);
   });
 
   it("is read-only from a session — insert/update/delete are refused", async () => {
@@ -119,6 +137,14 @@ describe("ports (global reference table)", () => {
 describe("organization_carrier_codes (tenant table)", () => {
   it("an org member with organization.read sees only their org's codes", async () => {
     const rows = await withRls(db, as(readOnlyA), (tx) =>
+      tx.select().from(organizationCarrierCodes),
+    );
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.organizationId === ownerA.orgId)).toBe(true);
+  });
+
+  it("is readable by a member whose role holds no organization.read (e.g. driver_portal) — membership alone gates select", async () => {
+    const rows = await withRls(db, as(driverA), (tx) =>
       tx.select().from(organizationCarrierCodes),
     );
     expect(rows.length).toBeGreaterThan(0);

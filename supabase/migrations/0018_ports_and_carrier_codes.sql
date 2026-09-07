@@ -115,9 +115,13 @@ create unique index organization_carrier_codes_default_unique
 
 alter table public.organization_carrier_codes enable row level security;
 
+-- Any org member may read the codes (not `organization.read`): movement.options
+-- (gated on movement.read, not organization.read — a custom role can hold one
+-- without the other) needs every dispatcher to see them to build a manifest.
+-- The codes themselves aren't sensitive within the org.
 create policy organization_carrier_codes_select on public.organization_carrier_codes
   for select to authenticated
-  using (public.has_permission(organization_id, 'organization.read'));
+  using (public.is_org_member(organization_id));
 
 create policy organization_carrier_codes_insert on public.organization_carrier_codes
   for insert to authenticated
@@ -227,19 +231,89 @@ create index movements_port_idx on public.movements (port_id) where port_id is n
 
 alter table public.movements drop column crossing_point;
 
--- movements_guard()'s frozen-column list (0003, revised 0011): crossing_point
--- -> port_id + carrier_code.
+-- movements_guard()'s manifest-changed expression (live definition is
+-- 0008_security_hardening.sql:43-133, not 0003 — 0008 added identity
+-- immutability, in-trigger permission checks and the lifecycle-timestamp
+-- anti-spoof block on top of 0003's original body, and none of that may be
+-- lost here). Rebuilt verbatim from that body with only crossing_point ->
+-- port_id + carrier_code changed in v_manifest_changed.
 create or replace function public.movements_guard()
 returns trigger
 language plpgsql
 as $$
+declare
+  v_manifest_changed boolean;
+  v_required_permission text;
 begin
-  if new.status is distinct from old.status then
-    if not public.movement_can_transition(old.status, new.status) then
-      raise exception 'invalid movement transition % -> %', old.status, new.status
-        using errcode = 'P0001';
+  if new.id is distinct from old.id
+     or new.organization_id is distinct from old.organization_id
+     or new.movement_number is distinct from old.movement_number
+     or new.created_by is distinct from old.created_by
+     or new.created_at is distinct from old.created_at then
+    raise exception 'movement identity fields are immutable' using errcode = 'P0001';
+  end if;
+
+  v_manifest_changed :=
+       new.regime is distinct from old.regime
+    or new.port_id is distinct from old.port_id
+    or new.carrier_code is distinct from old.carrier_code
+    or new.scheduled_crossing_at is distinct from old.scheduled_crossing_at
+    or new.driver_id is distinct from old.driver_id
+    or new.truck_id is distinct from old.truck_id
+    or new.trailer_id is distinct from old.trailer_id
+    or new.trip_number is distinct from old.trip_number
+    or new.notes is distinct from old.notes;
+
+  if new.status is distinct from old.status
+     and not public.movement_can_transition(old.status, new.status) then
+    raise exception 'invalid movement transition % -> %', old.status, new.status
+      using errcode = 'P0001';
+  end if;
+
+  if current_user = 'authenticated' then
+    if v_manifest_changed then
+      v_required_permission := case
+        when old.status = 'accepted' and new.status = 'sent' then 'movement.amend'
+        else 'movement.write'
+      end;
+      if not public.has_permission(old.organization_id, v_required_permission) then
+        raise exception 'permission denied: % required', v_required_permission
+          using errcode = '42501';
+      end if;
     end if;
-    -- stamp lifecycle timestamps
+
+    if new.customs_reference_number is distinct from old.customs_reference_number
+       and not public.has_permission(old.organization_id, 'movement.transmit_to_customs') then
+      raise exception 'permission denied: movement.transmit_to_customs required'
+        using errcode = '42501';
+    end if;
+
+    if new.status is distinct from old.status then
+      v_required_permission := case
+        when new.status = 'cancelled' then 'movement.cancel'
+        when old.status = 'accepted' and new.status = 'sent' then 'movement.amend'
+        when new.status = 'sent' then 'movement.transmit_to_customs'
+        when new.status in ('accepted', 'rejected', 'released', 'held')
+          then 'movement.transmit_to_customs'
+        else 'movement.write'
+      end;
+      if not public.has_permission(old.organization_id, v_required_permission) then
+        raise exception 'permission denied: % required', v_required_permission
+          using errcode = '42501';
+      end if;
+    end if;
+
+    -- Lifecycle timestamps are produced by this trigger, never supplied by a
+    -- client. Preserve their old values before stamping the current action.
+    new.submitted_at := old.submitted_at;
+    new.accepted_at := old.accepted_at;
+    new.rejected_at := old.rejected_at;
+    new.released_at := old.released_at;
+    new.arrived_at := old.arrived_at;
+    new.cancelled_at := old.cancelled_at;
+  end if;
+
+  if new.status is distinct from old.status then
     case new.status
       when 'sent'      then new.submitted_at := coalesce(new.submitted_at, now());
       when 'accepted'  then new.accepted_at  := now();
@@ -249,21 +323,9 @@ begin
       when 'cancelled' then new.cancelled_at := now();
       else null;
     end case;
-  else
-    -- No status change: manifest content is frozen once transmitted.
-    if not public.movement_is_editable(old.status) and (
-         new.regime is distinct from old.regime
-      or new.port_id is distinct from old.port_id
-      or new.carrier_code is distinct from old.carrier_code
-      or new.scheduled_crossing_at is distinct from old.scheduled_crossing_at
-      or new.driver_id is distinct from old.driver_id
-      or new.truck_id is distinct from old.truck_id
-      or new.trailer_id is distinct from old.trailer_id
-      or new.trip_number is distinct from old.trip_number
-    ) then
-      raise exception 'movement % is not editable in status %', old.movement_number, old.status
-        using errcode = 'P0001';
-    end if;
+  elsif not public.movement_is_editable(old.status) and v_manifest_changed then
+    raise exception 'movement % is not editable in status %', old.movement_number, old.status
+      using errcode = 'P0001';
   end if;
   return new;
 end;

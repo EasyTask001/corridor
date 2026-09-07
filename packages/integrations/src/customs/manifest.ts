@@ -50,6 +50,7 @@ export function buildManifest(src: ManifestSource): ManifestPayload {
   if (!src.driver) throw new Error("manifest requires a driver");
   if (!src.truck) throw new Error("manifest requires a truck");
   if (!src.movement.port) throw new Error("manifest requires a port of entry");
+  if (!src.movement.carrierCode) throw new Error("manifest requires a carrier code");
   if (!src.movement.scheduledCrossingAt) throw new Error("manifest requires an ETA");
 
   const eta =

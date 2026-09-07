@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@corridor/api";
 import { Badge, Button, Input, Label } from "@corridor/ui";
@@ -34,7 +34,7 @@ export function CarrierCodesPanel({ initial }: { initial: CarrierCode[] }) {
     trpc.organization.carrierCodes.setDefault.mutationOptions({ onSuccess: refresh, onError }),
   );
 
-  const codes = initial;
+  const { data: codes = initial } = useQuery({ ...listOpts, initialData: initial });
   const byRegime = { ACE: codes.filter((c) => c.regime === "ACE"), ACI: codes.filter((c) => c.regime === "ACI") };
 
   return (

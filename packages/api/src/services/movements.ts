@@ -262,6 +262,7 @@ export function validationFor(full: FullMovement) {
   return validateForTransmit({
     regime: full.regime,
     port: full.port ? { code: full.port.code } : null,
+    carrierCode: full.carrierCode,
     scheduledCrossingAt: full.scheduledCrossingAt?.toISOString() ?? null,
     driver: full.driver
       ? {
