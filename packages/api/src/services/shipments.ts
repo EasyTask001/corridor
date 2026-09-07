@@ -68,8 +68,6 @@ export async function commoditiesFor(tx: Tx, shipmentIds: string[]) {
   return rows.map((r) => ({ ...r, hazmat: hazmat.filter((h) => h.commodityId === r.id) }));
 }
 
-export type LoadedCommodity = Awaited<ReturnType<typeof commoditiesFor>>[number];
-
 /** Shipments attached to a movement, with their commodities and party names. */
 export async function shipmentsForMovement(tx: Tx, movementId: string) {
   const rows = await tx
@@ -109,8 +107,6 @@ export async function shipmentsForMovement(tx: Tx, movementId: string) {
     commodities: lines.filter((l) => l.shipmentId === shipment.id),
   }));
 }
-
-export type LoadedShipment = Awaited<ReturnType<typeof shipmentsForMovement>>[number];
 
 /** Only the columns a patch may touch; `undefined` keys are left alone. */
 export function shipmentSetFrom(patch: ShipmentPatch) {

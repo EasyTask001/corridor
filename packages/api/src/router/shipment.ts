@@ -425,9 +425,15 @@ export const shipmentRouter = router({
         for (const movementId of new Set(before.map((s) => s.movementId).filter(Boolean))) {
           await syncMovementRiskAlerts(tx, ctx.orgId, movementId!);
         }
-        await writeAudit(tx, ctx.orgId, "shipment.unassign", "shipment", rows[0]?.id ?? "", null, {
-          shipmentIds: input.shipmentIds,
-        });
+        await writeAudit(
+          tx,
+          ctx.orgId,
+          "shipment.unassign",
+          "shipment",
+          input.shipmentIds[0]!,
+          { movementIds: before.map((s) => s.movementId) },
+          { shipmentIds: input.shipmentIds },
+        );
         return { unassigned: rows.length };
       }),
     ),
