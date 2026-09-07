@@ -69,6 +69,12 @@ verification bar, commit style, fixed stack versions, code layout). Additions:
   (movement, `refresh`, `editable`, mutations via `useMovementMutations()`), leaving
   `movement-workspace.tsx` as the shell (STEPS, stepper, `useMovementRealtime`). Later tasks
   edit only their step file.
+- **Replacing a trigger or function** (`movements_guard()`, `movement_children_guard()`,
+  `shipments_control_number()`, `create_organization_with_owner()`, …): always `create or replace`
+  from the **latest** prior definition — `grep -n "function public.<name>" supabase/migrations/*.sql`
+  and take the highest-numbered file (e.g. `movements_guard()` lives in 0008, revised again in 0018) —
+  never from the migration that first created it. Add an integration test for a protection the
+  replaced body must keep.
 - **Env vars** added to `.env.example` and `turbo.json` `globalEnv` in the task introducing them.
 - **Manifest payload** (`packages/integrations/src/customs/types.ts` `ManifestPayload`) is
   extended in place; `buildManifest` in `manifest.ts` stays the single builder.
@@ -114,8 +120,8 @@ after T6 and mutually independent. T12/T13/T14 independent, after T7.
 3. `movements`: add `carrier_code text` (snapshot of the code, not an FK — codes are stable
    identifiers and appear in control numbers) and `port_id uuid references public.ports(id)`;
    backfill `port_id` from `crossing_point->>'code'` joined on `ports.code`, then drop
-   `crossing_point`. Update the frozen-column list in `movements_guard()` (see
-   `0003_movements.sql`) to `port_id`, `carrier_code`.
+   `crossing_point`. Update the frozen-column list in `movements_guard()` (latest body is in
+   `0008_security_hardening.sql`) to `port_id`, `carrier_code`.
 4. Drizzle: new `reference.ts` (`ports`, `organizationCarrierCodes`); update `core.ts`,
    `movements.ts`; export from `schema/index.ts`.
 5. `import-ports.ts`: parses `packages/db/data/ports/{us_ports,cbsa_offices,in_bond_destinations,firms,cbsa_sublocations}.csv`
