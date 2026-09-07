@@ -47,8 +47,12 @@ export function LoginForm({ next }: { next: string }) {
       if (seq !== lookupSeq.current) return;
       setHint({ domain, sso: body.sso === true, enforced: body.enforced === true });
     } catch {
-      // Offer the password form rather than a dead end.
-      if (seq === lookupSeq.current) setHint(null);
+      // The lookup is down or rate-limited, so we know nothing about this
+      // domain: offer BOTH ways in rather than guessing. Hiding the SSO button
+      // would strand an SSO-only tenant; hiding the password field would
+      // strand everyone else. The server action still refuses a password on an
+      // enforced domain, so the extra option cannot become a way around it.
+      if (seq === lookupSeq.current) setHint({ domain, sso: true, enforced: false });
     }
   }
 

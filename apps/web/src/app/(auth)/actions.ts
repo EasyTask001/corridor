@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { email as emailSchema } from "@corridor/domain";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { passwordSignInBlockedFor } from "@/lib/sso";
 import { env } from "@/lib/env";
 
 export type AuthState = { error?: string; message?: string } | null;
@@ -25,6 +26,12 @@ export async function signIn(_prev: AuthState, formData: FormData): Promise<Auth
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
 
+  // Enforcement lives here, not in the form: an organization that requires SSO
+  // must not be reachable with a password by anyone who scripts the POST or
+  // whose login page kept the field because the hint lookup failed.
+  const blocked = await passwordSignInBlockedFor(parsed.data.email);
+  if (blocked) return { error: blocked };
+
   const supabase = await createSupabaseServerClient();
   const { error } = await supabase.auth.signInWithPassword(parsed.data);
   if (error) return { error: "Invalid email or password" };
@@ -41,6 +48,11 @@ export async function signUp(_prev: AuthState, formData: FormData): Promise<Auth
       displayName: formData.get("displayName"),
     });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+
+  // Same gate on the way in: a domain that requires SSO gets its accounts from
+  // the IdP, not from a password sign-up form.
+  const blocked = await passwordSignInBlockedFor(parsed.data.email);
+  if (blocked) return { error: blocked };
 
   const supabase = await createSupabaseServerClient();
   const next = safeNext(formData.get("next"));

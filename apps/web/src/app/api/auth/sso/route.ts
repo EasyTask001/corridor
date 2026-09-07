@@ -1,7 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
-import { emailDomain } from "@corridor/domain";
 import { rateLimitFor } from "@corridor/api";
-import { env } from "@/lib/env";
+import { lookupSso, NO_SSO, type SsoLookup } from "@/lib/sso";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,15 +14,18 @@ export const dynamic = "force-dynamic";
  * not need the provider either — `signInWithSSO({ domain })` resolves the
  * domain against Supabase Auth, which is the authoritative mapping.
  *
+ * This is a **hint**, not the enforcement: it fails open, because a resolver
+ * outage must not take the login page down with it. The control that actually
+ * refuses a password on an enforced domain is `passwordSignInBlockedFor()` in
+ * the sign-in server action, which fails closed.
+ *
  * Because it is public it is counted by IP (`sso:ip:<ip>`) against the trial
  * ceiling of the `standard` tier — the tRPC procedures' per-user counter has
  * nothing to key on here. A caller enumerating domains hits that within a
  * minute; a person typing their address once does not.
  */
 export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const email = url.searchParams.get("email") ?? "";
-  const domain = emailDomain(email);
+  const email = new URL(req.url).searchParams.get("email") ?? "";
 
   const limit = await rateLimitFor("standard", "trial").check({
     orgId: null,
@@ -44,33 +45,16 @@ export async function GET(req: Request) {
     );
   }
 
-  // Not an address we could look up: answer the same shape rather than an
-  // error, so the login page has one code path.
-  if (!domain) return answer(false, false);
-
-  const supabase = createClient(env.supabaseUrl, env.supabaseAnonKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-
-  // Two SECURITY DEFINER resolvers, granted to `anon` (migration 0014). The
-  // anon key is all this needs: it reads no table.
-  const [provider, enforced] = await Promise.all([
-    supabase.rpc("sso_provider_for_email", { p_email: email }),
-    supabase.rpc("sso_enforced_for_email", { p_email: email }),
-  ]);
-
-  if (provider.error) {
-    console.error("[sso] provider lookup failed", provider.error);
-    // Degrade to password sign-in rather than locking everyone out.
-    return answer(false, false);
+  try {
+    return answer(await lookupSso(email));
+  } catch (error) {
+    console.error("[sso] lookup failed", error);
+    return answer(NO_SSO);
   }
-
-  const hasSso = typeof provider.data === "string" && provider.data.length > 0;
-  return answer(hasSso, hasSso && enforced.data === true);
 }
 
-function answer(sso: boolean, enforced: boolean) {
-  return Response.json({ sso, enforced }, { headers: { "cache-control": "no-store" } });
+function answer(result: SsoLookup) {
+  return Response.json(result, { headers: { "cache-control": "no-store" } });
 }
 
 /** First hop in `x-forwarded-for` (what Vercel sets), else the direct peer. */

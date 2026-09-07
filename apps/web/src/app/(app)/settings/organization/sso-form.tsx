@@ -126,7 +126,11 @@ export function SsoForm({ plan, initial }: { plan: SubscriptionPlan; initial: Ss
           <dt className="text-ink-500">Domains</dt>
           <dd>{config.domains.join(", ")}</dd>
           <dt className="text-ink-500">Password sign-in</dt>
-          <dd>{config.enforced ? "Disabled for these domains" : "Still allowed"}</dd>
+          <dd>
+            {config.enforced
+              ? "Refused for these domains — sign-in and sign-up both require SSO"
+              : "Still allowed alongside SSO"}
+          </dd>
         </dl>
       )}
 
@@ -174,8 +178,12 @@ export function SsoForm({ plan, initial }: { plan: SubscriptionPlan; initial: Ss
             onChange={(event) => setEnforced(event.target.checked)}
             className="size-4 rounded border-ink-100"
           />
-          Require SSO — hide password sign-in for these domains
+          Require SSO — refuse password sign-in and sign-up for these domains
         </label>
+        <p className="-mt-2 text-xs text-ink-500">
+          Enforcement applies to new sign-ins; people already signed in keep their session until it
+          expires.
+        </p>
 
         {configure.error && <p className="text-sm text-danger-500">{configure.error.message}</p>}
         {remove.error && <p className="text-sm text-danger-500">{remove.error.message}</p>}
