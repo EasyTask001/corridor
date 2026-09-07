@@ -33,6 +33,12 @@ export const mcNumber = z
   .string()
   .trim()
   .regex(/^(MC-?)?\d{1,8}$/i, "Invalid MC number");
+/** Customs filer/broker identifier printed alongside the carrier code on a manifest. */
+export const filerCode = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^[A-Z0-9]{3}$/, "Filer code must be 3 alphanumeric characters");
 
 export const organizationSchema = z.object({
   id: uuid,
@@ -42,6 +48,7 @@ export const organizationSchema = z.object({
   canadianCarrierCode: canadianCarrierCode.nullable(),
   usDotNumber: usDotNumber.nullable(),
   mcNumber: mcNumber.nullable(),
+  filerCode: filerCode.nullable(),
   billingEmail: email.nullable(),
   subscriptionPlan,
   subscriptionStatus,
@@ -60,6 +67,7 @@ export type CreateOrganizationInput = z.infer<typeof createOrganizationInput>;
 
 export const updateOrganizationInput = createOrganizationInput.partial().extend({
   billingEmail: email.optional(),
+  filerCode: filerCode.optional(),
 });
 export type UpdateOrganizationInput = z.infer<typeof updateOrganizationInput>;
 

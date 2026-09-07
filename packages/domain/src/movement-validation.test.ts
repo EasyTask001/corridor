@@ -9,7 +9,7 @@ const TODAY = "2026-09-06";
 
 const ready: MovementForValidation = {
   regime: "ACE",
-  crossingPoint: { code: "3801", name: "Detroit" },
+  port: { code: "3801" },
   scheduledCrossingAt: "2026-09-08T14:00:00Z",
   driver: {
     licenseExpiry: "2027-01-01",
@@ -49,7 +49,7 @@ describe("validateForTransmit", () => {
 
   it("blocks on missing driver, truck, crossing and cargo", () => {
     const issues = validateForTransmit(
-      { ...ready, driver: null, truck: null, crossingPoint: null, cargo: [] },
+      { ...ready, driver: null, truck: null, port: null, cargo: [] },
       TODAY,
     );
     expect(issues.filter((i) => i.severity === "blocking").map((i) => i.code)).toEqual(

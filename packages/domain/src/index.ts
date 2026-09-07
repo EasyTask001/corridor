@@ -3,6 +3,7 @@ export * from "./permission";
 export * from "./role";
 export * from "./organization";
 export * from "./movement";
+export * from "./reference";
 export * from "./registry";
 export * from "./alert";
 export * from "./compliance";

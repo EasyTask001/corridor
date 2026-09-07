@@ -4,7 +4,7 @@
  * Mirrors the data CBP ACE / CBSA ACI reject a manifest for when missing.
  */
 import { daysBetween, todayIso } from "./compliance";
-import type { CargoInput, CrossingPoint, Regime } from "./movement";
+import type { CargoInput, Regime } from "./movement";
 
 export type IssueSeverity = "blocking" | "warning";
 
@@ -18,7 +18,8 @@ export interface ValidationIssue {
 
 export interface MovementForValidation {
   regime: Regime;
-  crossingPoint: CrossingPoint | null;
+  /** The port of entry / CBSA office, or null when not yet selected. */
+  port: { code: string } | null;
   scheduledCrossingAt: string | null;
   driver: {
     licenseExpiry: string | null;
@@ -70,7 +71,7 @@ export function validateForTransmit(
     issues.push({ code, severity: "warning", message, step });
 
   // --- trip ---
-  if (!m.crossingPoint?.code)
+  if (!m.port)
     block("crossing_point_missing", "Select a port of entry / CBSA office.", "trip");
   if (!m.scheduledCrossingAt)
     block("eta_missing", "Provide the estimated crossing date and time.", "trip");

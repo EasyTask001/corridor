@@ -1,12 +1,13 @@
 import { z } from "zod";
 import { isoDateTime, nonEmpty, uuid } from "./common";
-import { cargoInput, crossingPoint, movementStatus, regime, sealInput } from "./movement";
+import { cargoInput, carrierCode, movementStatus, regime, sealInput } from "./movement";
 
 export const movementListInput = z.object({
   status: z.array(movementStatus).optional(),
   regime: regime.optional(),
   search: z.string().trim().max(100).optional(),
   driverId: uuid.optional(),
+  portId: uuid.optional(),
   limit: z.number().int().min(1).max(200).default(50),
   offset: z.number().int().min(0).default(0),
 });
@@ -15,7 +16,9 @@ export type MovementListInput = z.infer<typeof movementListInput>;
 /** Editable header fields (draft / rejected only). */
 export const movementPatch = z.object({
   tripNumber: z.string().trim().max(40).nullable().optional(),
-  crossingPoint: crossingPoint.nullable().optional(),
+  portId: uuid.nullable().optional(),
+  /** Server defaults to the regime's default carrier code when omitted. */
+  carrierCode: carrierCode.nullable().optional(),
   scheduledCrossingAt: isoDateTime.nullable().optional(),
   driverId: uuid.nullable().optional(),
   truckId: uuid.nullable().optional(),
@@ -50,20 +53,3 @@ export const customsResponseInput = z.object({
   message: z.string().trim().max(2000).optional(),
 });
 export type CustomsResponseInput = z.infer<typeof customsResponseInput>;
-
-/** Well-known crossing points for the wizard dropdown (CBP port / CBSA office codes). */
-export const CROSSING_POINTS: ReadonlyArray<{ code: string; name: string; regime: "ACE" | "ACI" }> =
-  [
-    { code: "3801", name: "Detroit — Ambassador Bridge, MI", regime: "ACE" },
-    { code: "3802", name: "Port Huron — Blue Water Bridge, MI", regime: "ACE" },
-    { code: "0901", name: "Buffalo — Peace Bridge, NY", regime: "ACE" },
-    { code: "0712", name: "Lewiston — Queenston Bridge, NY", regime: "ACE" },
-    { code: "3004", name: "Blaine — Pacific Highway, WA", regime: "ACE" },
-    { code: "0209", name: "Champlain — Rouses Point, NY", regime: "ACE" },
-    { code: "0453", name: "Windsor — Ambassador Bridge, ON", regime: "ACI" },
-    { code: "0440", name: "Sarnia — Blue Water Bridge, ON", regime: "ACI" },
-    { code: "0410", name: "Fort Erie — Peace Bridge, ON", regime: "ACI" },
-    { code: "0427", name: "Queenston — Lewiston Bridge, ON", regime: "ACI" },
-    { code: "0813", name: "Pacific Highway, BC", regime: "ACI" },
-    { code: "0351", name: "Lacolle — Route 15, QC", regime: "ACI" },
-  ];

@@ -92,15 +92,12 @@ export function isEditable(status: MovementStatus): boolean {
 // Movement
 // ---------------------------------------------------------------------------
 
-export const crossingPoint = z.object({
-  /** CBP port code (4 digits) or CBSA office code (3–4 digits) */
-  code: z
-    .string()
-    .trim()
-    .regex(/^[0-9A-Z]{3,4}$/i),
-  name: z.string().trim().max(120).optional(),
-});
-export type CrossingPoint = z.infer<typeof crossingPoint>;
+/** 2-4 alphanumerics: an ACE SCAC-style code or an ACI carrier code. */
+export const carrierCode = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^[A-Z0-9]{2,4}$/, "Carrier code must be 2-4 alphanumeric characters");
 
 export const movementSchema = z.object({
   id: uuid,
@@ -109,7 +106,8 @@ export const movementSchema = z.object({
   movementNumber: nonEmpty.max(40),
   tripNumber: z.string().trim().max(40).nullable(),
   status: movementStatus,
-  crossingPoint: crossingPoint.nullable(),
+  portId: uuid.nullable(),
+  carrierCode: z.string().nullable(),
   scheduledCrossingAt: isoDateTime.nullable(),
   driverId: uuid.nullable(),
   truckId: uuid.nullable(),
@@ -129,7 +127,9 @@ export type Movement = z.infer<typeof movementSchema>;
 export const createMovementInput = z.object({
   regime,
   tripNumber: z.string().trim().max(40).optional(),
-  crossingPoint: crossingPoint.optional(),
+  portId: uuid.optional(),
+  /** Server defaults to the regime's default carrier code when omitted. */
+  carrierCode: carrierCode.optional(),
   scheduledCrossingAt: isoDateTime.optional(),
   driverId: uuid.optional(),
   truckId: uuid.optional(),
