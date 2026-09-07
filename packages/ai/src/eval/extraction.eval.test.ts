@@ -5,7 +5,7 @@
  * extractor change.
  *
  *   pnpm --filter @corridor/ai eval                 # mock extractor (default in tests)
- *   CORRIDOR_EVAL_EXTRACTOR=model pnpm --filter @corridor/ai eval   # real model (needs OPENAI_API_KEY)
+ *   CORRIDOR_EVAL_EXTRACTOR=model pnpm --filter @corridor/ai eval   # real model (needs AI_GATEWAY_API_KEY or OPENAI_API_KEY)
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -29,6 +29,7 @@ interface Expected {
   shipper?: { name?: string | null };
   consignee?: { name?: string | null };
   cargo?: Array<Record<string, unknown>>;
+  rateConfirmation?: Record<string, unknown>;
   _expectLowConfidence?: boolean;
 }
 
@@ -60,6 +61,12 @@ function score(actual: Record<string, unknown>, expected: Expected) {
   for (const [i, el] of (expected.cargo ?? []).entries()) {
     const al = ac[i] ?? {};
     for (const [k, v] of Object.entries(el)) check(`cargo[${i}].${k}`, al[k], v);
+  }
+  if (expected.cargo) check("cargo.length", ac.length, expected.cargo.length);
+  if (expected.rateConfirmation) {
+    const arc = (actual.rateConfirmation as Record<string, unknown> | null) ?? {};
+    for (const [k, v] of Object.entries(expected.rateConfirmation))
+      check(`rateConfirmation.${k}`, arc[k], v);
   }
   return { total, hit, accuracy: total ? hit / total : 1, misses };
 }

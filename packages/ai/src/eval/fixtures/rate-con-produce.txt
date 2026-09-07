@@ -1,0 +1,17 @@
+CARRIER RATE CONFIRMATION
+Rate Confirmation: RC-55120
+Date: 2026-09-04
+
+Broker: Great Lakes Logistics LLC, 200 Woodward Ave, Detroit MI 48226
+Carrier: Pathfinder Trans Inc, Windsor ON N8X 1A1
+
+Shipper: Erie Produce Co, 88 Market Ave, Buffalo NY 14203
+Consignee: Fort Erie Cold Storage, 12 Harbour St, Fort Erie ON
+
+Pickup: 2026-09-05T08:00
+Delivery: 2026-09-06T14:00
+Equipment: 53' reefer, -1C continuous
+Rate: 2,450.00 USD all-in
+
+Load tender only. No commodity detail on this document — customs data must come
+from the commercial invoice or bill of lading.

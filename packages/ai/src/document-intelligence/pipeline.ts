@@ -26,13 +26,33 @@ export function selectExtractor(input: DocumentInput, opts: PipelineOptions = {}
   return createModelExtractor(env) ?? mockExtractor;
 }
 
-/** Required-for-manifest fields and their confidences. */
-export function lowConfidenceFields(doc: {
-  shipper: { confidence: number };
-  consignee: { confidence: number };
-  cargo: Array<{ confidence: number; weightKg: number | null; pieceCount: number | null }>;
-}): string[] {
+/** Text we can hand the classifier; binary uploads (PDF/image) get filename cues only. */
+function readableText(input: DocumentInput): string | undefined {
+  if (!input.mimeType.startsWith("text/") && input.mimeType !== "application/json")
+    return undefined;
+  return new TextDecoder().decode(input.bytes.slice(0, 8192));
+}
+
+/**
+ * Required-for-manifest fields and their confidences. A rate confirmation is a
+ * load tender, not a customs document: it is not expected to carry cargo lines,
+ * so only its own block is scored.
+ */
+export function lowConfidenceFields(
+  doc: {
+    shipper: { confidence: number };
+    consignee: { confidence: number };
+    cargo: Array<{ confidence: number; weightKg: number | null; pieceCount: number | null }>;
+    rateConfirmation?: { confidence: number } | null;
+  },
+  documentType?: DocumentType,
+): string[] {
   const out: string[] = [];
+  if (documentType === "rate_confirmation") {
+    if ((doc.rateConfirmation?.confidence ?? 0) < LOW_CONFIDENCE_THRESHOLD)
+      out.push("rateConfirmation");
+    return out;
+  }
   if (doc.shipper.confidence < LOW_CONFIDENCE_THRESHOLD) out.push("shipper");
   if (doc.consignee.confidence < LOW_CONFIDENCE_THRESHOLD) out.push("consignee");
   doc.cargo.forEach((l, i) => {
@@ -49,7 +69,11 @@ export async function runExtractionPipeline(
   opts: PipelineOptions = {},
 ): Promise<PipelineOutcome> {
   const extractor = selectExtractor(input, opts);
-  const hinted: DocumentType = classifyByHints(input.filename, input.declaredType);
+  const hinted: DocumentType = classifyByHints(
+    input.filename,
+    input.declaredType,
+    readableText(input),
+  );
 
   let raw: unknown;
   let model = extractor.name;
@@ -74,15 +98,16 @@ export async function runExtractionPipeline(
   }
 
   const doc = parsed.data;
-  const low = lowConfidenceFields(doc);
-  // Overall confidence = min over required parts (never trust a self-reported score higher than its parts).
-  const parts = [
-    doc.shipper.confidence,
-    doc.consignee.confidence,
-    ...doc.cargo.map((c) => c.confidence),
-  ];
-  const confidence = Math.min(doc.confidence, ...(parts.length ? parts : [0]));
   const detectedType = doc.documentType !== "other" ? doc.documentType : hinted;
+  const low = lowConfidenceFields(doc, detectedType);
+  // Overall confidence = min over required parts (never trust a self-reported
+  // score higher than its parts). A rate confirmation has no manifest parts —
+  // its own block carries the confidence.
+  const parts =
+    detectedType === "rate_confirmation"
+      ? [doc.rateConfirmation?.confidence ?? 0]
+      : [doc.shipper.confidence, doc.consignee.confidence, ...doc.cargo.map((c) => c.confidence)];
+  const confidence = Math.min(doc.confidence, ...(parts.length ? parts : [0]));
 
   return {
     ok: true,

@@ -3,15 +3,14 @@
  * SAME Zod contract (`extractedDocument`) that validates the review form, so
  * the model is constrained to the domain shape at generation time.
  *
- * Provider: OpenAI via @ai-sdk/openai when OPENAI_API_KEY is set. Swapping to
- * AI Gateway later is a one-line change in `resolveModel`.
+ * Provider selection lives in `../client` (Vercel AI Gateway → Claude when
+ * AI_GATEWAY_API_KEY is set, OpenAI direct when only OPENAI_API_KEY is, and
+ * nothing at all otherwise — the pipeline then uses the mock extractor).
  */
-import { createOpenAI } from "@ai-sdk/openai";
 import { generateObject } from "ai";
 import { extractedDocument, type DocumentType } from "@corridor/domain";
+import { aiConfigured, languageModel } from "../client";
 import type { DocumentInput, Extractor, ExtractorResult } from "./types";
-
-export const DEFAULT_EXTRACTION_MODEL = "gpt-4.1-mini";
 
 const SYSTEM = `You are a customs documentation specialist for cross-border trucking between Canada and the United States.
 Extract the shipment data from the attached document exactly as written. Rules:
@@ -22,27 +21,31 @@ Extract the shipment data from the attached document exactly as written. Rules:
 - Country of origin as ISO 3166-1 alpha-2.
 - One cargo line per distinct commodity line on the document.
 - confidence is 0..1 for each party and line; overall confidence is the minimum of the parts that a customs manifest requires (shipper, consignee, each line's description/weight/pieces).
-- Put anything ambiguous in notes for the human reviewer.`;
+- Put anything ambiguous in notes for the human reviewer.
 
-function resolveModel(env: NodeJS.ProcessEnv = process.env) {
-  const apiKey = env.OPENAI_API_KEY;
-  if (!apiKey) return null;
-  const openai = createOpenAI({ apiKey });
-  const id = env.CORRIDOR_EXTRACTION_MODEL ?? DEFAULT_EXTRACTION_MODEL;
-  return { model: openai(id), id };
-}
+Rate confirmations (broker → carrier load tenders, often headed "RATE CONFIRMATION" or "CARRIER RATE
+CONFIRMATION") are NOT customs documents: they carry no commodity detail. For those, set
+documentType to "rate_confirmation", return an EMPTY cargo array (never invent commodity lines from
+a load tender), and fill the rateConfirmation object instead:
+- carrierName / brokerName exactly as printed; referenceNumber is the load / pro / confirmation number.
+- rateAmount is the total linehaul rate agreed with the carrier, rateCurrency USD or CAD.
+- pickupAt / deliveryAt as ISO-8601 date-times in the document's own local time; date-only when no
+  time is given (append T00:00:00).
+- equipment is the trailer type as printed (e.g. "53' reefer", "dry van").
+- rateConfirmation.confidence is 0..1 over those fields, and is the overall document confidence.
+For any other document type, leave rateConfirmation null.`;
 
 export function modelExtractorAvailable(env: NodeJS.ProcessEnv = process.env): boolean {
-  return !!env.OPENAI_API_KEY;
+  return aiConfigured(env);
 }
 
 export function createModelExtractor(env: NodeJS.ProcessEnv = process.env): Extractor | null {
-  const resolved = resolveModel(env);
+  const resolved = languageModel("extraction", env);
   if (!resolved) return null;
-  const { model, id } = resolved;
+  const { model, id, label } = resolved;
 
   return {
-    name: `openai:${id}`,
+    name: label,
     async extract(
       input: DocumentInput,
       hint: { documentType: DocumentType },

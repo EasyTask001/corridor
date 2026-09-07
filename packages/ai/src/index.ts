@@ -1,3 +1,4 @@
+export * from "./client";
 export * from "./document-intelligence";
 export * from "./risk-detection";
 export * from "./copilot";

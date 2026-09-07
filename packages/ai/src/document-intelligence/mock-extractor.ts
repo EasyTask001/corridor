@@ -11,7 +11,9 @@
  *       BOL: BOL-1001   Date: 2026-09-01
  *       Line: Hot-rolled steel coils | 7208.10 | 21500 kg | 12 pcs | 48000 USD | CA
  *     Unlabelled / malformed values come back with low confidence so the
- *     human-in-the-loop path is exercised.
+ *     human-in-the-loop path is exercised. Text mentioning "rate confirmation"
+ *     is read as a load tender: Carrier/Broker/Pickup/Delivery/Equipment/Rate
+ *     labels fill `rateConfirmation` and `cargo` stays empty.
  * Anything else yields a single low-confidence placeholder line.
  */
 import type { DocumentType, ExtractedDocument } from "@corridor/domain";
@@ -47,6 +49,36 @@ function parseLine(text: string): ExtractedDocument["cargo"][number] {
   };
 }
 
+/**
+ * Load-tender block. Rate confirmations carry no commodity detail, so the mock
+ * returns the tender fields and an EMPTY cargo array — nothing here may become
+ * a customs line.
+ */
+function parseRateConfirmation(
+  grab: (label: string) => string | undefined,
+): NonNullable<ExtractedDocument["rateConfirmation"]> {
+  const rate = grab("Rate") ?? "";
+  const amount = rate.match(/([\d,]+(?:\.\d+)?)/)?.[1];
+  const at = (value: string | undefined) => {
+    const m = value?.match(/\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?/);
+    if (!m) return null;
+    return m[0].includes("T") ? m[0] : `${m[0]}T00:00:00`;
+  };
+  const rc = {
+    carrierName: parseParty(grab("Carrier"), 0).name,
+    brokerName: parseParty(grab("Broker"), 0).name,
+    referenceNumber:
+      grab("Rate Confirmation") ?? grab("RateCon") ?? grab("Load") ?? grab("Number") ?? null,
+    rateAmount: amount ? Number(amount.replace(/,/g, "")) : null,
+    rateCurrency: (rate.match(/\b(USD|CAD)\b/i)?.[1]?.toUpperCase() as "USD" | "CAD") ?? null,
+    pickupAt: at(grab("Pickup")),
+    deliveryAt: at(grab("Delivery")),
+    equipment: grab("Equipment") ?? null,
+  };
+  const known = Object.values(rc).filter((v) => v != null && v !== "").length;
+  return { ...rc, confidence: Math.min(0.97, 0.3 + known * 0.1) };
+}
+
 function parseParty(line: string | undefined, conf: number) {
   if (!line) return { name: null, address: null, taxId: null, confidence: 0.2 };
   const [name, ...rest] = line.split(",").map((s) => s.trim());
@@ -71,19 +103,26 @@ export function mockExtract(input: DocumentInput, hint: { documentType: Document
   const lines = [...text.matchAll(/^\s*Line\s*:\s*(.+)$/gim)].map((m) => parseLine(m[1]!));
   const isText = input.mimeType.startsWith("text/") && (lines.length > 0 || grab("Shipper"));
 
+  const isRateCon = /rate\s+con(firmation)?\b|carrier\s+rate|load\s+tender/i.test(text);
+
   if (isText) {
-    const type: DocumentType = grab("Invoice")
-      ? "invoice"
-      : grab("Rate Confirmation") || grab("RateCon")
-        ? "rate_confirmation"
+    const type: DocumentType = isRateCon
+      ? "rate_confirmation"
+      : grab("Invoice")
+        ? "invoice"
         : grab("BOL") || grab("Bill of Lading")
           ? "bol"
           : hint.documentType;
     const shipper = parseParty(grab("Shipper"), 0.93);
     const consignee = parseParty(grab("Consignee"), 0.91);
     const brokerLine = grab("Broker");
-    const cargo = lines.length ? lines : [parseLine("Unreadable line")];
+    const rateConfirmation = type === "rate_confirmation" ? parseRateConfirmation(grab) : null;
+    // A rate confirmation legitimately has no cargo; anything else that shows
+    // no readable line gets one low-confidence placeholder for the reviewer.
+    const cargo = lines.length ? lines : rateConfirmation ? [] : [parseLine("Unreadable line")];
     const notes: string[] = [];
+    if (rateConfirmation)
+      notes.push("Rate confirmation: load tender only, no customs data extracted.");
     if (!shipper.name) notes.push("Shipper not found on document.");
     if (!consignee.name) notes.push("Consignee not found on document.");
     for (const [i, l] of cargo.entries()) {
@@ -93,11 +132,9 @@ export function mockExtract(input: DocumentInput, hint: { documentType: Document
     const totalsWeight = cargo.reduce((s, l) => s + (l.weightKg ?? 0), 0) || null;
     const totalsPieces = cargo.reduce((s, l) => s + (l.pieceCount ?? 0), 0) || null;
     const totalsValue = cargo.reduce((s, l) => s + (l.valueAmount ?? 0), 0) || null;
-    const overall = Math.min(
-      shipper.confidence,
-      consignee.confidence,
-      ...cargo.map((c) => c.confidence),
-    );
+    const overall = rateConfirmation
+      ? rateConfirmation.confidence
+      : Math.min(shipper.confidence, consignee.confidence, ...cargo.map((c) => c.confidence));
     return {
       documentType: type,
       documentNumber:
@@ -107,6 +144,7 @@ export function mockExtract(input: DocumentInput, hint: { documentType: Document
       consignee,
       broker: brokerLine ? parseParty(brokerLine, 0.85) : null,
       cargo,
+      rateConfirmation,
       totals: {
         weightKg: totalsWeight,
         pieceCount: totalsPieces,
@@ -139,8 +177,9 @@ export function mockExtract(input: DocumentInput, hint: { documentType: Document
         confidence: 0.1,
       },
     ],
+    rateConfirmation: null,
     totals: null,
-    notes: ["Mock extractor: configure OPENAI_API_KEY to read PDFs and images."],
+    notes: ["Mock extractor: configure AI_GATEWAY_API_KEY to read PDFs and images."],
     confidence: 0.1,
   } satisfies ExtractedDocument;
 }

@@ -1,0 +1,18 @@
+{
+  "documentType": "rate_confirmation",
+  "documentNumber": "RC-55120",
+  "documentDate": "2026-09-04",
+  "shipper": { "name": "Erie Produce Co" },
+  "consignee": { "name": "Fort Erie Cold Storage" },
+  "cargo": [],
+  "rateConfirmation": {
+    "carrierName": "Pathfinder Trans Inc",
+    "brokerName": "Great Lakes Logistics LLC",
+    "referenceNumber": "RC-55120",
+    "rateAmount": 2450,
+    "rateCurrency": "USD",
+    "pickupAt": "2026-09-05T08:00",
+    "deliveryAt": "2026-09-06T14:00",
+    "equipment": "53' reefer, -1C continuous"
+  }
+}

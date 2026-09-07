@@ -5,7 +5,6 @@ export {
   createEmbedder,
   selectEmbedder,
   embedderAvailable,
-  DEFAULT_EMBEDDING_MODEL,
   EMBEDDING_DIMENSIONS,
 } from "./embedder";
 export * from "./chunk";

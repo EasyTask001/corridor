@@ -300,6 +300,47 @@ function ReviewForm({
             </div>
           </section>
 
+          {extracted.rateConfirmation && (
+            <section className="panel p-4" aria-labelledby="rate-con-heading">
+              <div className="flex items-center justify-between">
+                <h2
+                  id="rate-con-heading"
+                  className="text-xs font-medium uppercase tracking-wide text-ink-500"
+                >
+                  Rate confirmation
+                </h2>
+                <Conf value={extracted.rateConfirmation.confidence} />
+              </div>
+              <p className="mt-1 text-xs text-ink-500">
+                Load tender — read-only. Rate confirmations carry no commodity detail, so nothing
+                here is applied to a movement.
+              </p>
+              <dl className="mt-3 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                {(
+                  [
+                    ["Carrier", extracted.rateConfirmation.carrierName],
+                    ["Broker", extracted.rateConfirmation.brokerName],
+                    ["Reference", extracted.rateConfirmation.referenceNumber],
+                    [
+                      "Rate",
+                      extracted.rateConfirmation.rateAmount != null
+                        ? `${extracted.rateConfirmation.rateAmount} ${extracted.rateConfirmation.rateCurrency ?? ""}`.trim()
+                        : null,
+                    ],
+                    ["Pickup", extracted.rateConfirmation.pickupAt],
+                    ["Delivery", extracted.rateConfirmation.deliveryAt],
+                    ["Equipment", extracted.rateConfirmation.equipment],
+                  ] as const
+                ).map(([label, value]) => (
+                  <div key={label}>
+                    <dt className="text-xs text-ink-500">{label}</dt>
+                    <dd className="font-mono text-xs">{value || "—"}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
+          )}
+
           <section className="panel overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">

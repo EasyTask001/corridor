@@ -7,16 +7,13 @@ import {
   toUIMessageStream,
   type UIMessage,
 } from "ai";
-import { createOpenAI } from "@ai-sdk/openai";
 import { cookies } from "next/headers";
 import { ACTIVE_ORG_COOKIE, createContext, copilotTools, retrieveContext } from "@corridor/api";
-import { COPILOT_SYSTEM_PROMPT, buildContextBlock } from "@corridor/ai";
+import { COPILOT_SYSTEM_PROMPT, buildContextBlock, languageModel } from "@corridor/ai";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
-
-const FALLBACK_MODEL = "gpt-4.1-mini";
 
 export async function POST(req: Request) {
   const [supabase, cookieStore] = await Promise.all([createSupabaseServerClient(), cookies()]);
@@ -46,14 +43,14 @@ export async function POST(req: Request) {
     ? await ctx.rls((tx) => retrieveContext(tx, orgId, lastUserText))
     : { regulations: [], orgKnowledge: [] };
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
+  const resolved = languageModel("copilot");
+  if (!resolved) {
     // Mock mode: no model configured. Retrieval still runs so citations can
     // be exercised end-to-end; the "answer" is a plain summary of what
     // retrieval found, streamed through the same UI message protocol.
     const summary = context.regulations.length
-      ? `Mock copilot (no OPENAI_API_KEY configured): closest regulation match is "${context.regulations[0]!.title}" (${context.regulations[0]!.source}).`
-      : "Mock copilot (no OPENAI_API_KEY configured): no matching regulation found for that question. Configure OPENAI_API_KEY to enable the real model and tools.";
+      ? `Mock copilot (no AI provider configured): closest regulation match is "${context.regulations[0]!.title}" (${context.regulations[0]!.source}).`
+      : "Mock copilot (no AI provider configured): no matching regulation found for that question. Set AI_GATEWAY_API_KEY (or OPENAI_API_KEY) to enable the real model and tools.";
     const stream = createUIMessageStream({
       execute: ({ writer }) => {
         writer.write({ type: "data-citations", data: context });
@@ -72,11 +69,8 @@ export async function POST(req: Request) {
     context.orgKnowledge.map((k: { content: string }) => k.content),
   );
 
-  const openai = createOpenAI({ apiKey });
-  const model = openai(process.env.CORRIDOR_COPILOT_MODEL ?? FALLBACK_MODEL);
-
   const result = streamText({
-    model,
+    model: resolved.model,
     system: contextBlock ? `${COPILOT_SYSTEM_PROMPT}\n\n${contextBlock}` : COPILOT_SYSTEM_PROMPT,
     messages: await convertToModelMessages(messages),
     // Each tool call opens its own short-lived RLS transaction (see

@@ -19,6 +19,22 @@ describe("classifyByHints", () => {
     expect(classifyByHints("ratecon-4471.pdf", "other")).toBe("rate_confirmation");
     expect(classifyByHints("IMG_2231.jpg", "other")).toBe("other");
   });
+
+  it("detects rate confirmations from content when the filename says nothing", () => {
+    expect(classifyByHints("IMG_2231.jpg", "other", "CARRIER RATE CONFIRMATION\nLoad 4471")).toBe(
+      "rate_confirmation",
+    );
+    expect(classifyByHints("scan.pdf", "other", "Rate Con  #4471")).toBe("rate_confirmation");
+    expect(classifyByHints("scan.pdf", "other", "LOAD TENDER — please sign")).toBe(
+      "rate_confirmation",
+    );
+  });
+
+  it("lets content override a misleading filename, but never the declared type", () => {
+    const tender = "CARRIER RATE CONFIRMATION\nBill of lading to follow";
+    expect(classifyByHints("bol-4471.pdf", "other", tender)).toBe("rate_confirmation");
+    expect(classifyByHints("bol-4471.pdf", "bol", tender)).toBe("bol");
+  });
 });
 
 describe("selectExtractor", () => {
@@ -105,6 +121,55 @@ describe("runExtractionPipeline", () => {
     };
     const out = await runExtractionPipeline(textDoc("x"), { extractor: boom });
     expect(out).toMatchObject({ ok: false, error: "provider down" });
+  });
+
+  it("treats a rate confirmation as a load tender: no cargo, tender confidence", async () => {
+    const out = await runExtractionPipeline(
+      textDoc(
+        `CARRIER RATE CONFIRMATION\nRate Confirmation: RC-900\nBroker: Great Lakes Logistics LLC, Detroit MI\nCarrier: Pathfinder Trans Inc, Windsor ON\nShipper: Erie Produce Co, Buffalo NY\nConsignee: Fort Erie Cold Storage, Fort Erie ON\nPickup: 2026-09-05T08:00\nDelivery: 2026-09-06T14:00\nEquipment: 53' reefer\nRate: 2,450.00 USD`,
+        "scan-4471.txt",
+      ),
+      { extractor: mockExtractor },
+    );
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.detectedType).toBe("rate_confirmation");
+    // No commodity detail on a tender — nothing may become a cargo line.
+    expect(out.document.cargo).toEqual([]);
+    expect(out.document.rateConfirmation).toMatchObject({
+      carrierName: "Pathfinder Trans Inc",
+      brokerName: "Great Lakes Logistics LLC",
+      referenceNumber: "RC-900",
+      rateAmount: 2450,
+      rateCurrency: "USD",
+      pickupAt: "2026-09-05T08:00",
+      deliveryAt: "2026-09-06T14:00",
+      equipment: "53' reefer",
+    });
+    // Missing cargo is not a review flag on a tender; its own block carries the score.
+    expect(out.lowConfidenceFields).toEqual([]);
+    expect(out.confidence).toBe(out.document.rateConfirmation!.confidence);
+  });
+
+  it("flags an unreadable rate confirmation rather than reporting empty cargo", async () => {
+    const out = await runExtractionPipeline(
+      textDoc(`RATE CONFIRMATION\nShipper: Erie Produce Co`, "tender.txt"),
+      { extractor: mockExtractor },
+    );
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.lowConfidenceFields).toEqual(["rateConfirmation"]);
+    expect(out.confidence).toBeLessThan(0.7);
+  });
+
+  it("non-tender documents carry no rate-confirmation block", async () => {
+    const out = await runExtractionPipeline(
+      textDoc(`BOL: B3\nShipper: A Co\nConsignee: B Inc\nLine: Widgets | 8471.30 | 10 kg | 1 pcs`),
+      { extractor: mockExtractor },
+    );
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.document.rateConfirmation).toBeNull();
   });
 
   it("lowConfidenceFields handles empty cargo", () => {

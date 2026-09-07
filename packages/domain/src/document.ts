@@ -49,6 +49,36 @@ export const extractedCargoLine = z.object({
 export type ExtractedCargoLine = z.infer<typeof extractedCargoLine>;
 
 /**
+ * ISO-8601 date-time as printed on a load tender. The offset is optional
+ * because tenders quote local pickup/delivery windows without one.
+ */
+const tenderDateTime = z
+  .string()
+  .regex(
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:\d{2})?$/,
+    "Expected an ISO-8601 date-time",
+  );
+
+/**
+ * A broker → carrier rate confirmation (load tender). It is NOT a customs
+ * document: it carries no commodity detail, so nothing here ever becomes a
+ * cargo line or a manifest field — review shows it read-only. Non-rate-con
+ * documents carry `null` here.
+ */
+export const extractedRateConfirmation = z.object({
+  carrierName: z.string().trim().max(160).nullable(),
+  brokerName: z.string().trim().max(160).nullable(),
+  referenceNumber: z.string().trim().max(60).nullable(),
+  rateAmount: z.number().nonnegative().max(1_000_000).nullable(),
+  rateCurrency: currency.nullable(),
+  pickupAt: tenderDateTime.nullable(),
+  deliveryAt: tenderDateTime.nullable(),
+  equipment: z.string().trim().max(80).nullable(),
+  confidence,
+});
+export type ExtractedRateConfirmation = z.infer<typeof extractedRateConfirmation>;
+
+/**
  * THE extraction contract. The same schema validates the model's structured
  * output (`generateObject`) and the review form, so AI output can never
  * bypass domain validation on its way into `cargo`.
@@ -61,6 +91,12 @@ export const extractedDocument = z.object({
   consignee: extractedParty,
   broker: extractedParty.nullable(),
   cargo: z.array(extractedCargoLine).max(50),
+  /**
+   * Load-tender details, present only when `documentType` is
+   * "rate_confirmation" (null otherwise — nullable rather than optional so the
+   * schema stays valid for providers that require every key).
+   */
+  rateConfirmation: extractedRateConfirmation.nullable(),
   totals: z
     .object({
       weightKg: z.number().nonnegative().nullable(),
@@ -71,7 +107,10 @@ export const extractedDocument = z.object({
     .nullable(),
   /** Anything the extractor was unsure about, for the reviewer. */
   notes: z.array(z.string().max(300)).max(20),
-  /** overall confidence — min of the required-field confidences, see pipeline */
+  /**
+   * overall confidence — min of the required-field confidences (see pipeline),
+   * or the rate-confirmation block's confidence for a load tender
+   */
   confidence,
 });
 export type ExtractedDocument = z.infer<typeof extractedDocument>;

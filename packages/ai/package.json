@@ -15,6 +15,7 @@
     "eval": "vitest run src/eval"
   },
   "dependencies": {
+    "@ai-sdk/gateway": "^4.0.75",
     "@ai-sdk/openai": "^4.0.60",
     "@corridor/domain": "workspace:*",
     "ai": "^7.0.93",

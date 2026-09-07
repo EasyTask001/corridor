@@ -18,7 +18,7 @@ export default async function CopilotPage() {
         <p className="text-sm text-ink-500">
           Answers cite ingested CBP/CBSA guidance and your organization&apos;s own movement notes,
           and can look up live movement, driver and tariff data.
-          {capabilities.mode === "mock" && " Running in mock mode (no OPENAI_API_KEY configured)."}
+          {capabilities.mode === "mock" && " Running in mock mode (no AI provider configured)."}
         </p>
       </header>
       <CopilotChat
