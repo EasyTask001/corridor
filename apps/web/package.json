@@ -22,6 +22,7 @@
     "@corridor/db": "workspace:*",
     "@corridor/domain": "workspace:*",
     "@corridor/integrations": "workspace:*",
+    "@corridor/ui": "workspace:*",
     "@supabase/ssr": "^0.12.6",
     "@supabase/supabase-js": "^2.57.4",
     "@tanstack/react-query": "^5.102.8",

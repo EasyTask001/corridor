@@ -1,10 +1,23 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { daysBetween, todayIso } from "@corridor/domain";
+import {
+  Badge,
+  Button,
+  Card,
+  cn,
+  createDataTableColumns,
+  DataTable,
+  Input,
+  Label,
+  NativeSelect,
+  Textarea,
+  type DataTableColumnDef,
+} from "@corridor/ui";
 import { useTRPC } from "@/lib/trpc/client";
-import { REGISTRIES, type FieldDef, type RegistryKind } from "./fields";
+import { REGISTRIES, type FieldDef, type RegistryConfig, type RegistryKind } from "./fields";
 
 type Row = Record<string, unknown> & { id: string; status: string };
 
@@ -70,13 +83,32 @@ export function ExpiryChip({ value }: { value: unknown }) {
 
 function StatusChip({ value }: { value: unknown }) {
   const s = String(value);
-  const cls =
-    s === "active"
-      ? "bg-ok-500/10 text-ok-500"
-      : s === "inactive"
-        ? "bg-ink-100 text-ink-500"
-        : "bg-ink-100 text-ink-300";
-  return <span className={`rounded px-2 py-0.5 text-xs font-medium ${cls}`}>{s}</span>;
+  return (
+    <Badge variant={s === "active" ? "ok" : s === "inactive" ? "neutral" : "muted"}>{s}</Badge>
+  );
+}
+
+/** Renders one registry cell from the column config (see `fields.ts`). */
+function renderCell(cfg: RegistryConfig, r: Row, key: string): ReactNode {
+  switch (key) {
+    case "__name":
+      return <span className="font-medium">{cfg.displayName(r)}</span>;
+    case "__desc":
+      return [r.modelYear, r.make, r.model].filter(Boolean).join(" ") || "—";
+    case "__city": {
+      const a = (r.address ?? {}) as Record<string, string>;
+      return [a.city, a.region, a.country].filter(Boolean).join(", ") || "—";
+    }
+    default: {
+      const col = cfg.columns.find((c) => c.key === key);
+      const v = getPath(r, key);
+      if (col?.kind === "expiry") return <ExpiryChip value={v} />;
+      if (col?.kind === "status") return <StatusChip value={v} />;
+      if (col?.kind === "mono")
+        return <span className="font-mono text-xs">{String(v ?? "—")}</span>;
+      return String(v ?? "—").replace(/_/g, " ");
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -146,27 +178,52 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
     else if (editing) update.mutate({ ...payload, id: editing.id } as any);
   };
 
-  const cell = (r: Row, key: string) => {
-    switch (key) {
-      case "__name":
-        return <span className="font-medium">{cfg.displayName(r)}</span>;
-      case "__desc":
-        return [r.modelYear, r.make, r.model].filter(Boolean).join(" ") || "—";
-      case "__city": {
-        const a = (r.address ?? {}) as Record<string, string>;
-        return [a.city, a.region, a.country].filter(Boolean).join(", ") || "—";
-      }
-      default: {
-        const col = cfg.columns.find((c) => c.key === key);
-        const v = getPath(r, key);
-        if (col?.kind === "expiry") return <ExpiryChip value={v} />;
-        if (col?.kind === "status") return <StatusChip value={v} />;
-        if (col?.kind === "mono")
-          return <span className="font-mono text-xs">{String(v ?? "—")}</span>;
-        return String(v ?? "—").replace(/_/g, " ");
-      }
+  const columns = useMemo<DataTableColumnDef<Row>[]>(() => {
+    const helper = createDataTableColumns<Row>();
+    const cols: DataTableColumnDef<Row>[] = cfg.columns.map((c) =>
+      helper.display({
+        id: c.key,
+        header: c.label,
+        cell: ({ row }) => renderCell(cfg, row.original, c.key),
+        meta: { className: "whitespace-nowrap", headerClassName: "whitespace-nowrap" },
+      }),
+    );
+    if (canWrite) {
+      cols.push(
+        helper.display({
+          id: "__actions",
+          header: "",
+          meta: { className: "whitespace-nowrap text-right" },
+          cell: ({ row }) => (
+            <>
+              <Button
+                variant="ghost"
+                size="xs"
+                className="mr-3 px-0 py-0"
+                onClick={() => {
+                  setError(null);
+                  setEditing(row.original);
+                }}
+              >
+                Edit
+              </Button>
+              {row.original.status !== "archived" && (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="px-0 py-0 text-danger-500 hover:text-danger-500 hover:underline"
+                  onClick={() => archive.mutate({ id: row.original.id })}
+                >
+                  Archive
+                </Button>
+              )}
+            </>
+          ),
+        }),
+      );
     }
-  };
+    return cols;
+  }, [cfg, canWrite, archive]);
 
   return (
     <div className="space-y-4">
@@ -178,12 +235,12 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <input
+          <Input
             aria-label="Search"
             placeholder={cfg.searchPlaceholder}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="input w-72"
+            className="w-72"
           />
           <label className="flex items-center gap-1.5 text-xs text-ink-500">
             <input
@@ -194,73 +251,21 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
             Show archived
           </label>
           {canWrite && (
-            <button className="btn-primary" onClick={() => setEditing("new")}>
-              New {cfg.singular.toLowerCase()}
-            </button>
+            <Button onClick={() => setEditing("new")}>New {cfg.singular.toLowerCase()}</Button>
           )}
         </div>
       </header>
 
-      <div className="panel overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">
-            <tr>
-              {cfg.columns.map((c) => (
-                <th key={c.key} className="whitespace-nowrap px-4 py-2 font-medium">
-                  {c.label}
-                </th>
-              ))}
-              {canWrite && <th className="px-4 py-2" />}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-ink-100">
-            {isLoading && (
-              <tr>
-                <td className="px-4 py-6 text-ink-500" colSpan={cfg.columns.length + 1}>
-                  Loading…
-                </td>
-              </tr>
-            )}
-            {!isLoading && rows.length === 0 && (
-              <tr>
-                <td className="px-4 py-6 text-ink-500" colSpan={cfg.columns.length + 1}>
-                  No {cfg.title.toLowerCase()} yet.
-                </td>
-              </tr>
-            )}
-            {rows.map((r) => (
-              <tr key={r.id} className={r.status === "archived" ? "opacity-50" : ""}>
-                {cfg.columns.map((c) => (
-                  <td key={c.key} className="whitespace-nowrap px-4 py-2">
-                    {cell(r, c.key)}
-                  </td>
-                ))}
-                {canWrite && (
-                  <td className="whitespace-nowrap px-4 py-2 text-right">
-                    <button
-                      className="mr-3 text-xs text-ink-500 hover:text-ink-950"
-                      onClick={() => {
-                        setError(null);
-                        setEditing(r);
-                      }}
-                    >
-                      Edit
-                    </button>
-                    {r.status !== "archived" && (
-                      <button
-                        className="text-xs text-danger-500 hover:underline"
-                        onClick={() => archive.mutate({ id: r.id })}
-                      >
-                        Archive
-                      </button>
-                    )}
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <Card className="overflow-x-auto">
+        <DataTable
+          data={rows}
+          columns={columns}
+          getRowId={(r) => r.id}
+          isLoading={isLoading}
+          emptyMessage={`No ${cfg.title.toLowerCase()} yet.`}
+          rowClassName={(r) => (r.status === "archived" ? "opacity-50" : undefined)}
+        />
+      </Card>
 
       {editing && (
         <div
@@ -285,15 +290,15 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
                 const initial = editing === "new" ? "" : (getPath(editing, f.name) ?? "");
                 const value =
                   f.type === "date" && initial ? String(initial).slice(0, 10) : String(initial);
-                const cls = `input ${f.mono ? "font-mono" : ""} ${f.uppercase ? "uppercase" : ""}`;
+                const cls = cn(f.mono && "font-mono", f.uppercase && "uppercase");
                 return (
                   <div key={f.name} className={f.span === 2 ? "col-span-2" : ""}>
-                    <label htmlFor={id} className="label">
+                    <Label htmlFor={id}>
                       {f.label}
                       {f.required && <span className="text-danger-500"> *</span>}
-                    </label>
+                    </Label>
                     {f.type === "select" ? (
-                      <select
+                      <NativeSelect
                         id={id}
                         name={f.name}
                         defaultValue={value || f.options?.[0]?.value}
@@ -304,9 +309,9 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
                             {o.label}
                           </option>
                         ))}
-                      </select>
+                      </NativeSelect>
                     ) : f.type === "textarea" ? (
-                      <textarea
+                      <Textarea
                         id={id}
                         name={f.name}
                         defaultValue={value}
@@ -314,7 +319,7 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
                         className={cls}
                       />
                     ) : (
-                      <input
+                      <Input
                         id={id}
                         name={f.name}
                         type={f.type ?? "text"}
@@ -331,16 +336,12 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
             <div className="flex items-center justify-between gap-3 border-t border-ink-100 px-6 py-4">
               <p className="text-sm text-danger-500">{error}</p>
               <div className="flex gap-2">
-                <button type="button" className="btn-secondary" onClick={() => setEditing(null)}>
+                <Button type="button" variant="secondary" onClick={() => setEditing(null)}>
                   Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="btn-primary"
-                  disabled={create.isPending || update.isPending}
-                >
+                </Button>
+                <Button type="submit" disabled={create.isPending || update.isPending}>
                   {create.isPending || update.isPending ? "Saving…" : "Save"}
-                </button>
+                </Button>
               </div>
             </div>
           </form>

@@ -1,0 +1,24 @@
+/**
+ * Corridor design tokens. Imported by the web app's `globals.css` (after
+ * `@import "tailwindcss"`) so every `ink-*` / `signal-*` / `ok|warn|danger`
+ * utility referenced by `@corridor/ui` resolves the same way everywhere.
+ */
+@theme {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  /* Corridor palette: deep navy ground, signal amber accent (border / customs) */
+  --color-ink-950: #0b1220;
+  --color-ink-900: #111a2e;
+  --color-ink-800: #1a2540;
+  --color-ink-700: #2a3856;
+  --color-ink-500: #5b6b8c;
+  --color-ink-300: #aab5cc;
+  --color-ink-100: #e6eaf2;
+  --color-ink-50: #f5f7fb;
+  --color-signal-500: #f0a93a;
+  --color-signal-600: #d9932a;
+  --color-ok-500: #22a06b;
+  --color-warn-500: #e0a20c;
+  --color-danger-500: #d9534f;
+}

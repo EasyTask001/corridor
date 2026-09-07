@@ -25,6 +25,7 @@ Demo logins (password `corridor-demo`): `owner@pathfinder.demo`, `dispatch@pathf
 | `packages/db`         | Drizzle schema + `withRls()` transaction helper                                  |
 | `packages/auth`       | Session resolution (cookie **or** Bearer), permission helpers                    |
 | `packages/api`        | tRPC routers + context                                                           |
+| `packages/ui`         | shadcn-style component library + design tokens (`@corridor/ui`)                  |
 | `supabase/migrations` | SQL source of truth for schema, RLS, functions                                   |
 
 ## AI providers

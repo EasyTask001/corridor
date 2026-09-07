@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { AlertStatus } from "@corridor/domain";
+import { Badge, Button, cn } from "@corridor/ui";
 import { useTRPC } from "@/lib/trpc/client";
 
 const TABS: { label: string; status: AlertStatus[] }[] = [
@@ -13,16 +14,13 @@ const TABS: { label: string; status: AlertStatus[] }[] = [
 ];
 
 export function SeverityBadge({ severity }: { severity: string }) {
-  const cls =
-    severity === "critical"
-      ? "bg-danger-500/10 text-danger-500"
-      : severity === "warning"
-        ? "bg-warn-500/10 text-warn-500"
-        : "bg-ink-100 text-ink-500";
   return (
-    <span className={`rounded px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${cls}`}>
+    <Badge
+      caps
+      variant={severity === "critical" ? "danger" : severity === "warning" ? "warn" : "neutral"}
+    >
       {severity}
-    </span>
+    </Badge>
   );
 }
 
@@ -87,22 +85,19 @@ export function AlertsList({ canManage }: { canManage: boolean }) {
             <button
               key={t.label}
               onClick={() => setTab(i)}
-              className={`rounded px-3 py-1 text-sm ${
-                i === tab ? "bg-white font-medium shadow-sm" : "text-ink-500 hover:text-ink-950"
-              }`}
+              className={cn(
+                "rounded px-3 py-1 text-sm",
+                i === tab ? "bg-white font-medium shadow-sm" : "text-ink-500 hover:text-ink-950",
+              )}
             >
               {t.label}
             </button>
           ))}
         </div>
         {canManage && (
-          <button
-            className="btn-secondary"
-            disabled={rescan.isPending}
-            onClick={() => rescan.mutate()}
-          >
+          <Button variant="secondary" disabled={rescan.isPending} onClick={() => rescan.mutate()}>
             {rescan.isPending ? "Scanning…" : "Re-run checks"}
-          </button>
+          </Button>
         )}
       </div>
 
@@ -135,36 +130,40 @@ export function AlertsList({ canManage }: { canManage: boolean }) {
               {canManage && (
                 <div className="flex shrink-0 gap-2">
                   {a.status === "open" && (
-                    <button
-                      className="btn-secondary px-3 py-1 text-xs"
+                    <Button
+                      variant="secondary"
+                      size="sm"
                       onClick={() => setStatus.mutate({ id: a.id, status: "acknowledged" })}
                     >
                       Acknowledge
-                    </button>
+                    </Button>
                   )}
                   {(a.status === "open" || a.status === "acknowledged") && (
                     <>
-                      <button
-                        className="btn-secondary px-3 py-1 text-xs"
+                      <Button
+                        variant="secondary"
+                        size="sm"
                         onClick={() => setStatus.mutate({ id: a.id, status: "resolved" })}
                       >
                         Resolve
-                      </button>
-                      <button
-                        className="px-2 py-1 text-xs text-ink-500 hover:text-ink-950"
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="xs"
                         onClick={() => setStatus.mutate({ id: a.id, status: "dismissed" })}
                       >
                         Dismiss
-                      </button>
+                      </Button>
                     </>
                   )}
                   {(a.status === "resolved" || a.status === "dismissed") && (
-                    <button
-                      className="btn-secondary px-3 py-1 text-xs"
+                    <Button
+                      variant="secondary"
+                      size="sm"
                       onClick={() => setStatus.mutate({ id: a.id, status: "open" })}
                     >
                       Reopen
-                    </button>
+                    </Button>
                   )}
                 </div>
               )}

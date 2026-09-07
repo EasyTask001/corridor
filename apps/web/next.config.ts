@@ -8,6 +8,7 @@ const nextConfig: NextConfig = {
     "@corridor/db",
     "@corridor/domain",
     "@corridor/integrations",
+    "@corridor/ui",
   ],
   serverExternalPackages: ["postgres"],
   headers: async () => [

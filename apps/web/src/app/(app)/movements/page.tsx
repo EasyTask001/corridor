@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { movementStatus, type MovementStatus } from "@corridor/domain";
+import { Button, buttonVariants, Card, Input } from "@corridor/ui";
 import { getSession } from "@/lib/session";
 import { api } from "@/lib/trpc/server";
-import { StatusBadge } from "@/components/movement/status-badge";
+import { MovementsTable, type MovementRow } from "./movements-table";
 import { createMovement } from "./actions";
 
 export const metadata: Metadata = { title: "Movements" };
@@ -59,6 +60,21 @@ export default async function MovementsPage({
   const fmt = (d: Date | null) =>
     d ? d.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "—";
 
+  // Formatted here (Server Component) so the client table stays serialisable
+  // and renders the same string before and after hydration.
+  const tableRows: MovementRow[] = list.rows.map((m) => ({
+    id: m.id,
+    movementNumber: m.movementNumber,
+    tripNumber: m.tripNumber,
+    status: m.status,
+    crossingLabel: m.crossingPoint?.name ?? m.crossingPoint?.code ?? "—",
+    etaLabel: fmt(m.scheduledCrossingAt),
+    driverLabel: m.driverName ?? "—",
+    unitsLabel: `${m.truckUnit ?? "—"} / ${m.trailerUnit ?? "—"}`,
+    cargoCount: m.cargoCount,
+    customsReferenceLabel: m.customsReferenceNumber ?? "—",
+  }));
+
   return (
     <div className="space-y-4">
       <header className="flex flex-wrap items-end justify-between gap-3">
@@ -70,13 +86,13 @@ export default async function MovementsPage({
           <div className="flex items-center gap-2">
             <form action={createMovement}>
               <input type="hidden" name="regime" value="ACE" />
-              <button className="btn-primary">New ACE movement</button>
+              <Button>New ACE movement</Button>
             </form>
             <form action={createMovement}>
               <input type="hidden" name="regime" value="ACI" />
-              <button className="btn-signal">New ACI movement</button>
+              <Button variant="signal">New ACI movement</Button>
             </form>
-            <Link href="/movements/new" className="btn-secondary">
+            <Link href="/movements/new" className={buttonVariants({ variant: "secondary" })}>
               New movement…
             </Link>
           </div>
@@ -112,69 +128,19 @@ export default async function MovementsPage({
         <form className="ml-auto" method="get">
           {status && <input type="hidden" name="status" value={status} />}
           {regime && <input type="hidden" name="regime" value={regime} />}
-          <input
+          <Input
             name="q"
             defaultValue={q ?? ""}
             placeholder="Search movement #, trip, customs ref…"
             aria-label="Search movements"
-            className="input w-72"
+            className="w-72"
           />
         </form>
       </div>
 
-      <div className="panel overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">
-            <tr>
-              <th className="px-4 py-2 font-medium">Movement</th>
-              <th className="px-4 py-2 font-medium">Status</th>
-              <th className="px-4 py-2 font-medium">Crossing</th>
-              <th className="px-4 py-2 font-medium">ETA</th>
-              <th className="px-4 py-2 font-medium">Driver</th>
-              <th className="px-4 py-2 font-medium">Truck / Trailer</th>
-              <th className="px-4 py-2 font-medium">Lines</th>
-              <th className="px-4 py-2 font-medium">Customs ref</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-ink-100">
-            {list.rows.length === 0 && (
-              <tr>
-                <td colSpan={8} className="px-4 py-6 text-ink-500">
-                  No movements match.
-                </td>
-              </tr>
-            )}
-            {list.rows.map((m) => (
-              <tr key={m.id} className="hover:bg-ink-50">
-                <td className="px-4 py-2">
-                  <Link
-                    href={`/movements/${m.id}`}
-                    className="font-mono font-medium hover:underline"
-                  >
-                    {m.movementNumber}
-                  </Link>
-                  {m.tripNumber && <div className="text-xs text-ink-500">{m.tripNumber}</div>}
-                </td>
-                <td className="px-4 py-2">
-                  <StatusBadge status={m.status} />
-                </td>
-                <td className="px-4 py-2">
-                  {m.crossingPoint?.name ?? m.crossingPoint?.code ?? "—"}
-                </td>
-                <td className="whitespace-nowrap px-4 py-2 text-ink-700">
-                  {fmt(m.scheduledCrossingAt)}
-                </td>
-                <td className="px-4 py-2">{m.driverName ?? "—"}</td>
-                <td className="px-4 py-2 font-mono text-xs">
-                  {m.truckUnit ?? "—"} / {m.trailerUnit ?? "—"}
-                </td>
-                <td className="px-4 py-2 font-mono">{m.cargoCount}</td>
-                <td className="px-4 py-2 font-mono text-xs">{m.customsReferenceNumber ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <Card className="overflow-x-auto">
+        <MovementsTable rows={tableRows} />
+      </Card>
     </div>
   );
 }
