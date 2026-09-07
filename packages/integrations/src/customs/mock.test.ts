@@ -18,14 +18,38 @@ const src: ManifestSource = {
     port: { code: "3801", name: "Detroit" },
     scheduledCrossingAt: "2026-09-08T14:00:00.000Z",
   },
-  driver: {
-    firstName: "G",
-    lastName: "S",
-    licenseNumber: "L1",
-    licenseJurisdiction: "ON",
-    citizenship: "CA",
-    fastCardNumber: null,
-  },
+  crew: [
+    {
+      role: "person_in_charge",
+      firstName: "G",
+      lastName: "S",
+      gender: "M",
+      licenseNumber: "L1",
+      licenseJurisdiction: "ON",
+      citizenship: "CA",
+      hazmatEndorsement: true,
+      documents: [
+        {
+          documentType: "passport",
+          documentNumber: "P123",
+          issuingCountry: "CA",
+          issuingState: null,
+          expiresOn: "2030-01-01",
+        },
+      ],
+    },
+    {
+      role: "passenger",
+      firstName: "A",
+      lastName: "R",
+      gender: "F",
+      licenseNumber: null,
+      licenseJurisdiction: null,
+      citizenship: "US",
+      hazmatEndorsement: false,
+      documents: [],
+    },
+  ],
   truck: { unitNumber: "T-101", vin: null, plateNumber: "AB1", plateJurisdiction: "ON" },
   trailer: { unitNumber: "TR-501", plateNumber: "TRL1", plateJurisdiction: "ON" },
   seals: [{ sealNumber: "S1" }, { sealNumber: "S2" }],
@@ -69,7 +93,19 @@ describe("buildManifest", () => {
   it("maps movement → provider-neutral e-manifest", () => {
     const m = buildManifest(src);
     expect(m.trip.portOfEntry).toBe("3801");
+    expect(m.crew.map((c) => c.role)).toEqual(["person_in_charge", "passenger"]);
     expect(m.crew[0]?.licenseNumber).toBe("L1");
+    expect(m.crew[0]?.hazmatEndorsement).toBe(true);
+    expect(m.crew[0]?.documents).toEqual([
+      {
+        type: "passport",
+        number: "P123",
+        issuingCountry: "CA",
+        issuingState: null,
+        expiresOn: "2030-01-01",
+      },
+    ]);
+    expect(m.crew[1]?.gender).toBe("F");
     expect(m.equipment[0]?.seals).toEqual(["S1", "S2"]);
     expect(m.shipments[0]?.controlNumber).toBe("PFTRPAPS0001");
     expect(m.shipments[0]?.shipper).toEqual({
@@ -83,7 +119,7 @@ describe("buildManifest", () => {
     ]);
   });
   it("refuses incomplete movements", () => {
-    expect(() => buildManifest({ ...src, driver: null })).toThrow(/driver/);
+    expect(() => buildManifest({ ...src, crew: [] })).toThrow(/person in charge/);
     expect(() => buildManifest({ ...src, movement: { ...src.movement, port: null } })).toThrow(
       /port/,
     );

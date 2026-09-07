@@ -5,9 +5,12 @@
  */
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, asc, desc, eq, ilike, inArray, or, schema, sql } from "@corridor/db";
+import { and, asc, desc, eq, ilike, inArray, ne, or, schema, sql } from "@corridor/db";
 import {
   amendmentInput,
+  crewInput,
+  crewRemoveInput,
+  crewSetRoleInput,
   customsResponseInput,
   hasBlockingIssues,
   isEditable,
@@ -48,6 +51,7 @@ import { recordUsage } from "../services/usage";
 
 const {
   movements,
+  movementCrew,
   movementAmendments,
   movementSuggestions,
   seals,
@@ -70,6 +74,28 @@ function requireEditable(status: MovementStatus) {
 
 const actorOf = (ctx: OrgContext) => ({ orgId: ctx.orgId, userId: ctx.session.user.id });
 
+/**
+ * Step whoever currently holds the person-in-charge role down to crew member,
+ * so the caller can hand it to somebody else. `movement_crew_pic_unique` is the
+ * backstop; doing it here means promoting reads as a swap, not a constraint
+ * violation the dispatcher has to unpick.
+ */
+const demotePersonInCharge = (
+  tx: Parameters<typeof requireMovement>[0],
+  movementId: string,
+  except?: string,
+) =>
+  tx
+    .update(movementCrew)
+    .set({ role: "crew_member" })
+    .where(
+      and(
+        eq(movementCrew.movementId, movementId),
+        eq(movementCrew.role, "person_in_charge"),
+        ...(except ? [ne(movementCrew.driverId, except)] : []),
+      ),
+    );
+
 const customsSimulationEnabled = () =>
   process.env.CORRIDOR_ALLOW_CUSTOMS_SIMULATION === "true" || process.env.NODE_ENV !== "production";
 
@@ -81,7 +107,11 @@ export const movementRouter = router({
         const conds = [eq(movements.organizationId, ctx.orgId)];
         if (input.status?.length) conds.push(inArray(movements.status, input.status));
         if (input.regime) conds.push(eq(movements.regime, input.regime));
-        if (input.driverId) conds.push(eq(movements.driverId, input.driverId));
+        if (input.driverId)
+          conds.push(
+            sql`exists (select 1 from public.movement_crew mc
+                        where mc.movement_id = ${movements.id} and mc.driver_id = ${input.driverId})`,
+          );
         if (input.portId) conds.push(eq(movements.portId, input.portId));
         if (input.search) {
           const like = `%${input.search.replace(/[%_\\]/g, "\\$&")}%`;
@@ -108,7 +138,11 @@ export const movementRouter = router({
               carrierCode: movements.carrierCode,
               scheduledCrossingAt: movements.scheduledCrossingAt,
               customsReferenceNumber: movements.customsReferenceNumber,
-              driverName: sql<string | null>`${drivers.firstName} || ' ' || ${drivers.lastName}`,
+              driverName: sql<string | null>`(select d.first_name || ' ' || d.last_name
+                from public.movement_crew mc
+                join public.drivers d on d.id = mc.driver_id
+                where mc.movement_id = ${movements.id} and mc.role = 'person_in_charge'
+                limit 1)`,
               truckUnit: trucks.unitNumber,
               trailerUnit: trailers.unitNumber,
               shipmentCount: sql<number>`(select count(*)::int from public.shipments s where s.movement_id = ${movements.id})`,
@@ -116,7 +150,6 @@ export const movementRouter = router({
               createdAt: movements.createdAt,
             })
             .from(movements)
-            .leftJoin(drivers, eq(drivers.id, movements.driverId))
             .leftJoin(trucks, eq(trucks.id, movements.truckId))
             .leftJoin(trailers, eq(trailers.id, movements.trailerId))
             .leftJoin(ports, eq(ports.id, movements.portId))
@@ -211,14 +244,8 @@ export const movementRouter = router({
 
   update: permissionProcedure("movement.write")
     .input(movementPatch.extend({ id: uuid }))
-    .mutation(async ({ ctx, input }) => {
-      // Assigning (or reassigning) a driver is the one patch a driver needs to
-      // hear about. It is *resolved* inside the transaction (so `drivers` is
-      // read under the caller's RLS) but *delivered* after it commits: delivery
-      // needs the service role, and taking that connection while this one is
-      // still open would hold two from the same pool per request.
-      let pending: Awaited<ReturnType<typeof resolveDriverAssignment>> = null;
-      const row = await ctx.rls(async (tx) => {
+    .mutation(({ ctx, input }) =>
+      ctx.rls(async (tx) => {
         const { id, ...patch } = input;
         const m = await requireMovement(tx, ctx.orgId, id);
         requireEditable(m.status);
@@ -233,7 +260,6 @@ export const movementRouter = router({
                 ? new Date(patch.scheduledCrossingAt)
                 : null,
             }),
-            ...(patch.driverId !== undefined && { driverId: patch.driverId }),
             ...(patch.truckId !== undefined && { truckId: patch.truckId }),
             ...(patch.trailerId !== undefined && { trailerId: patch.trailerId }),
             ...(patch.notes !== undefined && { notes: patch.notes }),
@@ -241,36 +267,150 @@ export const movementRouter = router({
           .where(eq(movements.id, id))
           .returning();
         await writeAudit(tx, ctx.orgId, "movement.update", "movement", id, m, row!);
-        if (patch.driverId && patch.driverId !== m.driverId) {
+        return row!;
+      }),
+    ),
+
+  crew: router({
+    /**
+     * Put a person on the crossing. Promoting someone to person in charge
+     * demotes whoever held it (movement_crew_pic_unique allows exactly one).
+     *
+     * Being put on a load is the one change a crew member needs to hear about.
+     * It is *resolved* inside the transaction (so `drivers` is read under the
+     * caller's RLS) but *delivered* after it commits: delivery needs the
+     * service role, and taking that connection while this one is still open
+     * would hold two from the same pool per request.
+     */
+    add: permissionProcedure("movement.write")
+      .input(crewInput)
+      .mutation(async ({ ctx, input }) => {
+        let pending: Awaited<ReturnType<typeof resolveDriverAssignment>> = null;
+        const row = await ctx.rls(async (tx) => {
+          const m = await requireMovement(tx, ctx.orgId, input.movementId);
+          requireEditable(m.status);
+          if (input.role === "person_in_charge") await demotePersonInCharge(tx, input.movementId);
+          const nextRows = await tx
+            .select({ next: sql<number>`coalesce(max(${movementCrew.position}), 0) + 1` })
+            .from(movementCrew)
+            .where(eq(movementCrew.movementId, input.movementId));
+          const [crew] = await tx
+            .insert(movementCrew)
+            .values({
+              organizationId: ctx.orgId,
+              movementId: input.movementId,
+              driverId: input.driverId,
+              role: input.role,
+              position: nextRows[0]?.next ?? 1,
+            })
+            .returning()
+            .catch((e: unknown) => {
+              if ((e as { cause?: { code?: string } })?.cause?.code === "23505")
+                throw new TRPCError({
+                  code: "CONFLICT",
+                  message: "That person is already on this crossing",
+                });
+              throw e;
+            });
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "movement.crew_add",
+            "movement_crew",
+            crew!.id,
+            null,
+            crew!,
+          );
           pending = await resolveDriverAssignment(tx, {
             orgId: ctx.orgId,
-            driverId: patch.driverId,
-            movementId: id,
-            movementNumber: row!.movementNumber,
+            driverId: input.driverId,
+            movementId: input.movementId,
+            movementNumber: m.movementNumber,
             actorUserId: ctx.session.user.id,
           });
+          return crew!;
+        });
+        // Post-commit: no transaction of ours is open, so notifyUser's
+        // service-role transaction is the only connection in play.
+        //
+        // Never rethrow. The assignment is already durably committed, and a
+        // notification that could not be delivered is not a reason to hand the
+        // dispatcher a failed mutation — they would retry an edit that already
+        // succeeded. Log it instead and return the row.
+        if (pending) {
+          try {
+            await notifyUser(ctx.db, pending);
+          } catch (error) {
+            console.error(
+              `[notifications] movement.assigned dispatch failed for movement ${input.movementId} / driver ${input.driverId} (the assignment itself is committed)`,
+              error,
+            );
+          }
         }
-        return row!;
-      });
-      // Post-commit: no transaction of ours is open, so notifyUser's
-      // service-role transaction is the only connection in play.
-      //
-      // Never rethrow. The assignment is already durably committed, and a
-      // notification that could not be delivered is not a reason to hand the
-      // dispatcher a failed mutation — they would retry an edit that already
-      // succeeded. Log it instead and return the row.
-      if (pending) {
-        try {
-          await notifyUser(ctx.db, pending);
-        } catch (error) {
-          console.error(
-            `[notifications] movement.assigned dispatch failed for movement ${input.id} / driver ${input.driverId ?? "unknown"} (the update itself is committed)`,
-            error,
+        return row;
+      }),
+
+    remove: permissionProcedure("movement.write")
+      .input(crewRemoveInput)
+      .mutation(({ ctx, input }) =>
+        ctx.rls(async (tx) => {
+          const m = await requireMovement(tx, ctx.orgId, input.movementId);
+          requireEditable(m.status);
+          const [removed] = await tx
+            .delete(movementCrew)
+            .where(
+              and(
+                eq(movementCrew.movementId, input.movementId),
+                eq(movementCrew.driverId, input.driverId),
+              ),
+            )
+            .returning();
+          if (!removed) throw new TRPCError({ code: "NOT_FOUND", message: "Not on this crossing" });
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "movement.crew_remove",
+            "movement_crew",
+            removed.id,
+            removed,
+            null,
           );
-        }
-      }
-      return row;
-    }),
+          return { id: removed.id };
+        }),
+      ),
+
+    setRole: permissionProcedure("movement.write")
+      .input(crewSetRoleInput)
+      .mutation(({ ctx, input }) =>
+        ctx.rls(async (tx) => {
+          const m = await requireMovement(tx, ctx.orgId, input.movementId);
+          requireEditable(m.status);
+          if (input.role === "person_in_charge")
+            await demotePersonInCharge(tx, input.movementId, input.driverId);
+          const [row] = await tx
+            .update(movementCrew)
+            .set({ role: input.role })
+            .where(
+              and(
+                eq(movementCrew.movementId, input.movementId),
+                eq(movementCrew.driverId, input.driverId),
+              ),
+            )
+            .returning();
+          if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Not on this crossing" });
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "movement.crew_set_role",
+            "movement_crew",
+            row.id,
+            null,
+            { driverId: input.driverId, role: input.role },
+          );
+          return row;
+        }),
+      ),
+  }),
 
   seals: router({
     add: permissionProcedure("movement.write")
@@ -488,7 +628,6 @@ export const movementRouter = router({
             ? new Date(set.scheduledCrossingAt as unknown as string)
             : null;
         }
-        consider("driverId", m.driverId, p.driverId);
         consider("truckId", m.truckId, p.truckId);
         consider("trailerId", m.trailerId, p.trailerId);
         if (Object.keys(diff).length === 0) {
@@ -677,6 +816,7 @@ export const movementRouter = router({
             id: drivers.id,
             label: sql<string>`${drivers.lastName} || ', ' || ${drivers.firstName}`,
             licenseExpiry: drivers.licenseExpiry,
+            personType: drivers.personType,
           })
           .from(drivers)
           .where(and(eq(drivers.organizationId, ctx.orgId), eq(drivers.status, "active")))

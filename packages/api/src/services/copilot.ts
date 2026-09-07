@@ -280,7 +280,7 @@ export function copilotTools(rls: RlsRunner, orgId: string): ToolSet {
 
     checkDriverExpiry: tool({
       description:
-        "Check a driver's license, FAST card and medical certificate expiry dates by name.",
+        "Check a driver's license, travel documents (FAST/NEXUS/passport) and medical certificate expiry dates by name.",
       inputSchema: z.object({ driverName: z.string().describe("Driver's first and/or last name") }),
       execute: async ({ driverName }) =>
         rls(async (tx) => {
@@ -291,9 +291,13 @@ export function copilotTools(rls: RlsRunner, orgId: string): ToolSet {
               lastName: drivers.lastName,
               licenseNumber: drivers.licenseNumber,
               licenseExpiry: drivers.licenseExpiry,
-              fastCardNumber: drivers.fastCardNumber,
-              fastCardExpiry: drivers.fastCardExpiry,
               medicalCertExpiry: drivers.medicalCertExpiry,
+              travelDocuments: sql<
+                { type: string; number: string; expiresOn: string | null }[]
+              >`coalesce((select jsonb_agg(jsonb_build_object('type', dd.document_type,
+                                                             'number', dd.document_number,
+                                                             'expiresOn', dd.expires_on))
+                          from public.driver_documents dd where dd.driver_id = ${drivers.id}), '[]'::jsonb)`,
               status: drivers.status,
             })
             .from(drivers)

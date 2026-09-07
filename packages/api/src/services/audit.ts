@@ -90,6 +90,8 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
   "party.drivers.create": "driver.create",
   "party.drivers.update": "driver.update",
   "party.drivers.archive": "driver.archive",
+  "party.drivers.documents.upsert": "driver.document_add / driver.document_update",
+  "party.drivers.documents.remove": "driver.document_remove",
   "party.trucks.create": "truck.create",
   "party.trucks.update": "truck.update",
   "party.trucks.archive": "truck.archive",
@@ -107,6 +109,9 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
   // --- movements ----------------------------------------------------------
   "movement.create": "movement.create",
   "movement.update": "movement.update",
+  "movement.crew.add": "movement.crew_add",
+  "movement.crew.remove": "movement.crew_remove",
+  "movement.crew.setRole": "movement.crew_set_role",
   "movement.seals.add": "movement.seal_add",
   "movement.seals.remove": "movement.seal_remove",
   "movement.addNote": "movement.note_add",

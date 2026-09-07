@@ -23,6 +23,8 @@ import {
   type RlsTransaction,
 } from "@corridor/db";
 import {
+  driverDocumentInput,
+  driverDocumentRemoveInput,
   driverInput,
   partnerInput,
   registryListInput,
@@ -31,16 +33,17 @@ import {
   uuid,
   type PermissionKey,
 } from "@corridor/domain";
-import { permissionProcedure, router } from "../trpc";
+import { mergeRouters, permissionProcedure, router } from "../trpc";
 import { writeAudit } from "../services/audit";
 import {
   findingsForDriver,
   findingsForTrailer,
   findingsForTruck,
   syncEntityAlerts,
+  travelDocumentsFor,
 } from "../services/compliance";
 
-const { drivers, trucks, trailers, partners } = schema;
+const { drivers, driverDocuments, trucks, trailers, partners } = schema;
 
 /** Structural shape every registry table satisfies; used for query building. */
 type RegistryTable = typeof drivers;
@@ -64,9 +67,11 @@ function mapDbError(e: unknown): never {
   if (cause?.code === "23505") {
     const which = constraint.includes("vin")
       ? "VIN"
-      : constraint.includes("license")
-        ? "license number"
-        : "unit number";
+      : constraint.includes("document")
+        ? "document number"
+        : constraint.includes("license")
+          ? "license number"
+          : "unit number";
     throw new TRPCError({
       code: "CONFLICT",
       message: `A record with this ${which} already exists`,
@@ -214,18 +219,134 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
   });
 }
 
-export const partyRouter = router({
-  drivers: registryRouter({
-    table: drivers,
-    input: driverInput,
-    read: "driver.read",
-    write: "driver.write",
-    entityType: "driver",
-    searchColumns: (t) => [t.firstName, t.lastName, t.licenseNumber, t.fastCardNumber],
-    orderBy: (t) => [asc(t.lastName), asc(t.firstName)],
-    afterSave: (tx, orgId, row) =>
-      syncEntityAlerts(tx, orgId, { type: "driver", id: row.id }, findingsForDriver(row)),
+/** A driver's compliance alerts depend on their travel documents too. */
+async function syncDriverAlerts(tx: RlsTransaction, orgId: string, driverId: string) {
+  const [driver] = await tx
+    .select()
+    .from(drivers)
+    .where(and(eq(drivers.id, driverId), eq(drivers.organizationId, orgId)))
+    .limit(1);
+  if (!driver) throw new TRPCError({ code: "NOT_FOUND", message: "Driver not found" });
+  return syncEntityAlerts(
+    tx,
+    orgId,
+    { type: "driver", id: driverId },
+    findingsForDriver(driver, await travelDocumentsFor(tx, driverId)),
+  );
+}
+
+/**
+ * Travel documents hang off one person, so they are a sub-router rather than a
+ * fifth registry: there is no org-wide list, search or archive for them.
+ */
+const driverDocumentRouter = router({
+  documents: router({
+    list: permissionProcedure("driver.read")
+      .input(z.object({ driverId: uuid }))
+      .query(({ ctx, input }) =>
+        ctx.rls((tx) =>
+          tx
+            .select()
+            .from(driverDocuments)
+            .where(
+              and(
+                eq(driverDocuments.driverId, input.driverId),
+                eq(driverDocuments.organizationId, ctx.orgId),
+              ),
+            )
+            .orderBy(asc(driverDocuments.documentType)),
+        ),
+      ),
+
+    upsert: permissionProcedure("driver.write")
+      .input(driverDocumentInput)
+      .mutation(({ ctx, input }) =>
+        ctx.rls(async (tx) => {
+          const { id, driverId, ...fields } = input;
+          const [row] = id
+            ? await tx
+                .update(driverDocuments)
+                .set(fields)
+                .where(
+                  and(
+                    eq(driverDocuments.id, id),
+                    eq(driverDocuments.driverId, driverId),
+                    eq(driverDocuments.organizationId, ctx.orgId),
+                  ),
+                )
+                .returning()
+                .catch(mapDbError)
+            : await tx
+                .insert(driverDocuments)
+                .values({ ...fields, driverId, organizationId: ctx.orgId })
+                .returning()
+                .catch(mapDbError);
+          if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            id ? "driver.document_update" : "driver.document_add",
+            "driver_document",
+            row.id,
+            null,
+            row,
+          );
+          await syncDriverAlerts(tx, ctx.orgId, driverId);
+          return row;
+        }),
+      ),
+
+    remove: permissionProcedure("driver.write")
+      .input(driverDocumentRemoveInput)
+      .mutation(({ ctx, input }) =>
+        ctx.rls(async (tx) => {
+          const [removed] = await tx
+            .delete(driverDocuments)
+            .where(
+              and(
+                eq(driverDocuments.id, input.id),
+                eq(driverDocuments.driverId, input.driverId),
+                eq(driverDocuments.organizationId, ctx.orgId),
+              ),
+            )
+            .returning();
+          if (!removed) throw new TRPCError({ code: "NOT_FOUND" });
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "driver.document_remove",
+            "driver_document",
+            input.id,
+            removed,
+            null,
+          );
+          await syncDriverAlerts(tx, ctx.orgId, input.driverId);
+          return { id: input.id };
+        }),
+      ),
   }),
+});
+
+export const partyRouter = router({
+  drivers: mergeRouters(
+    registryRouter({
+      table: drivers,
+      input: driverInput,
+      read: "driver.read",
+      write: "driver.write",
+      entityType: "driver",
+      searchColumns: (t) => [t.firstName, t.lastName, t.licenseNumber],
+      orderBy: (t) => [asc(t.lastName), asc(t.firstName)],
+      afterSave: async (tx, orgId, row) =>
+        syncEntityAlerts(
+          tx,
+          orgId,
+          { type: "driver", id: row.id },
+          findingsForDriver(row, await travelDocumentsFor(tx, row.id)),
+        ),
+    }),
+    driverDocumentRouter,
+  ),
   trucks: registryRouter({
     table: trucks,
     input: truckInput,

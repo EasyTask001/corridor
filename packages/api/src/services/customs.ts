@@ -152,7 +152,7 @@ export function manifestFor(
       port: full.port ? { code: full.port.code, name: full.port.name } : null,
       scheduledCrossingAt: full.scheduledCrossingAt,
     },
-    driver: full.driver,
+    crew: full.crew,
     truck: full.truck,
     trailer: full.trailer,
     seals: full.seals,

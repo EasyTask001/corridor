@@ -1,4 +1,4 @@
-import type { Regime } from "@corridor/domain";
+import type { CrewRole, DriverDocumentType, Gender, Regime } from "@corridor/domain";
 
 /** A shipper/consignee as it is printed on the manifest. */
 export interface ManifestParty {
@@ -26,13 +26,22 @@ export interface ManifestPayload {
     estimatedArrival: string;
   };
   crew: Array<{
-    role: "driver";
+    role: CrewRole;
     firstName: string;
     lastName: string;
-    licenseNumber: string;
-    licenseJurisdiction: string;
+    gender: Gender | null;
+    /** Null for a passenger, who does not drive. */
+    licenseNumber: string | null;
+    licenseJurisdiction: string | null;
     citizenship: string | null;
-    fastCardNumber: string | null;
+    hazmatEndorsement: boolean;
+    documents: Array<{
+      type: DriverDocumentType;
+      number: string;
+      issuingCountry: string | null;
+      issuingState: string | null;
+      expiresOn: string | null;
+    }>;
   }>;
   conveyance: { unitNumber: string; vin: string | null; plate: string; plateJurisdiction: string };
   equipment: Array<{

@@ -1,4 +1,4 @@
-import type { Regime } from "@corridor/domain";
+import type { CrewRole, DriverDocumentType, Gender, Regime } from "@corridor/domain";
 import type { ManifestPayload, ManifestParty } from "./types";
 
 /** Minimal structural input — the API passes its loaded movement + org. */
@@ -16,14 +16,23 @@ export interface ManifestSource {
     port: { code: string; name?: string } | null;
     scheduledCrossingAt: Date | string | null;
   };
-  driver: {
+  crew: Array<{
+    role: CrewRole;
     firstName: string;
     lastName: string;
-    licenseNumber: string;
-    licenseJurisdiction: string;
+    gender: Gender | null;
+    licenseNumber: string | null;
+    licenseJurisdiction: string | null;
     citizenship: string | null;
-    fastCardNumber: string | null;
-  } | null;
+    hazmatEndorsement: boolean;
+    documents: Array<{
+      documentType: DriverDocumentType;
+      documentNumber: string;
+      issuingCountry: string | null;
+      issuingState: string | null;
+      expiresOn: string | null;
+    }>;
+  }>;
   truck: {
     unitNumber: string;
     vin: string | null;
@@ -86,7 +95,8 @@ const party = (name: string | null, address: PostalAddress | null): ManifestPart
   name ? { name, address: formatAddress(address) } : null;
 
 export function buildManifest(src: ManifestSource): ManifestPayload {
-  if (!src.driver) throw new Error("manifest requires a driver");
+  if (!src.crew.some((c) => c.role === "person_in_charge"))
+    throw new Error("manifest requires a person in charge");
   if (!src.truck) throw new Error("manifest requires a truck");
   if (!src.movement.port) throw new Error("manifest requires a port of entry");
   if (!src.movement.carrierCode) throw new Error("manifest requires a carrier code");
@@ -112,17 +122,23 @@ export function buildManifest(src: ManifestSource): ManifestPayload {
       portOfEntry: src.movement.port.code,
       estimatedArrival: eta,
     },
-    crew: [
-      {
-        role: "driver",
-        firstName: src.driver.firstName,
-        lastName: src.driver.lastName,
-        licenseNumber: src.driver.licenseNumber,
-        licenseJurisdiction: src.driver.licenseJurisdiction,
-        citizenship: src.driver.citizenship,
-        fastCardNumber: src.driver.fastCardNumber,
-      },
-    ],
+    crew: src.crew.map((c) => ({
+      role: c.role,
+      firstName: c.firstName,
+      lastName: c.lastName,
+      gender: c.gender,
+      licenseNumber: c.licenseNumber,
+      licenseJurisdiction: c.licenseJurisdiction,
+      citizenship: c.citizenship,
+      hazmatEndorsement: c.hazmatEndorsement,
+      documents: c.documents.map((d) => ({
+        type: d.documentType,
+        number: d.documentNumber,
+        issuingCountry: d.issuingCountry,
+        issuingState: d.issuingState,
+        expiresOn: d.expiresOn,
+      })),
+    })),
     conveyance: {
       unitNumber: src.truck.unitNumber,
       vin: src.truck.vin,

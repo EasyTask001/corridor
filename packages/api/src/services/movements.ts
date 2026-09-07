@@ -5,7 +5,7 @@
  * append-only timeline can never be bypassed.
  */
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, schema, type RlsTransaction } from "@corridor/db";
+import { and, asc, desc, eq, inArray, schema, type RlsTransaction } from "@corridor/db";
 import { shipmentsForMovement } from "./shipments";
 import {
   actorMayTransition,
@@ -17,10 +17,12 @@ import {
 
 const {
   movements,
+  movementCrew,
   movementEvents,
   movementAmendments,
   seals,
   drivers,
+  driverDocuments,
   trucks,
   trailers,
   userProfiles,
@@ -174,17 +176,59 @@ export async function applyCustomsDecision(
   return updated;
 }
 
+/**
+ * The crew of one movement, each person's registry record and travel documents
+ * folded in. Ordered the way the manifest prints them: person in charge first.
+ */
+export async function crewForMovement(tx: Tx, movementId: string) {
+  const rows = await tx
+    .select({
+      id: movementCrew.id,
+      driverId: movementCrew.driverId,
+      role: movementCrew.role,
+      position: movementCrew.position,
+      firstName: drivers.firstName,
+      lastName: drivers.lastName,
+      personType: drivers.personType,
+      gender: drivers.gender,
+      licenseNumber: drivers.licenseNumber,
+      licenseJurisdiction: drivers.licenseJurisdiction,
+      licenseExpiry: drivers.licenseExpiry,
+      citizenship: drivers.citizenship,
+      dateOfBirth: drivers.dateOfBirth,
+      hazmatEndorsement: drivers.hazmatEndorsement,
+      usAddress: drivers.usAddress,
+      status: drivers.status,
+    })
+    .from(movementCrew)
+    .innerJoin(drivers, eq(drivers.id, movementCrew.driverId))
+    .where(eq(movementCrew.movementId, movementId))
+    .orderBy(asc(movementCrew.position), asc(drivers.lastName));
+
+  const documents = rows.length
+    ? await tx
+        .select()
+        .from(driverDocuments)
+        .where(
+          inArray(
+            driverDocuments.driverId,
+            rows.map((r) => r.driverId),
+          ),
+        )
+        .orderBy(desc(driverDocuments.isPrimary), asc(driverDocuments.documentType))
+    : [];
+
+  const roleRank = { person_in_charge: 0, crew_member: 1, passenger: 2 };
+  return rows
+    .map((r) => ({ ...r, documents: documents.filter((d) => d.driverId === r.driverId) }))
+    .sort((a, b) => roleRank[a.role] - roleRank[b.role] || a.position - b.position);
+}
+
 export async function loadFull(tx: Tx, orgId: string, id: string) {
   const m = await requireMovement(tx, orgId, id);
-  const [driver, truck, trailer, port, shipmentRows, sealRows, events, amendments] =
+  const [crew, truck, trailer, port, shipmentRows, sealRows, events, amendments] =
     await Promise.all([
-      m.driverId
-        ? tx
-            .select()
-            .from(drivers)
-            .where(eq(drivers.id, m.driverId))
-            .then((r) => r[0] ?? null)
-        : null,
+      crewForMovement(tx, id),
       m.truckId
         ? tx
             .select()
@@ -233,7 +277,7 @@ export async function loadFull(tx: Tx, orgId: string, id: string) {
 
   return {
     ...m,
-    driver,
+    crew,
     truck,
     trailer,
     port,
@@ -252,15 +296,19 @@ export function validationFor(full: FullMovement) {
     port: full.port ? { code: full.port.code } : null,
     carrierCode: full.carrierCode,
     scheduledCrossingAt: full.scheduledCrossingAt?.toISOString() ?? null,
-    driver: full.driver
-      ? {
-          licenseExpiry: full.driver.licenseExpiry,
-          fastCardNumber: full.driver.fastCardNumber,
-          fastCardExpiry: full.driver.fastCardExpiry,
-          citizenship: full.driver.citizenship,
-          status: full.driver.status,
-        }
-      : null,
+    crew: full.crew.map((c) => ({
+      role: c.role,
+      personType: c.personType,
+      displayName: `${c.firstName} ${c.lastName}`,
+      licenseExpiry: c.licenseExpiry,
+      status: c.status,
+      citizenship: c.citizenship,
+      usAddress: c.usAddress,
+      documents: c.documents.map((d) => ({
+        documentType: d.documentType,
+        expiresOn: d.expiresOn,
+      })),
+    })),
     truck: full.truck
       ? {
           registrationExpiry: full.truck.registrationExpiry,

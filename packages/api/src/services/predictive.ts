@@ -13,7 +13,7 @@ import { isEditable, movementSuggestionPayload } from "@corridor/domain";
 import { suggestMovement, type MovementFingerprint } from "@corridor/ai";
 import { requireMovement } from "./movements";
 
-const { movements, movementSuggestions, shipments, ports } = schema;
+const { movements, movementCrew, movementSuggestions, shipments, ports } = schema;
 
 export async function generateMovementSuggestion(
   tx: RlsTransaction,
@@ -53,8 +53,9 @@ export async function generateMovementSuggestion(
         eq(movements.regime, target.regime),
         notInArray(movements.status, ["draft", "rejected", "cancelled"]),
         isNotNull(movements.portId),
-        isNotNull(movements.driverId),
         isNotNull(movements.truckId),
+        sql`exists (select 1 from public.movement_crew mc
+                    where mc.movement_id = ${movements.id} and mc.role = 'person_in_charge')`,
         sql`exists (
           select 1 from public.shipments complete
           where complete.movement_id = ${movements.id}
@@ -105,13 +106,19 @@ export async function generateMovementSuggestion(
         .then((r) => r[0] ?? null)
     : null;
 
+  const sourceCrew = await tx
+    .select({ driverId: movementCrew.driverId, role: movementCrew.role })
+    .from(movementCrew)
+    .where(eq(movementCrew.movementId, source.id))
+    .orderBy(movementCrew.position);
+
   const payload = movementSuggestionPayload.parse({
     sourceMovementId: source.id,
     sourceMovementNumber: source.movementNumber,
     targetUpdatedAt: target.updatedAt.toISOString(),
     port: sourcePort,
     carrierCode: source.carrierCode ?? null,
-    driverId: source.driverId,
+    crew: sourceCrew,
     truckId: source.truckId,
     trailerId: source.trailerId,
   });
@@ -163,12 +170,30 @@ export async function acceptMovementSuggestion(
   const patch = {
     ...(!movement.portId && payload.port && { portId: payload.port.id }),
     ...(!movement.carrierCode && payload.carrierCode && { carrierCode: payload.carrierCode }),
-    ...(!movement.driverId && payload.driverId && { driverId: payload.driverId }),
     ...(!movement.truckId && payload.truckId && { truckId: payload.truckId }),
     ...(!movement.trailerId && payload.trailerId && { trailerId: payload.trailerId }),
   };
   if (Object.keys(patch).length > 0) {
     await tx.update(movements).set(patch).where(eq(movements.id, movement.id));
+  }
+
+  // Crew is offered whole, and only onto an empty crew list — never merged into
+  // one the dispatcher has already started building.
+  const existingCrew = await tx
+    .select({ id: movementCrew.id })
+    .from(movementCrew)
+    .where(eq(movementCrew.movementId, movement.id))
+    .limit(1);
+  if (existingCrew.length === 0 && payload.crew.length > 0) {
+    await tx.insert(movementCrew).values(
+      payload.crew.map((c, i) => ({
+        organizationId: orgId,
+        movementId: movement.id,
+        driverId: c.driverId,
+        role: c.role,
+        position: i + 1,
+      })),
+    );
   }
 
   const [decided] = await tx
