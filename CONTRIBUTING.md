@@ -7,8 +7,8 @@ Thank you for contributing! This guide covers the workflow, standards, and tooli
 1. **Fork & Clone**
 
    ```bash
-   git clone https://github.com/<your-fork>/Corridor.git
-   cd Corridor
+   git clone https://github.com/<your-fork>/corridor.git
+   cd corridor
    pnpm install
    ```
 
@@ -71,11 +71,9 @@ refactor: extract tariff caching to integrations
 ### Pull Requests
 
 1. **Title**: Same format as commit subject
-2. **Description**:
-   - What changed and why
-   - Testing performed (unit, integration, e2e, manual)
-   - Migration notes (if schema changed)
-   - Screenshots for UI changes
+2. **Description**: fill in `.github/PULL_REQUEST_TEMPLATE.md`, which GitHub pre-populates —
+   what changed and why, testing performed, migration notes if the schema changed, screenshots
+   for UI changes
 3. **Checks**: All must pass (typecheck, lint, test, build)
 4. **Review**: At least one approval required
 
@@ -107,6 +105,46 @@ refactor: extract tariff caching to integrations
 - Every tenant table: `organization_id uuid REFERENCES organizations(id)`, `enable row level security`
 - RLS policies use `has_permission(org_id, 'key')` / `is_org_member(org_id)`
 - Run `pnpm db:lint` before committing migrations
+
+### Schema design: extend before you add
+
+A new table is the last option, not the first. Before writing `create table`, read the live
+schema (`docker exec supabase_db_Corridor psql -U postgres -d postgres -c '\dt public.*'` or
+`packages/db/src/schema/`) and work down this list. Stop at the first step that fits.
+
+1. **A table with the same grain already exists** → add columns to it, nullable or with a
+   default. Invitations live on `organization_members`, not an `invitations` table; the
+   driver–login link is `drivers.user_id`, not a join table.
+2. **The data is one-to-one with an existing table** → columns on that table, by default. A
+   separate table is justified only when at least one of these holds, and the migration header
+   says which:
+   - a different RLS or grant surface (`organization_sso` is reached by `anon`-callable
+     resolvers that must never touch `organizations`),
+   - large or rarely-read columns that would bloat the hot row (embedding vectors),
+   - a different lifecycle: retention, cascade, or archival.
+3. **The data is a new grain** — many rows per parent, an append-only ledger, per-user rather
+   than per-org — → a new table. `usage_records` (one row per billable event) and
+   `user_devices` (one row per handset) are the model.
+4. **Never** add a key/value bag or a `settings jsonb` column to dodge a migration.
+   `organization_counters` exists for sequence counters only. `jsonb` is for provider payloads
+   and free-form `metadata`, not for fields the app reads by name.
+
+Also:
+
+- **Denormalised copies need a trigger and a test.** `organizations.subscription_plan` mirrors
+  `subscriptions.plan` through `sync_org_subscription()` and is asserted in
+  `packages/db/src/jobs.integration.test.ts`. A copy kept in sync by application code is a bug
+  waiting to happen.
+- **Follow the existing column conventions**: `uuid primary key default gen_random_uuid()`
+  (`bigint generated always as identity` for ledgers), `organization_id ... on delete cascade`,
+  `created_at` / `updated_at` with the `set_updated_at()` trigger, enum-like values as `text`
+  with a `check (... in (...))`, and one index per query path with a comment naming the query.
+- **Every `create table` needs a "Why a new table" paragraph in the migration header**: the
+  grain, the existing tables considered, and why each does not fit. A migration that adds a
+  table without it is sent back in review. The headers of `0013_usage_billing.sql` and
+  `0015_user_devices.sql` are the reference.
+- **Removing or merging a table is also a new migration**, never an edit; move the data in the
+  same file and drop the old table only after the Drizzle mirror and `verify:mirror` are green.
 
 ### AI Integration
 
@@ -151,7 +189,9 @@ Configs shared via `@corridor/config`:
 ### Add a New Feature
 
 1. **Domain**: Define Zod schemas in `packages/domain/src/<feature>.ts`
-2. **Database**: Create migration `supabase/migrations/00NN_<feature>.sql`
+2. **Database**: Work through "Schema design" above — extend an existing table where the grain
+   matches. Only then create `supabase/migrations/00NN_<feature>.sql`, with the "Why a new
+   table" header if it adds one
 3. **Drizzle**: Mirror tables in `packages/db/src/schema/<feature>.ts`
 4. **Services**: Implement logic in `packages/api/src/services/<feature>.ts`
 5. **Router**: Add tRPC procedures in `packages/api/src/router/<feature>.ts`
@@ -189,6 +229,8 @@ happens:
 4. Push the tag — Vercel deploys the web app; the Expo app is built separately
 
 ## Getting Help
+
+`SUPPORT.md` is the index. In short:
 
 - **Architecture questions**: Check `docs/plans/` for implementation plans
 - **Type errors**: Run `pnpm typecheck` for full output
