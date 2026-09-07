@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -15,7 +16,7 @@ import {
   uuid,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
-import { ACE_SHIPMENT_TYPES, ACI_CARGO_TYPES } from "@corridor/domain";
+import { ACE_SHIPMENT_TYPES, ACI_CARGO_TYPES, CREW_ROLES } from "@corridor/domain";
 import type { MovementSuggestionPayload } from "@corridor/domain";
 import { authUsers, organizations } from "./core";
 import { sourceDocuments } from "./documents";
@@ -69,7 +70,6 @@ export const movements = pgTable(
      * must not move if the org edits its codes later. */
     carrierCode: text("carrier_code"),
     scheduledCrossingAt: timestamp("scheduled_crossing_at", { withTimezone: true }),
-    driverId: uuid("driver_id").references(() => drivers.id, { onDelete: "restrict" }),
     truckId: uuid("truck_id").references(() => trucks.id, { onDelete: "restrict" }),
     trailerId: uuid("trailer_id").references(() => trailers.id, { onDelete: "restrict" }),
     customsReferenceNumber: text("customs_reference_number"),
@@ -89,9 +89,6 @@ export const movements = pgTable(
     index("movements_org_status_idx").on(t.organizationId, t.status),
     index("movements_org_created_idx").on(t.organizationId, t.createdAt.desc()),
     index("movements_org_scheduled_idx").on(t.organizationId, t.scheduledCrossingAt),
-    index("movements_driver_idx")
-      .on(t.driverId)
-      .where(sql`${t.driverId} is not null`),
     index("movements_truck_idx")
       .on(t.truckId)
       .where(sql`${t.truckId} is not null`),
@@ -102,6 +99,45 @@ export const movements = pgTable(
       .on(t.portId)
       .where(sql`${t.portId} is not null`),
     unique("movements_organization_id_movement_number_key").on(t.organizationId, t.movementNumber),
+  ],
+);
+
+/**
+ * 0020 — the people on one crossing. Replaces movements.driver_id: CBP/CBSA
+ * accept a person in charge plus additional crew members and passengers, and
+ * the role belongs to the pairing, not to the person.
+ */
+export const movementCrew = pgTable(
+  "movement_crew",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    movementId: uuid("movement_id")
+      .notNull()
+      .references(() => movements.id, { onDelete: "cascade" }),
+    /** FK is composite — see movement_crew_driver_id_fkey below. */
+    driverId: uuid("driver_id").notNull(),
+    role: text("role", { enum: CREW_ROLES }).notNull().default("crew_member"),
+    position: integer("position").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("movement_crew_organization_id_idx").on(t.organizationId),
+    index("movement_crew_movement_idx").on(t.movementId, t.position),
+    index("movement_crew_driver_idx").on(t.driverId),
+    uniqueIndex("movement_crew_pic_unique")
+      .on(t.movementId)
+      .where(sql`${t.role} = 'person_in_charge'`),
+    unique("movement_crew_movement_id_driver_id_key").on(t.movementId, t.driverId),
+    foreignKey({
+      name: "movement_crew_driver_id_fkey",
+      columns: [t.driverId, t.organizationId],
+      foreignColumns: [drivers.id, drivers.organizationId],
+    }).onDelete("restrict"),
   ],
 );
 

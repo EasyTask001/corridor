@@ -13,6 +13,7 @@ import {
   commodities,
   drivers,
   movementAmendments,
+  movementCrew,
   movementEvents,
   movementSuggestions,
   movements,
@@ -202,6 +203,27 @@ describe("movement triggers", () => {
     expect(shipmentMsg).toMatch(/not editable in status sent/);
   });
 
+  it("lifecycle timestamps come from the trigger, never from the client", async () => {
+    // 0008 added this anti-spoof block and 0020 rebuilt movements_guard() on top
+    // of it; if a rebuild ever drops it, a client could backdate a manifest.
+    const m = await createDraft(dispatcherA);
+    const spoofed = new Date("2000-01-01T00:00:00Z");
+
+    const [sent] = await withRls(db, as(dispatcherA), (tx) =>
+      tx
+        .update(movements)
+        .set({ status: "sent", submittedAt: spoofed })
+        .where(eq(movements.id, m.id))
+        .returning(),
+    );
+    expect(sent!.submittedAt!.getTime()).toBeGreaterThan(spoofed.getTime());
+
+    const [planted] = await withRls(db, as(dispatcherA), (tx) =>
+      tx.update(movements).set({ arrivedAt: spoofed }).where(eq(movements.id, m.id)).returning(),
+    );
+    expect(planted!.arrivedAt).toBeNull();
+  });
+
   it("movement_events is append-only", async () => {
     const m = await createDraft(dispatcherA);
     const [ev] = await withRls(db, as(dispatcherA), (tx) =>
@@ -244,16 +266,33 @@ describe("movements RLS", () => {
     expect(msg).toMatch(/row-level security/);
   });
 
-  it("Driver-Portal sees only its assigned movements and their manifest details", async () => {
+  it("Driver-Portal sees only the movements it is crew on, and their manifest details", async () => {
     const [linkedDriver] = await db
       .select({ id: drivers.id })
       .from(drivers)
       .where(eq(drivers.userId, driverA.userId));
     expect(linkedDriver).toBeDefined();
 
+    const crewedMovementIds = new Set(
+      (
+        await db
+          .select({ movementId: movementCrew.movementId })
+          .from(movementCrew)
+          .where(eq(movementCrew.driverId, linkedDriver!.id))
+      ).map((r) => r.movementId),
+    );
+    expect(crewedMovementIds.size).toBeGreaterThan(0);
+
     const assigned = await withRls(db, as(driverA), (tx) => tx.select().from(movements));
     expect(assigned.length).toBeGreaterThan(0);
-    expect(assigned.every((movement) => movement.driverId === linkedDriver!.id)).toBe(true);
+    expect(assigned.every((movement) => crewedMovementIds.has(movement.id))).toBe(true);
+    // Being crew is what grants it: a movement they are not on stays invisible.
+    const notCrewed = await db
+      .select({ id: movements.id })
+      .from(movements)
+      .where(eq(movements.organizationId, driverA.orgId));
+    expect(notCrewed.some((m) => !crewedMovementIds.has(m.id))).toBe(true);
+    expect(assigned.length).toBeLessThan(notCrewed.length);
 
     const assignedShipments = await withRls(db, as(driverA), (tx) =>
       tx.select().from(shipments).where(eq(shipments.movementId, assigned[0]!.id)),
@@ -557,6 +596,146 @@ describe("movements_guard() permission + identity checks (0008)", () => {
   });
 });
 
+describe("movement_crew", () => {
+  it("allows exactly one person in charge per crossing", async () => {
+    const m = await createDraft(dispatcherA);
+    const roster = await db
+      .select({ id: drivers.id })
+      .from(drivers)
+      .where(eq(drivers.organizationId, dispatcherA.orgId))
+      .limit(2);
+    expect(roster).toHaveLength(2);
+
+    await withRls(db, as(dispatcherA), (tx) =>
+      tx.insert(movementCrew).values({
+        organizationId: dispatcherA.orgId,
+        movementId: m.id,
+        driverId: roster[0]!.id,
+        role: "person_in_charge",
+      }),
+    );
+    const second = await rejection(
+      withRls(db, as(dispatcherA), (tx) =>
+        tx.insert(movementCrew).values({
+          organizationId: dispatcherA.orgId,
+          movementId: m.id,
+          driverId: roster[1]!.id,
+          role: "person_in_charge",
+        }),
+      ),
+    );
+    expect(second).toMatch(/movement_crew_pic_unique|duplicate key/i);
+
+    // The same person cannot be listed twice on one crossing either.
+    const duplicate = await rejection(
+      withRls(db, as(dispatcherA), (tx) =>
+        tx.insert(movementCrew).values({
+          organizationId: dispatcherA.orgId,
+          movementId: m.id,
+          driverId: roster[0]!.id,
+          role: "crew_member",
+        }),
+      ),
+    );
+    expect(duplicate).toMatch(/duplicate key/i);
+  });
+
+  it("is frozen once the movement has been transmitted", async () => {
+    const m = await createDraft(dispatcherA);
+    const [driver] = await db
+      .select({ id: drivers.id })
+      .from(drivers)
+      .where(eq(drivers.organizationId, dispatcherA.orgId))
+      .limit(1);
+    await withRls(db, as(dispatcherA), (tx) =>
+      tx.insert(movementCrew).values({
+        organizationId: dispatcherA.orgId,
+        movementId: m.id,
+        driverId: driver!.id,
+        role: "person_in_charge",
+      }),
+    );
+    await db.update(movements).set({ status: "sent" }).where(eq(movements.id, m.id));
+
+    const msg = await rejection(
+      withRls(db, as(dispatcherA), (tx) =>
+        tx.delete(movementCrew).where(eq(movementCrew.movementId, m.id)),
+      ),
+    );
+    expect(msg).toMatch(/not editable in status sent/);
+  });
+
+  it("read-only cannot put anybody on a crossing", async () => {
+    const m = await createDraft(dispatcherA);
+    const [driver] = await db
+      .select({ id: drivers.id })
+      .from(drivers)
+      .where(eq(drivers.organizationId, dispatcherA.orgId))
+      .limit(1);
+    const msg = await rejection(
+      withRls(db, as(readOnlyA), (tx) =>
+        tx.insert(movementCrew).values({
+          organizationId: readOnlyA.orgId,
+          movementId: m.id,
+          driverId: driver!.id,
+          role: "crew_member",
+        }),
+      ),
+    );
+    expect(msg).toMatch(/row-level security/);
+  });
+
+  it("cross-tenant: Org B cannot see or add crew on an Org A crossing", async () => {
+    const m = await createDraft(dispatcherA);
+    const [driver] = await db
+      .select({ id: drivers.id })
+      .from(drivers)
+      .where(eq(drivers.organizationId, dispatcherA.orgId))
+      .limit(1);
+    await withRls(db, as(dispatcherA), (tx) =>
+      tx.insert(movementCrew).values({
+        organizationId: dispatcherA.orgId,
+        movementId: m.id,
+        driverId: driver!.id,
+        role: "person_in_charge",
+      }),
+    );
+    const seen = await withRls(db, as(ownerB), (tx) =>
+      tx.select().from(movementCrew).where(eq(movementCrew.movementId, m.id)),
+    );
+    expect(seen).toHaveLength(0);
+    // …and Org A cannot put one of Org B's people in its own cab either
+    // (movement_crew_driver_id_fkey is composite on (id, organization_id)).
+    const [foreignDriver] = await db
+      .select({ id: drivers.id })
+      .from(drivers)
+      .where(eq(drivers.organizationId, ownerB.orgId))
+      .limit(1);
+    const foreignPerson = await rejection(
+      withRls(db, as(dispatcherA), (tx) =>
+        tx.insert(movementCrew).values({
+          organizationId: dispatcherA.orgId,
+          movementId: m.id,
+          driverId: foreignDriver!.id,
+          role: "crew_member",
+        }),
+      ),
+    );
+    expect(foreignPerson).toMatch(/violates foreign key/i);
+    const msg = await rejection(
+      withRls(db, as(ownerB), (tx) =>
+        tx.insert(movementCrew).values({
+          organizationId: ownerB.orgId,
+          movementId: m.id,
+          driverId: driver!.id,
+          role: "crew_member",
+        }),
+      ),
+    );
+    expect(msg).toMatch(/row-level security|violates foreign key|movement .* not found/i);
+  });
+});
+
 describe("predictive movement suggestions", () => {
   it("tracks one immutable accept/dismiss decision and rejects cross-tenant sources", async () => {
     const own = await db
@@ -579,7 +758,7 @@ describe("predictive movement suggestions", () => {
       targetUpdatedAt: own[0]!.updatedAt.toISOString(),
       port: null,
       carrierCode: null,
-      driverId: null,
+      crew: [],
       truckId: null,
       trailerId: null,
     };
