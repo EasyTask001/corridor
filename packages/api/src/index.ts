@@ -3,10 +3,12 @@ export { createContext, ACTIVE_ORG_COOKIE, ACTIVE_ORG_HEADER, type Context } fro
 export { createCallerFactory } from "./trpc";
 export {
   rateLimitFor,
+  rateLimitKey,
   RATE_LIMITS,
   RATE_LIMIT_WINDOW_SECONDS,
   RateLimitExceededError,
   type RateLimiter,
+  type RateLimitIdentity,
   type RateLimitResult,
   type RateLimitTier,
 } from "./infra/ratelimit";

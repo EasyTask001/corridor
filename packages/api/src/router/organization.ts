@@ -26,29 +26,43 @@ import { invalidatePermissionCache } from "../infra/permission-cache";
 const { organizations, organizationMembers, roles, rolePermissions, permissions, userProfiles } =
   schema;
 
-/**
- * Drop the cached permission sets of everyone in the org (plus any user id the
- * caller passes explicitly — a member being removed is gone from the table by
- * the time this runs). Called after every mutation that can change what a
- * member may do, so the change lands on the member's next request instead of
- * up to `PERMISSION_CACHE_TTL_SECONDS` later.
- *
- * This runs inside the mutation's transaction, so a request that lands between
- * the delete and the commit can re-cache the pre-change set. That is why the
- * TTL — not this call — is the guarantee: staleness is bounded by
- * `PERMISSION_CACHE_TTL_SECONDS` either way, and invalidation just makes the
- * common case immediate.
- */
-async function invalidateOrgPermissions(
+/** What a permission-affecting mutation gets in addition to its transaction. */
+type PermissionMutation<T> = (
   tx: RlsTransaction,
-  orgId: string,
-  extraUserIds: readonly (string | null)[] = [],
-) {
-  const rows = await tx
-    .select({ userId: organizationMembers.userId })
-    .from(organizationMembers)
-    .where(eq(organizationMembers.organizationId, orgId));
-  await invalidatePermissionCache(orgId, [...rows.map((r) => r.userId), ...extraUserIds]);
+  /**
+   * Queue a user id that the post-mutation member list will not contain — a
+   * member being removed, say. Ids already in the org are collected for you.
+   */
+  alsoInvalidate: (userId: string | null) => void,
+) => Promise<T>;
+
+/**
+ * Run a mutation that can change what a member may do, then drop the cached
+ * permission sets of everyone in the org.
+ *
+ * The invalidation deliberately happens **after** `ctx.rls` resolves, i.e.
+ * after the transaction has committed. Deleting the keys mid-transaction would
+ * leave a window in which a concurrent request reads the pre-change rows (the
+ * mutation is not yet visible to it) and re-caches exactly the stale set the
+ * delete was meant to remove.
+ */
+export async function withPermissionInvalidation<T>(
+  ctx: OrgContext,
+  run: PermissionMutation<T>,
+): Promise<T> {
+  const extraUserIds: (string | null)[] = [];
+  const { result, memberUserIds } = await ctx.rls(async (tx) => {
+    const result = await run(tx, (userId) => {
+      extraUserIds.push(userId);
+    });
+    const rows = await tx
+      .select({ userId: organizationMembers.userId })
+      .from(organizationMembers)
+      .where(eq(organizationMembers.organizationId, ctx.orgId));
+    return { result, memberUserIds: rows.map((r) => r.userId) };
+  });
+  await invalidatePermissionCache(ctx.orgId, [...memberUserIds, ...extraUserIds]);
+  return result;
 }
 
 function assertCanGrant(ctx: OrgContext, requested: readonly PermissionKey[]) {
@@ -251,7 +265,7 @@ export const organizationRouter = router({
     update: permissionProcedure("organization.roles.manage")
       .input(updateCustomRoleInput)
       .mutation(({ ctx, input }) =>
-        ctx.rls(async (tx) => {
+        withPermissionInvalidation(ctx, async (tx) => {
           const before = await tx.query.roles.findFirst({
             where: and(
               eq(roles.id, input.id),
@@ -290,7 +304,6 @@ export const organizationRouter = router({
               permissions: grants.map((grant) => grant.key as PermissionKey),
             };
             await writeAudit(tx, ctx.orgId, "role.update", "role", input.id, previous, saved);
-            await invalidateOrgPermissions(tx, ctx.orgId);
             return saved;
           } catch (error) {
             mapRoleError(error);
@@ -301,7 +314,7 @@ export const organizationRouter = router({
     delete: permissionProcedure("organization.roles.manage")
       .input(z.object({ id: uuid }))
       .mutation(({ ctx, input }) =>
-        ctx.rls(async (tx) => {
+        withPermissionInvalidation(ctx, async (tx) => {
           const role = await tx.query.roles.findFirst({
             where: and(
               eq(roles.id, input.id),
@@ -314,7 +327,6 @@ export const organizationRouter = router({
           try {
             await tx.delete(roles).where(eq(roles.id, role.id));
             await writeAudit(tx, ctx.orgId, "role.delete", "role", role.id, before, null);
-            await invalidateOrgPermissions(tx, ctx.orgId);
             return { id: role.id };
           } catch (error) {
             mapRoleError(error);
@@ -384,7 +396,7 @@ export const organizationRouter = router({
     updateRole: permissionProcedure("organization.members.manage")
       .input(z.object({ memberId: uuid, roleId: uuid }))
       .mutation(({ ctx, input }) =>
-        ctx.rls(async (tx) => {
+        withPermissionInvalidation(ctx, async (tx, alsoInvalidate) => {
           const target = await tx.query.organizationMembers.findFirst({
             where: and(
               eq(organizationMembers.id, input.memberId),
@@ -417,7 +429,7 @@ export const organizationRouter = router({
             { roleId: target.roleId },
             { roleId: input.roleId },
           );
-          await invalidateOrgPermissions(tx, ctx.orgId, [target.userId]);
+          alsoInvalidate(target.userId);
           return row;
         }),
       ),
@@ -425,7 +437,7 @@ export const organizationRouter = router({
     setStatus: permissionProcedure("organization.members.manage")
       .input(z.object({ memberId: uuid, status: z.enum(["active", "suspended"]) }))
       .mutation(({ ctx, input }) =>
-        ctx.rls(async (tx) => {
+        withPermissionInvalidation(ctx, async (tx, alsoInvalidate) => {
           const target = await tx.query.organizationMembers.findFirst({
             where: and(
               eq(organizationMembers.id, input.memberId),
@@ -451,7 +463,7 @@ export const organizationRouter = router({
             { status: target.status },
             { status: input.status },
           );
-          await invalidateOrgPermissions(tx, ctx.orgId, [target.userId]);
+          alsoInvalidate(target.userId);
           return row!;
         }),
       ),
@@ -459,7 +471,7 @@ export const organizationRouter = router({
     remove: permissionProcedure("organization.members.manage")
       .input(z.object({ memberId: uuid }))
       .mutation(({ ctx, input }) =>
-        ctx.rls(async (tx) => {
+        withPermissionInvalidation(ctx, async (tx, alsoInvalidate) => {
           const target = await tx.query.organizationMembers.findFirst({
             where: and(
               eq(organizationMembers.id, input.memberId),
@@ -486,7 +498,8 @@ export const organizationRouter = router({
             },
             null,
           );
-          await invalidateOrgPermissions(tx, ctx.orgId, [target.userId]);
+          // The row is gone, so the member list read after this will not have it.
+          alsoInvalidate(target.userId);
           return { id: input.memberId };
         }),
       ),

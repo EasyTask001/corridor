@@ -5,6 +5,12 @@
  * (shared across instances). Without it, the same sliding window runs against
  * the in-process `MemoryKv` — see `rateLimitMultiplier()` for why the local
  * limits are deliberately looser.
+ *
+ * The two tiers are counted at different granularities (see `rateLimitKey`):
+ * `standard` is per user **within** the org, so one busy colleague cannot lock
+ * the whole tenant out of ordinary reads and writes; `ai` is per org, because
+ * model spend is an org-level plan resource that the whole tenant shares. The
+ * per-plan ceilings apply to whichever counter the tier uses.
  */
 import { Ratelimit, type Duration } from "@upstash/ratelimit";
 import type { SubscriptionPlan } from "@corridor/domain";
@@ -30,13 +36,33 @@ export interface RateLimitResult {
   retryAfterSeconds: number;
 }
 
+/** Who a request is counted against. `orgId` is null before onboarding. */
+export interface RateLimitIdentity {
+  orgId: string | null;
+  userId: string;
+}
+
 export interface RateLimiter {
   readonly tier: RateLimitTier;
   readonly plan: SubscriptionPlan;
   readonly limit: number;
   readonly windowSeconds: number;
-  /** `identity` is the org id when there is an active org, else the user id. */
-  check(identity: string): Promise<RateLimitResult>;
+  check(identity: RateLimitIdentity): Promise<RateLimitResult>;
+}
+
+/**
+ * The counter key.
+ *
+ * - `standard` → `standard:${orgId}:${userId}` (per user within the org).
+ * - `ai`       → `ai:${orgId}` (per org — shared model budget).
+ *
+ * With no active org (onboarding) both fall back to `${tier}:user:${userId}`.
+ * Keys always start with the tier and contain the org id, so a tenant can never
+ * be counted against another tenant's window.
+ */
+export function rateLimitKey(tier: RateLimitTier, identity: RateLimitIdentity): string {
+  if (!identity.orgId) return `${tier}:user:${identity.userId}`;
+  return tier === "ai" ? `ai:${identity.orgId}` : `standard:${identity.orgId}:${identity.userId}`;
 }
 
 /** Thrown as the `cause` of the `TOO_MANY_REQUESTS` tRPC error. */
@@ -123,9 +149,9 @@ async function checkWithKv(
 }
 
 /**
- * Sliding-window limiter for a tier/plan pair. The counter key is
- * `${tier}:${identity}` — the plan only selects the ceiling, so a plan change
- * takes effect on the next request without resetting the window.
+ * Sliding-window limiter for a tier/plan pair. The plan only selects the
+ * ceiling — it is not part of the key — so a plan change takes effect on the
+ * next request without resetting the window.
  *
  * Fails open: if Redis is unreachable the request is allowed rather than
  * turning a cache outage into an outage of the whole API.
@@ -140,8 +166,8 @@ export function rateLimitFor(tier: RateLimitTier, plan: SubscriptionPlan): RateL
     plan,
     limit,
     windowSeconds: RATE_LIMIT_WINDOW_SECONDS,
-    async check(identity: string): Promise<RateLimitResult> {
-      const key = `${tier}:${identity}`;
+    async check(identity: RateLimitIdentity): Promise<RateLimitResult> {
+      const key = rateLimitKey(tier, identity);
       try {
         if (!redis)
           return await checkWithKv(getKv(), `rl:${key}`, limit, RATE_LIMIT_WINDOW_SECONDS);

@@ -25,17 +25,18 @@ export const middleware = t.middleware;
 export const publicProcedure = t.procedure;
 
 /**
- * Sliding-window rate limit for the caller's plan. The counter is keyed by the
- * active org when there is one and by the user otherwise (onboarding calls,
- * which have no org yet) — never by IP, so a tenant cannot be throttled by
- * another tenant behind the same NAT.
+ * Sliding-window rate limit for the caller's plan. Counted per user within the
+ * org for `standard` and per org for `ai` (see `rateLimitKey`) — never by IP,
+ * so a tenant cannot be throttled by another tenant behind the same NAT.
  */
 export function rateLimited(tier: RateLimitTier) {
   return middleware(async ({ ctx, next }) => {
     const session = ctx.session;
     if (!session) throw new TRPCError({ code: "UNAUTHORIZED" });
-    const identity = session.activeOrganizationId ?? session.user.id;
-    const result = await rateLimitFor(tier, session.plan).check(identity);
+    const result = await rateLimitFor(tier, session.plan).check({
+      orgId: session.activeOrganizationId,
+      userId: session.user.id,
+    });
     if (!result.success) {
       const cause = new RateLimitExceededError(
         tier,

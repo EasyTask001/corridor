@@ -38,7 +38,10 @@ export async function POST(req: Request) {
 
   // Same `ai` tier the copilot tRPC procedures use — applied before any model
   // or embedding call so a burst costs nothing.
-  const limit = await rateLimitFor("ai", ctx.session.plan).check(orgId);
+  const limit = await rateLimitFor("ai", ctx.session.plan).check({
+    orgId,
+    userId: ctx.session.user.id,
+  });
   if (!limit.success) {
     return new Response(
       `Rate limit of ${limit.limit} copilot requests/minute exceeded on the ${ctx.session.plan} plan.`,
