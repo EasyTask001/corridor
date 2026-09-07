@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { PermissionKey } from "@corridor/domain";
 import type { SessionUser } from "@corridor/auth";
+import { NotificationBell } from "./notifications/notification-bell";
 
 interface NavItem {
   href: string;
@@ -31,6 +32,7 @@ const SETTINGS: NavItem[] = [
   { href: "/settings/roles", label: "Roles", permission: "organization.roles.manage" },
   { href: "/settings/billing", label: "Billing", permission: "billing.read" },
   { href: "/settings/integrations", label: "Integrations", permission: "integrations.manage" },
+  { href: "/settings/notifications", label: "Notifications" },
 ];
 
 export function AppShell({
@@ -89,7 +91,12 @@ export function AppShell({
           </form>
         </div>
       </aside>
-      <main className="min-w-0 flex-1 p-8">{children}</main>
+      <main className="min-w-0 flex-1">
+        <div className="flex justify-end border-b border-ink-100 bg-white px-6 py-2">
+          <NotificationBell />
+        </div>
+        <div className="p-8">{children}</div>
+      </main>
     </div>
   );
 }

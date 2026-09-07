@@ -126,6 +126,12 @@ export async function transmitMovement(tx: RlsTransaction, actor: Actor, movemen
         .join(" ")}`,
     });
   }
+  // Refresh risk findings right before transmit so hold-prediction reflects
+  // the final manifest content (dispatcher sees it on the Review step too).
+  // Dynamic import: risk.ts -> notifications.ts -> customs.ts would otherwise cycle.
+  const { syncMovementRiskAlerts } = await import("./risk");
+  await syncMovementRiskAlerts(tx, actor.orgId, movementId);
+
   const org = await loadOrganization(tx, actor.orgId);
   const { client } = await customsClientFor(tx, actor.orgId, full.regime);
   const manifest = manifestFor(org, full);

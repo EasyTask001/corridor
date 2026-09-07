@@ -150,6 +150,23 @@ export async function applyCustomsDecision(
         and(eq(movementAmendments.movementId, m.id), eq(movementAmendments.status, "submitted")),
       );
   }
+
+  // Dynamic import: notifications.ts -> customs.ts -> movements.ts would otherwise cycle.
+  const { notifyOrganization } = await import("./notifications");
+  const decisionLabel = {
+    accepted: "accepted",
+    rejected: "rejected",
+    released: "released",
+    held: "held for inspection",
+  }[input.decision];
+  await notifyOrganization(tx, {
+    orgId: actor.orgId,
+    eventType: "customs.decision",
+    title: `${m.movementNumber} ${decisionLabel} by ${m.regime === "ACE" ? "CBP" : "CBSA"}`,
+    body: input.message ?? undefined,
+    linkPath: `/movements/${m.id}`,
+  });
+
   return updated;
 }
 

@@ -4,6 +4,7 @@ import { billingRouter } from "./billing";
 import { documentsRouter } from "./documents";
 import { integrationsRouter } from "./integrations";
 import { movementRouter } from "./movement";
+import { notificationsRouter } from "./notifications";
 import { organizationRouter } from "./organization";
 import { partyRouter } from "./party";
 
@@ -16,6 +17,7 @@ export const appRouter = router({
   integrations: integrationsRouter,
   billing: billingRouter,
   documents: documentsRouter,
+  notifications: notificationsRouter,
 });
 
 export type AppRouter = typeof appRouter;

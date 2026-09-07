@@ -9,6 +9,7 @@ import { and, eq, schema, sql, type RlsTransaction } from "@corridor/db";
 import { LOW_CONFIDENCE_THRESHOLD, isEditable, type ApplyExtractionInput } from "@corridor/domain";
 import { runExtractionPipeline } from "@corridor/ai";
 import { addEvent, requireMovement, type Actor } from "./movements";
+import { notifyOrganization } from "./notifications";
 
 const { sourceDocuments, cargo, complianceAlerts } = schema;
 
@@ -113,6 +114,13 @@ export async function extractDocumentJob(tx: RlsTransaction, orgId: string, docu
         },
       })
       .onConflictDoNothing();
+    await notifyOrganization(tx, {
+      orgId,
+      eventType: "document.review_needed",
+      title: `Review needed: ${doc.originalFilename}`,
+      body: `Extracted with ${Math.round(outcome.confidence * 100)}% confidence. Fields needing attention: ${outcome.lowConfidenceFields.join(", ") || "overall confidence"}.`,
+      linkPath: `/documents/${doc.id}`,
+    });
   }
 
   if (doc.movementId) {

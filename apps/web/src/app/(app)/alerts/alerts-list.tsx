@@ -44,6 +44,7 @@ export function AlertsList({ canManage }: { canManage: boolean }) {
     if (a.driverId) return { href: "/parties/drivers", label: a.driverName ?? "Driver" };
     if (a.truckId) return { href: "/parties/trucks", label: `Truck ${a.truckUnit ?? ""}` };
     if (a.trailerId) return { href: "/parties/trailers", label: `Trailer ${a.trailerUnit ?? ""}` };
+    if (a.movementId) return { href: `/movements/${a.movementId}`, label: a.movementNumber ?? "Movement" };
     return null;
   };
 

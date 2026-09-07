@@ -24,6 +24,7 @@ import {
 } from "@corridor/domain";
 import { permissionProcedure, router, type OrgContext } from "../trpc";
 import { transmitMovement } from "../services/customs";
+import { syncMovementRiskAlerts } from "../services/risk";
 import {
   addEvent,
   applyCustomsDecision,
@@ -204,6 +205,7 @@ export const movementRouter = router({
               .where(and(eq(cargo.id, id), eq(cargo.movementId, movementId)))
               .returning();
             if (!row) throw new TRPCError({ code: "NOT_FOUND" });
+            await syncMovementRiskAlerts(tx, ctx.orgId, movementId);
             return row;
           }
           const nextRows = await tx
@@ -215,6 +217,7 @@ export const movementRouter = router({
             .insert(cargo)
             .values({ ...fields, movementId, organizationId: ctx.orgId, lineNumber: next })
             .returning();
+          await syncMovementRiskAlerts(tx, ctx.orgId, movementId);
           return row!;
         }),
       ),

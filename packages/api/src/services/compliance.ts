@@ -18,7 +18,7 @@ import {
   type ExpiryFinding,
 } from "@corridor/domain";
 
-const { complianceAlerts, drivers, trucks, trailers } = schema;
+const { complianceAlerts, drivers, trucks, trailers, movements } = schema;
 
 type DriverRow = typeof drivers.$inferSelect;
 type TruckRow = typeof trucks.$inferSelect;
@@ -114,6 +114,21 @@ export async function syncEntityAlerts(
         ...payload,
       });
       created++;
+      if (f.severity === "critical") {
+        const { notifyOrganization } = await import("../services/notifications");
+        await notifyOrganization(tx, {
+          orgId: organizationId,
+          eventType: "alert.critical",
+          title: f.title,
+          body: f.description,
+          linkPath:
+            entity.type === "driver"
+              ? "/parties/drivers"
+              : entity.type === "truck"
+                ? "/parties/trucks"
+                : "/parties/trailers",
+        });
+      }
     }
   }
 
@@ -190,7 +205,28 @@ export async function scanOrganization(
       ),
     );
 
-  return totals;
+  // Risk findings (anomaly scoring, hold-prediction, HS mismatch) refresh
+  // alongside expiry checks for every not-yet-decided movement — a lane's
+  // historical average shifts as more movements complete, so yesterday's
+  // "normal" shipment can become today's outlier even with no user action.
+  const { syncMovementRiskAlerts } = await import("./risk");
+  const activeMovements = await tx
+    .select({ id: movements.id })
+    .from(movements)
+    .where(
+      and(
+        eq(movements.organizationId, organizationId),
+        inArray(movements.status, ["draft", "sent", "accepted", "held", "rejected"]),
+      ),
+    );
+  const riskTotals = { created: 0, resolved: 0 };
+  for (const m of activeMovements) {
+    const r = await syncMovementRiskAlerts(tx, organizationId, m.id);
+    riskTotals.created += r.created;
+    riskTotals.resolved += r.resolved;
+  }
+
+  return { ...totals, risk: { ...riskTotals, movements: activeMovements.length } };
 }
 
 export { isNull };

@@ -5,7 +5,7 @@ import { alertListInput, alertStatus, canTransitionAlert, uuid } from "@corridor
 import { permissionProcedure, router } from "../trpc";
 import { scanOrganization } from "../services/compliance";
 
-const { complianceAlerts, drivers, trucks, trailers } = schema;
+const { complianceAlerts, drivers, trucks, trailers, movements } = schema;
 
 export const alertsRouter = router({
   list: permissionProcedure("alert.read")
@@ -49,11 +49,13 @@ export const alertsRouter = router({
               driverName: sql<string | null>`${drivers.firstName} || ' ' || ${drivers.lastName}`,
               truckUnit: trucks.unitNumber,
               trailerUnit: trailers.unitNumber,
+              movementNumber: movements.movementNumber,
             })
             .from(complianceAlerts)
             .leftJoin(drivers, eq(drivers.id, complianceAlerts.driverId))
             .leftJoin(trucks, eq(trucks.id, complianceAlerts.truckId))
             .leftJoin(trailers, eq(trailers.id, complianceAlerts.trailerId))
+            .leftJoin(movements, eq(movements.id, complianceAlerts.movementId))
             .where(where)
             .orderBy(
               sql`case ${complianceAlerts.severity} when 'critical' then 0 when 'warning' then 1 else 2 end`,
