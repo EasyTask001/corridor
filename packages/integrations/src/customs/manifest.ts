@@ -5,15 +5,15 @@ import type { ManifestPayload } from "./types";
 export interface ManifestSource {
   organization: {
     name: string;
-    scacCode: string | null;
-    canadianCarrierCode: string | null;
     usDotNumber: string | null;
+    filerCode: string | null;
   };
   movement: {
     regime: Regime;
     movementNumber: string;
     tripNumber: string | null;
-    crossingPoint: { code: string; name?: string } | null;
+    carrierCode: string | null;
+    port: { code: string; name?: string } | null;
     scheduledCrossingAt: Date | string | null;
   };
   driver: {
@@ -49,7 +49,7 @@ export interface ManifestSource {
 export function buildManifest(src: ManifestSource): ManifestPayload {
   if (!src.driver) throw new Error("manifest requires a driver");
   if (!src.truck) throw new Error("manifest requires a truck");
-  if (!src.movement.crossingPoint) throw new Error("manifest requires a crossing point");
+  if (!src.movement.port) throw new Error("manifest requires a port of entry");
   if (!src.movement.scheduledCrossingAt) throw new Error("manifest requires an ETA");
 
   const eta =
@@ -60,15 +60,15 @@ export function buildManifest(src: ManifestSource): ManifestPayload {
   return {
     regime: src.movement.regime,
     carrier: {
-      scac: src.organization.scacCode,
-      canadianCarrierCode: src.organization.canadianCarrierCode,
+      code: src.movement.carrierCode,
+      filerCode: src.organization.filerCode,
       usDotNumber: src.organization.usDotNumber,
       name: src.organization.name,
     },
     trip: {
       movementNumber: src.movement.movementNumber,
       tripNumber: src.movement.tripNumber,
-      portOfEntry: src.movement.crossingPoint.code,
+      portOfEntry: src.movement.port.code,
       estimatedArrival: eta,
     },
     crew: [

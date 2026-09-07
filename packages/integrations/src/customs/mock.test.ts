@@ -7,15 +7,15 @@ import { CustomsTransportError, hasCustomsCredentials } from "./types";
 const src: ManifestSource = {
   organization: {
     name: "Pathfinder",
-    scacCode: "PFTR",
-    canadianCarrierCode: "PFT1",
+    filerCode: "F01",
     usDotNumber: "1234567",
   },
   movement: {
     regime: "ACE",
     movementNumber: "ACE-26-00001",
     tripNumber: "TRIP-1",
-    crossingPoint: { code: "3801", name: "Detroit" },
+    carrierCode: "PFTR",
+    port: { code: "3801", name: "Detroit" },
     scheduledCrossingAt: "2026-09-08T14:00:00.000Z",
   },
   driver: {
@@ -60,8 +60,8 @@ describe("buildManifest", () => {
   it("refuses incomplete movements", () => {
     expect(() => buildManifest({ ...src, driver: null })).toThrow(/driver/);
     expect(() =>
-      buildManifest({ ...src, movement: { ...src.movement, crossingPoint: null } }),
-    ).toThrow(/crossing/);
+      buildManifest({ ...src, movement: { ...src.movement, port: null } }),
+    ).toThrow(/port/);
   });
 });
 

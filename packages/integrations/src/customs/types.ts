@@ -4,8 +4,11 @@ import type { Regime } from "@corridor/domain";
 export interface ManifestPayload {
   regime: Regime;
   carrier: {
-    scac: string | null;
-    canadianCarrierCode: string | null;
+    /** The movement's own carrier code (migration 0018) — a snapshot, not
+     * necessarily the org's current default, since a tenant may file under
+     * more than one ACE/ACI code. */
+    code: string | null;
+    filerCode: string | null;
     usDotNumber: string | null;
     name: string;
   };
