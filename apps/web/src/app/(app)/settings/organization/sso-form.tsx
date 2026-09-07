@@ -1,0 +1,205 @@
+"use client";
+
+import { useState, type FormEvent } from "react";
+import Link from "next/link";
+import { useMutation } from "@tanstack/react-query";
+import type { inferRouterOutputs } from "@trpc/server";
+import type { AppRouter } from "@corridor/api";
+import type { SubscriptionPlan } from "@corridor/domain";
+import { Alert, Badge, Button, Input, Label, Textarea } from "@corridor/ui";
+import { useTRPC } from "@/lib/trpc/client";
+
+type SsoState = inferRouterOutputs<AppRouter>["organization"]["sso"]["get"];
+type SsoConfig = NonNullable<SsoState["config"]>;
+
+/** `acme.com, sub.acme.com` / one per line — both are what people paste. */
+function parseDomains(value: string): string[] {
+  return value
+    .split(/[\s,;]+/)
+    .map((d) => d.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function StatusBadge({ config }: { config: SsoConfig | null }) {
+  if (!config) return <Badge variant="muted">Not configured</Badge>;
+  return config.mode === "mock" ? (
+    <Badge variant="warn">Mock provider</Badge>
+  ) : (
+    <Badge variant="ok">Active</Badge>
+  );
+}
+
+/**
+ * Single sign-on (SAML) for the organization.
+ *
+ * Rendered only for someone holding `organization.manage`; the API refuses the
+ * read otherwise. Below Enterprise it is an upsell card rather than a hidden
+ * feature, because "why can't I find SSO?" is the more expensive support
+ * question.
+ */
+export function SsoForm({ plan, initial }: { plan: SubscriptionPlan; initial: SsoState | null }) {
+  const trpc = useTRPC();
+  const [config, setConfig] = useState<SsoConfig | null>(initial?.config ?? null);
+  const [metadataUrl, setMetadataUrl] = useState("");
+  const [metadataXml, setMetadataXml] = useState("");
+  const [domains, setDomains] = useState((initial?.config?.domains ?? []).join(", "));
+  const [enforced, setEnforced] = useState(initial?.config?.enforced ?? false);
+  const [saved, setSaved] = useState<string | null>(null);
+
+  const configure = useMutation(
+    trpc.organization.sso.configure.mutationOptions({
+      onSuccess: (row) => {
+        setConfig(row);
+        setDomains(row.domains.join(", "));
+        setEnforced(row.enforced);
+        setMetadataXml("");
+        setSaved("Single sign-on saved.");
+      },
+    }),
+  );
+  const remove = useMutation(
+    trpc.organization.sso.remove.mutationOptions({
+      onSuccess: () => {
+        setConfig(null);
+        setDomains("");
+        setEnforced(false);
+        setMetadataUrl("");
+        setMetadataXml("");
+        setSaved("Single sign-on removed.");
+      },
+    }),
+  );
+
+  if (plan !== "enterprise") {
+    return (
+      <section className="panel space-y-3 p-6">
+        <header className="flex items-center gap-3">
+          <h2 className="text-lg font-semibold">Single sign-on (SAML)</h2>
+          <Badge variant="solid">Enterprise</Badge>
+        </header>
+        <p className="text-sm text-ink-500">
+          Let your team sign in with your identity provider (Okta, Entra ID, Google Workspace) and
+          switch off passwords for your domains. Available on the Enterprise plan.
+        </p>
+        <Link href="/settings/billing" className="text-sm font-medium text-ink-950 underline">
+          Compare plans
+        </Link>
+      </section>
+    );
+  }
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSaved(null);
+    const url = metadataUrl.trim();
+    const xml = metadataXml.trim();
+    configure.mutate({
+      ...(url ? { metadataUrl: url } : {}),
+      ...(xml ? { metadataXml: xml } : {}),
+      domains: parseDomains(domains),
+      enforced,
+    });
+  };
+
+  return (
+    <section className="panel space-y-4 p-6">
+      <header className="flex items-center gap-3">
+        <h2 className="text-lg font-semibold">Single sign-on (SAML)</h2>
+        <StatusBadge config={config} />
+      </header>
+      <p className="text-sm text-ink-500">
+        Register your identity provider&apos;s metadata and the email domains it owns. Corridor
+        never sees the SAML assertion — your IdP posts it straight to Supabase Auth.
+      </p>
+
+      {initial?.instanceMode === "mock" && (
+        <Alert variant="warn">
+          This deployment has no SAML-capable Auth instance configured, so a saved configuration is
+          recorded as a mock provider and no real redirect happens.
+        </Alert>
+      )}
+
+      {config && (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+          <dt className="text-ink-500">Provider</dt>
+          <dd className="font-mono text-xs">{config.providerId}</dd>
+          <dt className="text-ink-500">Domains</dt>
+          <dd>{config.domains.join(", ")}</dd>
+          <dt className="text-ink-500">Password sign-in</dt>
+          <dd>{config.enforced ? "Disabled for these domains" : "Still allowed"}</dd>
+        </dl>
+      )}
+
+      <form className="space-y-4" onSubmit={submit}>
+        <div>
+          <Label htmlFor="sso-metadata-url">Metadata URL</Label>
+          <Input
+            id="sso-metadata-url"
+            value={metadataUrl}
+            placeholder="https://idp.example.com/app/metadata"
+            onChange={(event) => setMetadataUrl(event.target.value)}
+          />
+          <p className="mt-1 text-xs text-ink-500">
+            Or paste the metadata XML below — one or the other, not both.
+          </p>
+        </div>
+
+        <div>
+          <Label htmlFor="sso-metadata-xml">Metadata XML</Label>
+          <Textarea
+            id="sso-metadata-xml"
+            rows={4}
+            value={metadataXml}
+            placeholder="<EntityDescriptor …>"
+            className="font-mono text-xs"
+            onChange={(event) => setMetadataXml(event.target.value)}
+          />
+        </div>
+
+        <div>
+          <Label htmlFor="sso-domains">Email domains</Label>
+          <Input
+            id="sso-domains"
+            value={domains}
+            placeholder="acme.com, acme.co.uk"
+            onChange={(event) => setDomains(event.target.value)}
+          />
+        </div>
+
+        <label className="flex items-center gap-2 text-sm" htmlFor="sso-enforced">
+          <input
+            id="sso-enforced"
+            type="checkbox"
+            checked={enforced}
+            onChange={(event) => setEnforced(event.target.checked)}
+            className="size-4 rounded border-ink-100"
+          />
+          Require SSO — hide password sign-in for these domains
+        </label>
+
+        {configure.error && <p className="text-sm text-danger-500">{configure.error.message}</p>}
+        {remove.error && <p className="text-sm text-danger-500">{remove.error.message}</p>}
+        {saved && <p className="text-sm text-ok-500">{saved}</p>}
+
+        <div className="flex gap-3">
+          <Button type="submit" disabled={configure.isPending}>
+            {configure.isPending ? "Saving…" : config ? "Update SSO" : "Enable SSO"}
+          </Button>
+          {config && (
+            <Button
+              type="button"
+              variant="danger"
+              disabled={remove.isPending}
+              onClick={() => {
+                setSaved(null);
+                remove.mutate();
+              }}
+            >
+              {remove.isPending ? "Removing…" : "Remove SSO"}
+            </Button>
+          )}
+        </div>
+      </form>
+    </section>
+  );
+}

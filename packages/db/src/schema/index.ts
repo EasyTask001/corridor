@@ -4,7 +4,7 @@
  * express); these files exist so application queries are typed.
  *
  * Verified column-for-column and index-for-index (key columns, order and sort
- * direction) against migrations 0001–0013. When you add a migration, mirror it
+ * direction) against migrations 0001–0014. When you add a migration, mirror it
  * here in the same change and re-check with:
  *
  *   pnpm db:reset && pnpm --filter @corridor/db verify:mirror
@@ -18,3 +18,4 @@ export * from "./documents";
 export * from "./notifications";
 export * from "./copilot";
 export * from "./usage";
+export * from "./sso";

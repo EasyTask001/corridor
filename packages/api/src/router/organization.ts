@@ -7,11 +7,22 @@ import {
   inviteMemberInput,
   PERMISSIONS,
   PERMISSION_KEYS,
+  ssoConfigureInput,
   updateOrganizationInput,
   updateCustomRoleInput,
   uuid,
   type PermissionKey,
 } from "@corridor/domain";
+import {
+  createSsoProvider,
+  deleteSsoProvider,
+  isMockProviderId,
+  ssoMode,
+  SsoProviderError,
+  updateSsoProvider,
+  type SsoMode,
+  type SsoProviderInput,
+} from "@corridor/integrations";
 import { and, eq, inArray, isNull, or, schema, type RlsTransaction } from "@corridor/db";
 import {
   authedProcedure,
@@ -23,8 +34,15 @@ import {
 import { writeAudit } from "../services/audit";
 import { invalidatePermissionCache } from "../infra/permission-cache";
 
-const { organizations, organizationMembers, roles, rolePermissions, permissions, userProfiles } =
-  schema;
+const {
+  organizations,
+  organizationMembers,
+  organizationSso,
+  roles,
+  rolePermissions,
+  permissions,
+  userProfiles,
+} = schema;
 
 /** What a permission-affecting mutation gets in addition to its transaction. */
 type PermissionMutation<T> = (
@@ -111,6 +129,77 @@ function mapRoleError(error: unknown): never {
   throw error;
 }
 
+/**
+ * SAML SSO is sold with the Enterprise plan. The gate is the plan on the
+ * session (resolved from `organizations.subscription_plan` in the tRPC
+ * context), checked on read as well as write so a downgraded tenant cannot keep
+ * editing the configuration.
+ */
+function assertEnterprise(ctx: OrgContext) {
+  if (ctx.session.plan !== "enterprise") {
+    throw new TRPCError({ code: "FORBIDDEN", message: "SSO requires the Enterprise plan" });
+  }
+}
+
+/**
+ * SSO configuration is part of the organization profile, so it rides on
+ * `organization.manage` — the same permission the RLS policies on
+ * `organization_sso` enforce — plus the Enterprise gate.
+ */
+const ssoProcedure = permissionProcedure("organization.manage").use(({ ctx, next }) => {
+  assertEnterprise(ctx);
+  return next();
+});
+
+export interface SsoSettings {
+  /** GoTrue's provider uuid, or a `mock-sso-…` id. */
+  providerId: string;
+  domains: string[];
+  enforced: boolean;
+  /** `"mock"` when this configuration was never registered with a real IdP. */
+  mode: SsoMode;
+  updatedAt: Date;
+}
+
+type SsoRow = typeof organizationSso.$inferSelect;
+
+function toSsoSettings(row: SsoRow): SsoSettings {
+  return {
+    providerId: row.providerId,
+    domains: row.domains,
+    enforced: row.enforced,
+    mode: isMockProviderId(row.providerId) ? "mock" : "saml",
+    updatedAt: row.updatedAt,
+  };
+}
+
+/**
+ * Turn a rejection from Supabase Auth into an error the operator can act on.
+ * Without this tRPC would report an opaque INTERNAL_SERVER_ERROR for what is
+ * nearly always a typo in the metadata URL or an IdP the instance cannot reach.
+ */
+function mapSsoError(error: unknown): never {
+  if (error instanceof SsoProviderError) {
+    throw new TRPCError({
+      code: error.status >= 500 ? "BAD_GATEWAY" : "BAD_REQUEST",
+      message: `Supabase Auth rejected the SAML configuration: ${error.message}${
+        error.status >= 500 ? " (is the metadata URL reachable from Auth?)" : ""
+      }`,
+      cause: error,
+    });
+  }
+  throw error;
+}
+
+/**
+ * What the audit log records about an SSO change. Deliberately *not* the
+ * metadata: an IdP metadata document is up to half a megabyte of XML and would
+ * bury the rest of the trail, and the URL it came from is already on the row.
+ */
+function auditableSso(row: SsoRow | null | undefined) {
+  return row ? { providerId: row.providerId, domains: row.domains, enforced: row.enforced } : null;
+}
+
 export const organizationRouter = router({
   /** Who am I, which orgs am I in, what can I do in the active one. */
   me: authedProcedure.query(({ ctx }) => ({
@@ -180,6 +269,126 @@ export const organizationRouter = router({
         return row;
       }),
     ),
+
+  /**
+   * SAML single sign-on. Supabase Auth owns the provider and the redirect; this
+   * router owns which organization it belongs to, which domains it claims, and
+   * whether password sign-in is still allowed for them.
+   */
+  sso: router({
+    get: ssoProcedure.query(({ ctx }) =>
+      ctx.rls(async (tx) => {
+        const row = await tx.query.organizationSso.findFirst({
+          where: eq(organizationSso.organizationId, ctx.orgId),
+        });
+        return {
+          /** Whether *this deployment* can register real providers at all. */
+          instanceMode: ssoMode(),
+          config: row ? toSsoSettings(row) : null,
+        };
+      }),
+    ),
+
+    /**
+     * Register or re-register the tenant's IdP, then mirror it locally.
+     *
+     * The GoTrue call happens between two transactions rather than inside one,
+     * so a Postgres transaction is never held open across an HTTP request (the
+     * pattern `billing.checkout` already uses). The cost is a window in which
+     * the provider exists in Auth but not here — closed by deleting the
+     * just-created provider if the mirror write fails, which also keeps a retry
+     * from tripping GoTrue's "domain already claimed" rejection.
+     */
+    configure: ssoProcedure.input(ssoConfigureInput).mutation(async ({ ctx, input }) => {
+      const before = await ctx.rls((tx) =>
+        tx.query.organizationSso.findFirst({
+          where: eq(organizationSso.organizationId, ctx.orgId),
+        }),
+      );
+
+      const providerInput: SsoProviderInput = {
+        metadataUrl: input.metadataUrl,
+        metadataXml: input.metadataXml,
+        domains: input.domains,
+      };
+      const provider = await (
+        before
+          ? updateSsoProvider(before.providerId, providerInput)
+          : createSsoProvider(providerInput)
+      ).catch(mapSsoError);
+
+      try {
+        const row = await ctx.rls(async (tx) => {
+          const [saved] = await tx
+            .insert(organizationSso)
+            .values({
+              organizationId: ctx.orgId,
+              providerId: provider.id,
+              domains: input.domains,
+              enforced: input.enforced,
+            })
+            .onConflictDoUpdate({
+              target: organizationSso.organizationId,
+              set: {
+                providerId: provider.id,
+                domains: input.domains,
+                enforced: input.enforced,
+              },
+            })
+            .returning();
+          if (!saved) throw new TRPCError({ code: "FORBIDDEN", message: "Not permitted" });
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "organization.sso_configure",
+            "organization_sso",
+            ctx.orgId,
+            auditableSso(before),
+            auditableSso(saved),
+          );
+          return saved;
+        });
+        return toSsoSettings(row);
+      } catch (error) {
+        // Compensate: the provider we just created has no owner any more.
+        if (!before) {
+          await deleteSsoProvider(provider.id).catch(() => undefined);
+        }
+        throw error;
+      }
+    }),
+
+    /** Turn SSO off: the provider goes from Auth, the mirror row from here. */
+    remove: ssoProcedure.mutation(async ({ ctx }) => {
+      const before = await ctx.rls((tx) =>
+        tx.query.organizationSso.findFirst({
+          where: eq(organizationSso.organizationId, ctx.orgId),
+        }),
+      );
+      if (!before) throw new TRPCError({ code: "NOT_FOUND" });
+
+      await deleteSsoProvider(before.providerId).catch(mapSsoError);
+      await ctx.rls(async (tx) => {
+        const deleted = await tx
+          .delete(organizationSso)
+          .where(eq(organizationSso.organizationId, ctx.orgId))
+          .returning({ organizationId: organizationSso.organizationId });
+        if (deleted.length === 0) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "Not permitted" });
+        }
+        await writeAudit(
+          tx,
+          ctx.orgId,
+          "organization.sso_remove",
+          "organization_sso",
+          ctx.orgId,
+          auditableSso(before),
+          null,
+        );
+      });
+      return { organizationId: ctx.orgId };
+    }),
+  }),
 
   roles: router({
     list: orgProcedure.query(({ ctx }) =>

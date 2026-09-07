@@ -12,3 +12,4 @@ export * from "./document";
 export * from "./notification";
 export * from "./predictive";
 export * from "./reporting";
+export * from "./sso";

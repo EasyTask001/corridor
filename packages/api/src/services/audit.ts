@@ -79,6 +79,8 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
   "organization.members.remove": "member.remove",
   // written inside accept_invitation() (migration 0001)
   "organization.members.acceptInvite": "member.accept_invite",
+  "organization.sso.configure": "organization.sso_configure",
+  "organization.sso.remove": "organization.sso_remove",
 
   // --- registries ---------------------------------------------------------
   "party.drivers.create": "driver.create",

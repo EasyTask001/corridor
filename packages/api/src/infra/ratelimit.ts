@@ -45,6 +45,14 @@ export interface RateLimitResult {
 export interface RateLimitIdentity {
   orgId: string | null;
   userId: string;
+  /**
+   * Counter key to use instead of the derived one. For the handful of public
+   * endpoints that have no session to count against and must therefore count
+   * by IP — `GET /api/auth/sso`, keyed `sso:ip:<ip>`. Never set it for an
+   * authenticated caller: the derived key is what keeps one tenant out of
+   * another tenant's window.
+   */
+  key?: string;
 }
 
 export interface RateLimiter {
@@ -60,12 +68,15 @@ export interface RateLimiter {
  *
  * - `standard` → `standard:${orgId}:${userId}` (per user within the org).
  * - `ai`       → `ai:${orgId}` (per org — shared model budget).
+ * - an explicit `identity.key` wins over both (sessionless public endpoints).
  *
  * With no active org (onboarding) both fall back to `${tier}:user:${userId}`.
- * Keys always start with the tier and contain the org id, so a tenant can never
- * be counted against another tenant's window.
+ * A derived key always starts with the tier and contains the org id, so a
+ * tenant can never be counted against another tenant's window; an explicit key
+ * belongs to a caller that has no tenant yet, and carries its own prefix.
  */
 export function rateLimitKey(tier: RateLimitTier, identity: RateLimitIdentity): string {
+  if (identity.key) return identity.key;
   if (!identity.orgId) return `${tier}:user:${identity.userId}`;
   return tier === "ai" ? `ai:${identity.orgId}` : `standard:${identity.orgId}:${identity.userId}`;
 }

@@ -86,6 +86,17 @@ describe("rate limiting (memory fallback)", () => {
     expect(rateLimitKey("ai", { orgId: null, userId: "user-a" })).toBe("ai:user:user-a");
   });
 
+  it("honours an explicit key for sessionless public endpoints", () => {
+    // GET /api/auth/sso counts by IP: there is no session to count against.
+    expect(
+      rateLimitKey("standard", { orgId: null, userId: "anonymous", key: "sso:ip:203.0.113.7" }),
+    ).toBe("sso:ip:203.0.113.7");
+    // …and two IPs get their own windows.
+    expect(
+      rateLimitKey("standard", { orgId: null, userId: "anonymous", key: "sso:ip:203.0.113.8" }),
+    ).not.toBe("sso:ip:203.0.113.7");
+  });
+
   it("allows exactly `limit` requests and rejects the next one", async () => {
     const limiter = rateLimitFor("standard", "trial");
     expect(limiter.limit).toBe(RATE_LIMITS.standard.trial);

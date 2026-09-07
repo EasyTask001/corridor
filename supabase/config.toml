@@ -375,6 +375,30 @@ skip_nonce_check = false
 # If enabled, it will allow the user to successfully authenticate when the provider does not return an email address.
 email_optional = false
 
+# --- Corridor: SAML 2.0 (enterprise SSO) -------------------------------------
+# Enterprise tenants register a SAML provider from Settings → Organization; the
+# app talks to GoTrue's admin API at /auth/v1/admin/sso/providers
+# (packages/integrations/src/sso.ts).
+#
+# There is no config.toml key that enables SAML on the local stack in Supabase
+# CLI 2.116.0:
+#
+#   [auth.external.saml]
+#   enabled = true
+#
+# is parsed as a *generic OAuth provider* named "saml" and rejected with
+# "Missing required field in config: auth.external.saml.client_id", so it is
+# left commented out here deliberately. Enabling SAML end-to-end needs GoTrue's
+# own GOTRUE_SAML_ENABLED plus GOTRUE_SAML_PRIVATE_KEY, which the CLI does not
+# expose; on a hosted project it is a dashboard/API setting.
+#
+# What that does and does not affect locally:
+#   * provider CRUD through the admin API works on the local stack as shipped —
+#     the wrapper's real path is exercisable;
+#   * the sign-in redirect (supabase.auth.signInWithSSO) is not, so the tested
+#     path locally is the wrapper's mock mode (`mock-sso-…` provider ids).
+# -----------------------------------------------------------------------------
+
 # Allow Solana wallet holders to sign in to your project via the Sign in with Solana (SIWS, EIP-4361) standard.
 # You can configure "web3" rate limit in the [auth.rate_limit] section and set up [auth.captcha] if self-hosting.
 [auth.web3.solana]

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { api } from "@/lib/trpc/server";
 import { getSession } from "@/lib/session";
 import { OrganizationForm } from "./organization-form";
+import { SsoForm } from "./sso-form";
 
 export const metadata: Metadata = { title: "Organization" };
 
@@ -9,6 +10,11 @@ export default async function OrganizationSettingsPage() {
   const [session, caller] = await Promise.all([getSession(), api()]);
   const org = await caller.organization.get();
   const canManage = session?.permissions.has("organization.manage") ?? false;
+  const plan = session?.plan ?? "trial";
+
+  // `sso.get` is gated on organization.manage *and* the Enterprise plan, so it
+  // is only called when both hold; below Enterprise the section is an upsell.
+  const sso = canManage && plan === "enterprise" ? await caller.organization.sso.get() : null;
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -31,6 +37,7 @@ export default async function OrganizationSettingsPage() {
         }}
         readOnly={!canManage}
       />
+      {canManage && <SsoForm plan={plan} initial={sso} />}
     </div>
   );
 }
