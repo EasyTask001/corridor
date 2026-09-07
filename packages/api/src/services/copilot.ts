@@ -211,7 +211,7 @@ export function copilotTools(rls: RlsRunner, orgId: string): ToolSet {
   return {
     lookupMovementStatus: tool({
       description:
-        "Look up a movement (e-manifest) by its movement number (e.g. ACE-26-00001) and return its current status, crossing point, ETA and customs reference.",
+        "Look up a movement (e-manifest) by its movement number (e.g. ACE-26-00001) and return its current status, port of entry, ETA and customs reference.",
       inputSchema: z.object({
         movementNumber: z.string().describe("The movement number, e.g. ACE-26-00001"),
       }),
@@ -223,7 +223,8 @@ export function copilotTools(rls: RlsRunner, orgId: string): ToolSet {
               movementNumber: movements.movementNumber,
               status: movements.status,
               regime: movements.regime,
-              crossingPoint: movements.crossingPoint,
+              portId: movements.portId,
+              carrierCode: movements.carrierCode,
               scheduledCrossingAt: movements.scheduledCrossingAt,
               customsReferenceNumber: movements.customsReferenceNumber,
             })

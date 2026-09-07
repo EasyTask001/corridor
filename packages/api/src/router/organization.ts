@@ -2,6 +2,9 @@ import { randomBytes } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
+  carrierCodeRemoveInput,
+  carrierCodeSetDefaultInput,
+  carrierCodeUpsertInput,
   customRoleInput,
   createOrganizationInput,
   inviteMemberInput,
@@ -23,7 +26,7 @@ import {
   type SsoMode,
   type SsoProviderInput,
 } from "@corridor/integrations";
-import { and, eq, inArray, isNull, or, schema, sql, type RlsTransaction } from "@corridor/db";
+import { and, desc, eq, inArray, isNull, or, schema, sql, type RlsTransaction } from "@corridor/db";
 import {
   authedProcedure,
   orgProcedure,
@@ -36,6 +39,7 @@ import { invalidatePermissionCache } from "../infra/permission-cache";
 
 const {
   organizations,
+  organizationCarrierCodes,
   organizationMembers,
   organizationSso,
   roles,
@@ -43,6 +47,25 @@ const {
   permissions,
   userProfiles,
 } = schema;
+
+/** Postgres error code -> a message the dispatcher can act on. */
+function mapCarrierCodeError(error: unknown): never {
+  let current: unknown = error;
+  while (current instanceof Error) {
+    const code = (current as Error & { code?: string }).code;
+    if (code === "23505") {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: "This carrier code already exists for this regime",
+      });
+    }
+    if (code === "23514") {
+      throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid carrier code" });
+    }
+    current = current.cause;
+  }
+  throw error;
+}
 
 /** What a permission-affecting mutation gets in addition to its transaction. */
 type PermissionMutation<T> = (
@@ -256,6 +279,7 @@ export const organizationRouter = router({
             }),
             ...(input.usDotNumber !== undefined && { usDotNumber: input.usDotNumber }),
             ...(input.mcNumber !== undefined && { mcNumber: input.mcNumber }),
+            ...(input.filerCode !== undefined && { filerCode: input.filerCode }),
             ...(input.billingEmail !== undefined && { billingEmail: input.billingEmail }),
           })
           .where(eq(organizations.id, ctx.orgId))
@@ -273,6 +297,157 @@ export const organizationRouter = router({
         return row;
       }),
     ),
+
+  /**
+   * The ACE/ACI carrier codes this org files under (migration 0018). Gated
+   * entirely on `organization.manage` — the settings panel that surfaces this
+   * only renders for a manager in the first place.
+   */
+  carrierCodes: router({
+    list: permissionProcedure("organization.manage").query(({ ctx }) =>
+      ctx.rls((tx) =>
+        tx
+          .select()
+          .from(organizationCarrierCodes)
+          .where(eq(organizationCarrierCodes.organizationId, ctx.orgId))
+          .orderBy(
+            organizationCarrierCodes.regime,
+            desc(organizationCarrierCodes.isDefault),
+            organizationCarrierCodes.code,
+          ),
+      ),
+    ),
+
+    upsert: permissionProcedure("organization.manage")
+      .input(carrierCodeUpsertInput)
+      .mutation(({ ctx, input }) =>
+        ctx.rls(async (tx) => {
+          const { id, ...fields } = input;
+          if (id) {
+            const before = await tx.query.organizationCarrierCodes.findFirst({
+              where: and(
+                eq(organizationCarrierCodes.id, id),
+                eq(organizationCarrierCodes.organizationId, ctx.orgId),
+              ),
+            });
+            if (!before) throw new TRPCError({ code: "NOT_FOUND" });
+            const [row] = await tx
+              .update(organizationCarrierCodes)
+              .set({
+                regime: fields.regime,
+                code: fields.code,
+                label: fields.label ?? null,
+                ...(fields.isDefault !== undefined && { isDefault: fields.isDefault }),
+              })
+              .where(eq(organizationCarrierCodes.id, id))
+              .returning()
+              .catch(mapCarrierCodeError);
+            await writeAudit(
+              tx,
+              ctx.orgId,
+              "organization.carrier_code_update",
+              "organization_carrier_code",
+              id,
+              before,
+              row,
+            );
+            return row!;
+          }
+          const [row] = await tx
+            .insert(organizationCarrierCodes)
+            .values({
+              organizationId: ctx.orgId,
+              regime: fields.regime,
+              code: fields.code,
+              label: fields.label ?? null,
+              isDefault: fields.isDefault ?? false,
+            })
+            .returning()
+            .catch(mapCarrierCodeError);
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "organization.carrier_code_create",
+            "organization_carrier_code",
+            row!.id,
+            null,
+            row,
+          );
+          return row!;
+        }),
+      ),
+
+    remove: permissionProcedure("organization.manage")
+      .input(carrierCodeRemoveInput)
+      .mutation(({ ctx, input }) =>
+        ctx.rls(async (tx) => {
+          const [removed] = await tx
+            .delete(organizationCarrierCodes)
+            .where(
+              and(
+                eq(organizationCarrierCodes.id, input.id),
+                eq(organizationCarrierCodes.organizationId, ctx.orgId),
+              ),
+            )
+            .returning();
+          if (!removed) throw new TRPCError({ code: "NOT_FOUND" });
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "organization.carrier_code_remove",
+            "organization_carrier_code",
+            input.id,
+            removed,
+            null,
+          );
+          return { id: input.id };
+        }),
+      ),
+
+    /** Flip the default within the code's own regime; at most one may hold it. */
+    setDefault: permissionProcedure("organization.manage")
+      .input(carrierCodeSetDefaultInput)
+      .mutation(({ ctx, input }) =>
+        ctx.rls(async (tx) => {
+          const target = await tx.query.organizationCarrierCodes.findFirst({
+            where: and(
+              eq(organizationCarrierCodes.id, input.id),
+              eq(organizationCarrierCodes.organizationId, ctx.orgId),
+            ),
+          });
+          if (!target) throw new TRPCError({ code: "NOT_FOUND" });
+          // Two statements, not one UPDATE ... OR: the partial unique index is
+          // checked at the end of each statement, so clearing the old default
+          // first (however many rows that turns out to be — zero or one) keeps
+          // "set this row's default" from ever colliding with it.
+          await tx
+            .update(organizationCarrierCodes)
+            .set({ isDefault: false })
+            .where(
+              and(
+                eq(organizationCarrierCodes.organizationId, ctx.orgId),
+                eq(organizationCarrierCodes.regime, target.regime),
+                eq(organizationCarrierCodes.isDefault, true),
+              ),
+            );
+          const [row] = await tx
+            .update(organizationCarrierCodes)
+            .set({ isDefault: true })
+            .where(eq(organizationCarrierCodes.id, input.id))
+            .returning();
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "organization.carrier_code_set_default",
+            "organization_carrier_code",
+            input.id,
+            { isDefault: target.isDefault },
+            { isDefault: true },
+          );
+          return row!;
+        }),
+      ),
+  }),
 
   /**
    * SAML single sign-on. Supabase Auth owns the provider and the redirect; this

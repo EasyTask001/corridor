@@ -9,6 +9,7 @@ import { movementRouter } from "./movement";
 import { notificationsRouter } from "./notifications";
 import { organizationRouter } from "./organization";
 import { partyRouter } from "./party";
+import { referenceRouter } from "./reference";
 import { reportingRouter } from "./reporting";
 
 export const appRouter = router({
@@ -24,6 +25,7 @@ export const appRouter = router({
   documents: documentsRouter,
   notifications: notificationsRouter,
   reporting: reportingRouter,
+  reference: referenceRouter,
 });
 
 export type AppRouter = typeof appRouter;

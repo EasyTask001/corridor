@@ -6,7 +6,7 @@ import { translateReportQuestion, UnsupportedReportQuestionError } from "@corrid
 import { permissionProcedure, router } from "../trpc";
 import { writeAudit } from "../services/audit";
 
-const { movements, cargo } = schema;
+const { movements, cargo, ports } = schema;
 
 const reportInput = z.object({ question: z.string().trim().min(1).max(500) });
 
@@ -27,7 +27,7 @@ function dimensionSql(dimension: ReportQuery["dimension"]): { label: SQL<string>
     case "regime":
       return { label: sql<string>`${movements.regime}`, group: sql`${movements.regime}` };
     case "crossing": {
-      const expression = sql<string>`coalesce(${movements.crossingPoint} ->> 'name', ${movements.crossingPoint} ->> 'code', 'Unspecified')`;
+      const expression = sql<string>`coalesce(${ports.name}, 'Unspecified')`;
       return { label: expression, group: expression };
     }
     case "month": {
@@ -90,6 +90,7 @@ async function executeReport(tx: RlsTransaction, orgId: string, query: ReportQue
     .select({ label: dimension.label, value })
     .from(movements)
     .leftJoin(cargo, eq(cargo.movementId, movements.id))
+    .leftJoin(ports, eq(ports.id, movements.portId))
     .where(and(...filters))
     .groupBy(dimension.group)
     .orderBy(query.dimension === "month" ? dimension.label : desc(value))

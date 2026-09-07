@@ -13,7 +13,7 @@ import { isEditable, movementSuggestionPayload } from "@corridor/domain";
 import { suggestMovement, type MovementFingerprint } from "@corridor/ai";
 import { requireMovement } from "./movements";
 
-const { movements, movementSuggestions, cargo } = schema;
+const { movements, movementSuggestions, cargo, ports } = schema;
 
 export async function generateMovementSuggestion(
   tx: RlsTransaction,
@@ -37,7 +37,7 @@ export async function generateMovementSuggestion(
     .select({
       id: movements.id,
       regime: movements.regime,
-      crossingPoint: movements.crossingPoint,
+      portId: movements.portId,
       createdAt: movements.createdAt,
       shipperId: sql<
         string | null
@@ -52,7 +52,7 @@ export async function generateMovementSuggestion(
         eq(movements.organizationId, orgId),
         eq(movements.regime, target.regime),
         notInArray(movements.status, ["draft", "rejected", "cancelled"]),
-        isNotNull(movements.crossingPoint),
+        isNotNull(movements.portId),
         isNotNull(movements.driverId),
         isNotNull(movements.truckId),
         sql`exists (
@@ -69,7 +69,9 @@ export async function generateMovementSuggestion(
   const fingerprint: MovementFingerprint = {
     id: target.id,
     regime: target.regime,
-    crossingCode: target.crossingPoint?.code ?? null,
+    // Identity comparison only (see similarity.ts) — the port's id serves
+    // just as well as its code and needs no extra join here.
+    crossingCode: target.portId ?? null,
     shipperId: targetLane?.shipperId ?? null,
     consigneeId: targetLane?.consigneeId ?? null,
     createdAt: target.createdAt,
@@ -79,7 +81,7 @@ export async function generateMovementSuggestion(
     history.map((candidate) => ({
       id: candidate.id,
       regime: candidate.regime,
-      crossingCode: candidate.crossingPoint?.code ?? null,
+      crossingCode: candidate.portId ?? null,
       shipperId: candidate.shipperId,
       consigneeId: candidate.consigneeId,
       createdAt: candidate.createdAt,
@@ -109,12 +111,22 @@ export async function generateMovementSuggestion(
     .from(cargo)
     .where(eq(cargo.movementId, source.id))
     .orderBy(cargo.lineNumber);
+  // Snapshot the source's port (id + code/name), not just its id, so the
+  // suggestion still displays correctly even if the port catalogue changes.
+  const sourcePort = source.portId
+    ? await tx
+        .select({ id: ports.id, code: ports.code, name: ports.name })
+        .from(ports)
+        .where(eq(ports.id, source.portId))
+        .then((r) => r[0] ?? null)
+    : null;
 
   const payload = movementSuggestionPayload.parse({
     sourceMovementId: source.id,
     sourceMovementNumber: source.movementNumber,
     targetUpdatedAt: target.updatedAt.toISOString(),
-    crossingPoint: source.crossingPoint ?? null,
+    port: sourcePort,
+    carrierCode: source.carrierCode ?? null,
     driverId: source.driverId,
     truckId: source.truckId,
     trailerId: source.trailerId,
@@ -166,10 +178,8 @@ export async function acceptMovementSuggestion(
   }
 
   const patch = {
-    ...(!movement.crossingPoint &&
-      payload.crossingPoint && {
-        crossingPoint: payload.crossingPoint,
-      }),
+    ...(!movement.portId && payload.port && { portId: payload.port.id }),
+    ...(!movement.carrierCode && payload.carrierCode && { carrierCode: payload.carrierCode }),
     ...(!movement.driverId && payload.driverId && { driverId: payload.driverId }),
     ...(!movement.truckId && payload.truckId && { truckId: payload.truckId }),
     ...(!movement.trailerId && payload.trailerId && { trailerId: payload.trailerId }),

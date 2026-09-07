@@ -141,15 +141,15 @@ export function manifestFor(
   return buildManifest({
     organization: {
       name: org.name,
-      scacCode: org.scacCode,
-      canadianCarrierCode: org.canadianCarrierCode,
       usDotNumber: org.usDotNumber,
+      filerCode: org.filerCode,
     },
     movement: {
       regime: full.regime,
       movementNumber: full.movementNumber,
       tripNumber: full.tripNumber,
-      crossingPoint: full.crossingPoint ?? null,
+      carrierCode: full.carrierCode,
+      port: full.port ? { code: full.port.code, name: full.port.name } : null,
       scheduledCrossingAt: full.scheduledCrossingAt,
     },
     driver: full.driver,

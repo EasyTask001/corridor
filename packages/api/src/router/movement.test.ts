@@ -53,6 +53,7 @@ const DRIVER_ID = "55555555-5555-4555-8555-555555555555";
 const TRUCK_ID = "66666666-6666-4666-8666-666666666666";
 const TRAILER_ID = "77777777-7777-4777-8777-777777777777";
 const PARTNER_ID = "88888888-8888-4888-8888-888888888888";
+const PORT_ID = "99999999-9999-4999-8999-999999999998";
 
 const inDays = (days: number) => {
   const d = new Date();
@@ -69,7 +70,8 @@ function movementRow(over: Row = {}): Row {
     movementNumber: "ACE-26-00042",
     tripNumber: "TRIP-1042",
     status: "draft",
-    crossingPoint: { code: "3801", name: "Detroit" },
+    portId: PORT_ID,
+    carrierCode: "PFTR",
     scheduledCrossingAt: inDays(1),
     driverId: DRIVER_ID,
     truckId: TRUCK_ID,
@@ -93,9 +95,11 @@ function transmittableRows(movement: Row = movementRow()): Record<string, Row[]>
         scacCode: "CTCX",
         canadianCarrierCode: "CTC1",
         usDotNumber: "7654321",
+        filerCode: "F01",
       },
     ],
     movements: [movement],
+    ports: [{ id: PORT_ID, regime: "ACE", kind: "port_of_entry", code: "3801", name: "Detroit", country: "US" }],
     drivers: [
       {
         id: DRIVER_ID,

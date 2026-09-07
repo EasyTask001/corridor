@@ -81,6 +81,9 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
   "organization.members.acceptInvite": "member.accept_invite",
   "organization.sso.configure": "organization.sso_configure",
   "organization.sso.remove": "organization.sso_remove",
+  "organization.carrierCodes.upsert": "organization.carrier_code_create / organization.carrier_code_update",
+  "organization.carrierCodes.remove": "organization.carrier_code_remove",
+  "organization.carrierCodes.setDefault": "organization.carrier_code_set_default",
 
   // --- registries ---------------------------------------------------------
   "party.drivers.create": "driver.create",

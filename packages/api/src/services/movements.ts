@@ -25,6 +25,7 @@ const {
   trailers,
   userProfiles,
   organizations,
+  ports,
 } = schema;
 
 export type Tx = RlsTransaction;
@@ -172,7 +173,7 @@ export async function applyCustomsDecision(
 
 export async function loadFull(tx: Tx, orgId: string, id: string) {
   const m = await requireMovement(tx, orgId, id);
-  const [driver, truck, trailer, cargoRows, sealRows, events, amendments] = await Promise.all([
+  const [driver, truck, trailer, port, cargoRows, sealRows, events, amendments] = await Promise.all([
     m.driverId
       ? tx
           .select()
@@ -192,6 +193,13 @@ export async function loadFull(tx: Tx, orgId: string, id: string) {
           .select()
           .from(trailers)
           .where(eq(trailers.id, m.trailerId))
+          .then((r) => r[0] ?? null)
+      : null,
+    m.portId
+      ? tx
+          .select()
+          .from(ports)
+          .where(eq(ports.id, m.portId))
           .then((r) => r[0] ?? null)
       : null,
     tx
@@ -236,6 +244,7 @@ export async function loadFull(tx: Tx, orgId: string, id: string) {
     driver,
     truck,
     trailer,
+    port,
     cargo: cargoRows.map((r) => ({
       ...r.cargo,
       shipperName: r.shipperName,
@@ -252,7 +261,7 @@ export type FullMovement = Awaited<ReturnType<typeof loadFull>>;
 export function validationFor(full: FullMovement) {
   return validateForTransmit({
     regime: full.regime,
-    crossingPoint: full.crossingPoint ?? null,
+    port: full.port ? { code: full.port.code } : null,
     scheduledCrossingAt: full.scheduledCrossingAt?.toISOString() ?? null,
     driver: full.driver
       ? {

@@ -59,6 +59,8 @@ const {
   trucks,
   trailers,
   partners,
+  ports,
+  organizationCarrierCodes,
 } = schema;
 
 function requireEditable(status: MovementStatus) {
@@ -84,6 +86,7 @@ export const movementRouter = router({
         if (input.status?.length) conds.push(inArray(movements.status, input.status));
         if (input.regime) conds.push(eq(movements.regime, input.regime));
         if (input.driverId) conds.push(eq(movements.driverId, input.driverId));
+        if (input.portId) conds.push(eq(movements.portId, input.portId));
         if (input.search) {
           const like = `%${input.search.replace(/[%_\\]/g, "\\$&")}%`;
           conds.push(
@@ -95,7 +98,7 @@ export const movementRouter = router({
           );
         }
         const where = and(...conds);
-        const [rows, counts] = await Promise.all([
+        const [rawRows, counts] = await Promise.all([
           tx
             .select({
               id: movements.id,
@@ -103,7 +106,10 @@ export const movementRouter = router({
               movementNumber: movements.movementNumber,
               tripNumber: movements.tripNumber,
               status: movements.status,
-              crossingPoint: movements.crossingPoint,
+              portId: movements.portId,
+              portCode: ports.code,
+              portName: ports.name,
+              carrierCode: movements.carrierCode,
               scheduledCrossingAt: movements.scheduledCrossingAt,
               customsReferenceNumber: movements.customsReferenceNumber,
               driverName: sql<string | null>`${drivers.firstName} || ' ' || ${drivers.lastName}`,
@@ -117,6 +123,7 @@ export const movementRouter = router({
             .leftJoin(drivers, eq(drivers.id, movements.driverId))
             .leftJoin(trucks, eq(trucks.id, movements.truckId))
             .leftJoin(trailers, eq(trailers.id, movements.trailerId))
+            .leftJoin(ports, eq(ports.id, movements.portId))
             .where(where)
             .orderBy(desc(movements.updatedAt))
             .limit(input.limit)
@@ -126,6 +133,10 @@ export const movementRouter = router({
             .from(movements)
             .where(where),
         ]);
+        const rows = rawRows.map(({ portCode, portName, ...row }) => ({
+          ...row,
+          port: portCode ? { code: portCode, name: portName! } : null,
+        }));
         return { rows, total: counts[0]?.count ?? 0 };
       }),
     ),
@@ -166,6 +177,19 @@ export const movementRouter = router({
           sql`select public.next_movement_number(${ctx.orgId}::uuid, ${input.regime}) as n`,
         );
         const movementNumber = numRes[0]!.n;
+        // New movements start on the regime's default filing code; the trip
+        // step can change it before transmit.
+        const [defaultCode] = await tx
+          .select({ code: organizationCarrierCodes.code })
+          .from(organizationCarrierCodes)
+          .where(
+            and(
+              eq(organizationCarrierCodes.organizationId, ctx.orgId),
+              eq(organizationCarrierCodes.regime, input.regime),
+              eq(organizationCarrierCodes.isDefault, true),
+            ),
+          )
+          .limit(1);
         const [m] = await tx
           .insert(movements)
           .values({
@@ -173,6 +197,7 @@ export const movementRouter = router({
             regime: input.regime,
             movementNumber,
             tripNumber: input.tripNumber ?? null,
+            carrierCode: defaultCode?.code ?? null,
             createdBy: ctx.session.user.id,
           })
           .returning();
@@ -205,7 +230,8 @@ export const movementRouter = router({
           .update(movements)
           .set({
             ...(patch.tripNumber !== undefined && { tripNumber: patch.tripNumber }),
-            ...(patch.crossingPoint !== undefined && { crossingPoint: patch.crossingPoint }),
+            ...(patch.portId !== undefined && { portId: patch.portId }),
+            ...(patch.carrierCode !== undefined && { carrierCode: patch.carrierCode }),
             ...(patch.scheduledCrossingAt !== undefined && {
               scheduledCrossingAt: patch.scheduledCrossingAt
                 ? new Date(patch.scheduledCrossingAt)
@@ -524,7 +550,8 @@ export const movementRouter = router({
           (set as Record<string, unknown>)[key as string] = after;
         };
         consider("tripNumber", m.tripNumber, p.tripNumber);
-        consider("crossingPoint", m.crossingPoint, p.crossingPoint);
+        consider("portId", m.portId, p.portId);
+        consider("carrierCode", m.carrierCode, p.carrierCode);
         consider(
           "scheduledCrossingAt",
           m.scheduledCrossingAt?.toISOString() ?? null,
@@ -718,7 +745,7 @@ export const movementRouter = router({
   /** Lookup data for the wizard dropdowns in one round-trip. */
   options: permissionProcedure("movement.read").query(({ ctx }) =>
     ctx.rls(async (tx) => {
-      const [d, t, tr, p] = await Promise.all([
+      const [d, t, tr, p, cc] = await Promise.all([
         tx
           .select({
             id: drivers.id,
@@ -743,8 +770,24 @@ export const movementRouter = router({
           .from(partners)
           .where(and(eq(partners.organizationId, ctx.orgId), eq(partners.status, "active")))
           .orderBy(asc(partners.name)),
+        tx
+          .select({
+            id: organizationCarrierCodes.id,
+            regime: organizationCarrierCodes.regime,
+            code: organizationCarrierCodes.code,
+            label: organizationCarrierCodes.label,
+            isDefault: organizationCarrierCodes.isDefault,
+          })
+          .from(organizationCarrierCodes)
+          .where(
+            and(
+              eq(organizationCarrierCodes.organizationId, ctx.orgId),
+              eq(organizationCarrierCodes.status, "active"),
+            ),
+          )
+          .orderBy(organizationCarrierCodes.regime, desc(organizationCarrierCodes.isDefault)),
       ]);
-      return { drivers: d, trucks: t, trailers: tr, partners: p };
+      return { drivers: d, trucks: t, trailers: tr, partners: p, carrierCodes: cc };
     }),
   ),
 });

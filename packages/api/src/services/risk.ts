@@ -30,7 +30,7 @@ async function laneHistory(
   orgId: string,
   movement: typeof movements.$inferSelect,
 ) {
-  // "Lane" = same shipper+consignee if cargo already has them, else same crossing + regime.
+  // "Lane" = same shipper+consignee if cargo already has them, else same port + regime.
   const [firstLine] = await tx
     .select({ shipperId: cargo.shipperId, consigneeId: cargo.consigneeId })
     .from(cargo)
@@ -46,7 +46,7 @@ async function laneHistory(
             and c2.consignee_id = ${firstLine.consigneeId}
         )`
       : sql`${movements.regime} = ${movement.regime}
-            and ${movements.crossingPoint} ->> 'code' = ${movement.crossingPoint?.code ?? null}`;
+            and ${movements.portId} = ${movement.portId ?? null}`;
 
   const past = await tx
     .select({
