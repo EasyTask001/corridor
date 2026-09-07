@@ -3,7 +3,16 @@
  * RegistryPage renders forms and tables from this; validation is the
  * domain Zod schema on the server (surfaced via tRPC zodError).
  */
-export type FieldType = "text" | "email" | "tel" | "date" | "number" | "select" | "textarea";
+export type FieldType =
+  | "text"
+  | "email"
+  | "tel"
+  | "date"
+  | "number"
+  | "select"
+  /** rendered as a Yes/No select, submitted as a real boolean */
+  | "boolean"
+  | "textarea";
 
 export interface FieldDef {
   name: string;
@@ -58,35 +67,67 @@ export const REGISTRIES: Record<RegistryKind, RegistryConfig> = {
     singular: "Driver",
     readPermission: "driver.read",
     writePermission: "driver.write",
-    searchPlaceholder: "Search name, license, FAST card…",
+    searchPlaceholder: "Search name or license…",
     displayName: (r) => `${r.firstName} ${r.lastName}`,
     fields: [
       { name: "firstName", label: "First name", required: true },
       { name: "lastName", label: "Last name", required: true },
-      { name: "licenseNumber", label: "License number", required: true, mono: true },
+      {
+        name: "personType",
+        label: "Person type",
+        type: "select",
+        options: [
+          { value: "driver", label: "Driver" },
+          { value: "passenger", label: "Passenger" },
+        ],
+      },
+      {
+        name: "gender",
+        label: "Gender",
+        type: "select",
+        options: [
+          { value: "", label: "—" },
+          { value: "M", label: "Male" },
+          { value: "F", label: "Female" },
+          { value: "X", label: "Unspecified" },
+        ],
+      },
+      // Licence fields are blank for a passenger; the DB check enforces the rule.
+      { name: "licenseNumber", label: "License number", mono: true },
       {
         name: "licenseJurisdiction",
         label: "License province/state",
-        required: true,
         placeholder: "ON",
         uppercase: true,
       },
       { name: "licenseExpiry", label: "License expiry", type: "date" },
       { name: "medicalCertExpiry", label: "Medical certificate expiry", type: "date" },
-      { name: "fastCardNumber", label: "FAST card number", mono: true },
-      { name: "fastCardExpiry", label: "FAST card expiry", type: "date" },
+      {
+        name: "hazmatEndorsement",
+        label: "Hazmat endorsement",
+        type: "boolean",
+        options: [
+          { value: "false", label: "No" },
+          { value: "true", label: "Yes" },
+        ],
+      },
       { name: "citizenship", label: "Citizenship", placeholder: "CA", uppercase: true },
       { name: "dateOfBirth", label: "Date of birth", type: "date" },
       { name: "phone", label: "Phone", type: "tel" },
       { name: "email", label: "Email", type: "email" },
+      { name: "usAddress.line1", label: "US address line 1", span: 2 },
+      { name: "usAddress.city", label: "US city" },
+      { name: "usAddress.region", label: "US state", uppercase: true },
+      { name: "usAddress.postalCode", label: "US ZIP", uppercase: true },
+      { name: "usAddress.country", label: "US address country", placeholder: "US", uppercase: true },
       STATUS,
       NOTES,
     ],
     columns: [
       { key: "__name", label: "Driver" },
+      { key: "personType", label: "Type" },
       { key: "licenseNumber", label: "License", kind: "mono" },
       { key: "licenseExpiry", label: "License exp.", kind: "expiry" },
-      { key: "fastCardExpiry", label: "FAST exp.", kind: "expiry" },
       { key: "medicalCertExpiry", label: "Medical exp.", kind: "expiry" },
       { key: "status", label: "Status", kind: "status" },
     ],

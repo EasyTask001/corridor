@@ -31,7 +31,7 @@ export default function MovementScreen() {
     );
   }
 
-  const { driver, truck, trailer, events, shipments } = data;
+  const { crew, truck, trailer, events, shipments } = data;
   const movement = data;
 
   return (
@@ -59,7 +59,9 @@ export default function MovementScreen() {
           <Text style={styles.body}>Customs ref: {movement.customsReferenceNumber}</Text>
         ) : null}
         <Text style={styles.muted}>
-          {driver ? `${driver.firstName} ${driver.lastName}` : "No driver"}
+          {crew.length > 0
+            ? crew.map((c) => `${c.firstName} ${c.lastName}`).join(", ")
+            : "No crew"}
           {truck ? ` · Truck ${truck.unitNumber}` : ""}
           {trailer ? ` · Trailer ${trailer.unitNumber}` : ""}
         </Text>

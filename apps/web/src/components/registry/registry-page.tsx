@@ -17,6 +17,7 @@ import {
   type DataTableColumnDef,
 } from "@corridor/ui";
 import { useTRPC } from "@/lib/trpc/client";
+import { DriverDocumentsPanel } from "./driver-documents-panel";
 import { REGISTRIES, type FieldDef, type RegistryConfig, type RegistryKind } from "./fields";
 
 type Row = Record<string, unknown> & { id: string; status: string };
@@ -47,13 +48,16 @@ function formToPayload(form: HTMLFormElement, fields: FieldDef[]) {
     let v: unknown;
     if (raw === "") v = f.required ? "" : null;
     else if (f.type === "number") v = Number(raw);
+    else if (f.type === "boolean") v = raw === "true";
     else v = f.uppercase ? raw.toUpperCase() : raw;
     setPath(out, f.name, v);
   }
-  // Nested address: drop null leaves so the Zod object doesn't see nulls.
-  if (out.address && typeof out.address === "object") {
-    const a = out.address as Record<string, unknown>;
-    for (const k of Object.keys(a)) if (a[k] === null) delete a[k];
+  // Nested addresses (partners.address, drivers.usAddress): drop null leaves so
+  // the Zod object doesn't see nulls.
+  for (const value of Object.values(out)) {
+    if (!value || typeof value !== "object") continue;
+    const nested = value as Record<string, unknown>;
+    for (const k of Object.keys(nested)) if (nested[k] === null) delete nested[k];
   }
   return out;
 }
@@ -127,6 +131,8 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
   const [search, setSearch] = useState("");
   const [includeArchived, setIncludeArchived] = useState(false);
   const [editing, setEditing] = useState<Row | "new" | null>(null);
+  /** Drivers get a second tab; every other registry only has its fields. */
+  const [tab, setTab] = useState<"details" | "documents">("details");
   const [error, setError] = useState<string | null>(null);
 
   const listInput = useMemo(
@@ -202,6 +208,7 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
                 className="mr-3 px-0 py-0"
                 onClick={() => {
                   setError(null);
+                  setTab("details");
                   setEditing(row.original);
                 }}
               >
@@ -251,7 +258,14 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
             Show archived
           </label>
           {canWrite && (
-            <Button onClick={() => setEditing("new")}>New {cfg.singular.toLowerCase()}</Button>
+            <Button
+              onClick={() => {
+                setTab("details");
+                setEditing("new");
+              }}
+            >
+              New {cfg.singular.toLowerCase()}
+            </Button>
           )}
         </div>
       </header>
@@ -283,7 +297,33 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
               <h2 className="text-lg font-semibold">
                 {editing === "new" ? `New ${cfg.singular.toLowerCase()}` : cfg.displayName(editing)}
               </h2>
+              {/* Travel documents hang off a saved driver, so the tab only
+                  appears once there is a driver id to hang them on. */}
+              {kind === "drivers" && editing !== "new" && (
+                <div className="mt-3 flex gap-4 text-sm">
+                  {(["details", "documents"] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setTab(t)}
+                      className={cn(
+                        "border-b-2 pb-1",
+                        tab === t
+                          ? "border-ink-900 font-medium"
+                          : "border-transparent text-ink-500",
+                      )}
+                    >
+                      {t === "details" ? "Details" : "Travel documents"}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
+            {kind === "drivers" && editing !== "new" && tab === "documents" ? (
+              <div className="flex-1 px-6 py-5">
+                <DriverDocumentsPanel driverId={editing.id} canWrite={canWrite} />
+              </div>
+            ) : (
             <div className="grid flex-1 grid-cols-2 gap-4 px-6 py-5">
               {cfg.fields.map((f) => {
                 const id = `${kind}-${f.name}`;
@@ -297,7 +337,7 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
                       {f.label}
                       {f.required && <span className="text-danger-500"> *</span>}
                     </Label>
-                    {f.type === "select" ? (
+                    {f.type === "select" || f.type === "boolean" ? (
                       <NativeSelect
                         id={id}
                         name={f.name}
@@ -333,15 +373,18 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
                 );
               })}
             </div>
+            )}
             <div className="flex items-center justify-between gap-3 border-t border-ink-100 px-6 py-4">
               <p className="text-sm text-danger-500">{error}</p>
               <div className="flex gap-2">
                 <Button type="button" variant="secondary" onClick={() => setEditing(null)}>
-                  Cancel
+                  {tab === "documents" ? "Close" : "Cancel"}
                 </Button>
-                <Button type="submit" disabled={create.isPending || update.isPending}>
-                  {create.isPending || update.isPending ? "Saving…" : "Save"}
-                </Button>
+                {tab === "details" && (
+                  <Button type="submit" disabled={create.isPending || update.isPending}>
+                    {create.isPending || update.isPending ? "Saving…" : "Save"}
+                  </Button>
+                )}
               </div>
             </div>
           </form>

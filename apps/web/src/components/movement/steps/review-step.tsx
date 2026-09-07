@@ -117,7 +117,10 @@ function Summary({ m }: { m: Movement }) {
   return (
     <div className="panel grid grid-cols-2 gap-x-6 gap-y-2 p-5 text-sm sm:grid-cols-3">
       {[
-        ["Driver", m.driver ? `${m.driver.firstName} ${m.driver.lastName}` : "—"],
+        [
+          "Crew",
+          m.crew.map((c) => `${c.firstName} ${c.lastName}`).join(", ") || "—",
+        ],
         ["Truck", m.truck?.unitNumber ?? "—"],
         ["Trailer", m.trailer?.unitNumber ?? "—"],
         ["Shipments", String(m.shipments.length)],

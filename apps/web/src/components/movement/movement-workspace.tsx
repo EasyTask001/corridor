@@ -353,10 +353,11 @@ export function MovementWorkspace({
                   value={suggestion.suggestedPayload.carrierCode ?? "—"}
                 />
                 <SuggestionValue
-                  label="Driver"
+                  label="Crew"
                   value={
-                    options.drivers.find((x) => x.id === suggestion.suggestedPayload.driverId)
-                      ?.label ?? "—"
+                    suggestion.suggestedPayload.crew
+                      .map((c) => options.drivers.find((x) => x.id === c.driverId)?.label ?? "?")
+                      .join(", ") || "—"
                   }
                 />
                 <SuggestionValue
@@ -413,7 +414,6 @@ export function MovementWorkspace({
                     portId: amendPortId,
                     carrierCode:
                       String(fd.get("amendCarrierCode") ?? "").trim() || defaultCarrierCode,
-                    driverId: String(fd.get("driverId") ?? "") || null,
                     truckId: String(fd.get("truckId") ?? "") || null,
                     trailerId: String(fd.get("trailerId") ?? "") || null,
                   },
@@ -460,21 +460,6 @@ export function MovementWorkspace({
                     <option key={c.code} value={c.code}>
                       {c.code}
                       {c.label ? ` · ${c.label}` : ""}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Driver" htmlFor="amendDriver">
-                <select
-                  id="amendDriver"
-                  name="driverId"
-                  defaultValue={m.driverId ?? ""}
-                  className="input"
-                >
-                  <option value="">— none —</option>
-                  {options.drivers.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.label}
                     </option>
                   ))}
                 </select>

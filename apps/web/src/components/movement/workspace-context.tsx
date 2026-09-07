@@ -81,6 +81,9 @@ export function useMovementMutations() {
 
   return {
     update: useMutation(trpc.movement.update.mutationOptions(opts)),
+    addCrew: useMutation(trpc.movement.crew.add.mutationOptions(opts)),
+    removeCrew: useMutation(trpc.movement.crew.remove.mutationOptions(opts)),
+    setCrewRole: useMutation(trpc.movement.crew.setRole.mutationOptions(opts)),
     addSeal: useMutation(trpc.movement.seals.add.mutationOptions(opts)),
     removeSeal: useMutation(trpc.movement.seals.remove.mutationOptions(opts)),
     createShipment: useMutation(trpc.shipment.create.mutationOptions(opts)),
