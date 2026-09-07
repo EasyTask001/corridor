@@ -54,6 +54,7 @@ const TRUCK_ID = "66666666-6666-4666-8666-666666666666";
 const TRAILER_ID = "77777777-7777-4777-8777-777777777777";
 const PARTNER_ID = "88888888-8888-4888-8888-888888888888";
 const PORT_ID = "99999999-9999-4999-8999-999999999998";
+const SHIPMENT_ID = "12121212-1212-4212-8212-121212121212";
 
 const inDays = (days: number) => {
   const d = new Date();
@@ -85,7 +86,7 @@ function movementRow(over: Row = {}): Row {
   };
 }
 
-/** Registries + one clean cargo line: everything `validateForTransmit` demands. */
+/** Registries + one clean shipment: everything `validateForTransmit` demands. */
 function transmittableRows(movement: Row = movementRow()): Record<string, Row[]> {
   return {
     organizations: [
@@ -99,7 +100,16 @@ function transmittableRows(movement: Row = movementRow()): Record<string, Row[]>
       },
     ],
     movements: [movement],
-    ports: [{ id: PORT_ID, regime: "ACE", kind: "port_of_entry", code: "3801", name: "Detroit", country: "US" }],
+    ports: [
+      {
+        id: PORT_ID,
+        regime: "ACE",
+        kind: "port_of_entry",
+        code: "3801",
+        name: "Detroit",
+        country: "US",
+      },
+    ],
     drivers: [
       {
         id: DRIVER_ID,
@@ -135,18 +145,40 @@ function transmittableRows(movement: Row = movementRow()): Record<string, Row[]>
         registrationExpiry: isoDay(180),
       },
     ],
-    cargo: [
+    shipments: [
+      {
+        id: SHIPMENT_ID,
+        organizationId: TEST_ORG_ID,
+        regime: "ACE",
+        movementId: MOVEMENT_ID,
+        carrierCode: "CTCX",
+        shipmentType: "regular_bill",
+        cargoType: null,
+        controlReference: "PAPS90210",
+        controlNumber: "CTCXPAPS90210",
+        status: "draft",
+        entryNumber: null,
+        entryPortId: null,
+        inBondEntryType: null,
+        inBondDestinationPortId: null,
+        inBondNumber: null,
+        shipperId: PARTNER_ID,
+        consigneeId: PARTNER_ID,
+      },
+    ],
+    commodities: [
       {
         id: "99999999-9999-4999-8999-999999999999",
         organizationId: TEST_ORG_ID,
-        movementId: MOVEMENT_ID,
+        shipmentId: SHIPMENT_ID,
         lineNumber: 1,
         commodityDescription: "Hot-rolled steel coils",
         hsCode: "7208.39",
         weightKg: 18000,
-        pieceCount: 6,
-        shipperId: PARTNER_ID,
-        consigneeId: PARTNER_ID,
+        weightUnit: "KG",
+        quantity: 6,
+        quantityUnit: "Coil",
+        marksAndNumbers: null,
         valueAmount: 42000,
         valueCurrency: "USD",
         countryOfOrigin: "CA",
@@ -184,8 +216,25 @@ const DISPATCHER: PermissionKey[] = [
   "movement.cancel",
 ];
 
+/** shipmentsForMovement() reads the party names/addresses through correlated
+ * subqueries the fake DB cannot evaluate, so they come from `sqlValues`. */
+const SHIPMENT_SQL_VALUES = {
+  shipperName: "Maple Ridge Steel Ltd",
+  shipperCountry: "CA",
+  shipperAddress: { city: "Hamilton", country: "CA" },
+  consigneeName: "Great Lakes Fabrication Inc",
+  consigneeCountry: "US",
+  consigneeAddress: { city: "Detroit", country: "US" },
+  entryPortCode: null,
+  inBondDestinationPortCode: null,
+};
+
 const caller = (options: MockContextOptions = {}) =>
-  createMockCaller(createCaller, { permissions: DISPATCHER, ...options });
+  createMockCaller(createCaller, {
+    permissions: DISPATCHER,
+    ...options,
+    sqlValues: { ...SHIPMENT_SQL_VALUES, ...options.sqlValues },
+  });
 
 beforeEach(() => {
   writeAudit.mockReset();
@@ -302,13 +351,14 @@ describe("movement.update", () => {
 describe("movement.submit", () => {
   it("refuses to transmit a manifest that fails validation, and leaves it editable", async () => {
     const rows = transmittableRows();
-    rows.cargo = [];
+    rows.shipments = [];
+    rows.commodities = [];
     rows.drivers = [];
     const { caller: api, db } = caller({ rows });
 
     await expect(api.submit({ id: MOVEMENT_ID })).rejects.toMatchObject({
       code: "PRECONDITION_FAILED",
-      message: /Cannot transmit:.*Assign a driver.*shipment line/s,
+      message: /Cannot transmit:.*Assign a driver.*at least one shipment/s,
     });
 
     expect(db.table("movements")[0]!.status).toBe("draft");

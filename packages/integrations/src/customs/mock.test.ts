@@ -29,18 +29,34 @@ const src: ManifestSource = {
   truck: { unitNumber: "T-101", vin: null, plateNumber: "AB1", plateJurisdiction: "ON" },
   trailer: { unitNumber: "TR-501", plateNumber: "TRL1", plateJurisdiction: "ON" },
   seals: [{ sealNumber: "S1" }, { sealNumber: "S2" }],
-  cargo: [
+  shipments: [
     {
-      lineNumber: 1,
+      controlNumber: "PFTRPAPS0001",
+      shipmentType: "regular_bill",
+      cargoType: null,
+      entryNumber: "ENT-1",
+      entryPortCode: "3801",
+      inBondEntryType: null,
+      inBondDestinationPortCode: null,
+      inBondNumber: null,
       shipperName: "A",
+      shipperAddress: { line1: "1 Mill Rd", city: "Hamilton", region: "ON", country: "CA" },
       consigneeName: "B",
-      commodityDescription: "Steel",
-      hsCode: "7208.10",
-      weightKg: 100,
-      pieceCount: 2,
-      valueAmount: 10,
-      valueCurrency: "USD",
-      countryOfOrigin: "CA",
+      consigneeAddress: null,
+      commodities: [
+        {
+          commodityDescription: "Steel",
+          hsCode: "7208.10",
+          quantity: 2,
+          quantityUnit: "Coil",
+          weightKg: 100,
+          marksAndNumbers: null,
+          countryOfOrigin: "CA",
+          valueAmount: 10,
+          valueCurrency: "USD",
+          hazmat: [{ unCode: "UN1203", description: "Gasoline" }],
+        },
+      ],
     },
   ],
 };
@@ -55,16 +71,26 @@ describe("buildManifest", () => {
     expect(m.trip.portOfEntry).toBe("3801");
     expect(m.crew[0]?.licenseNumber).toBe("L1");
     expect(m.equipment[0]?.seals).toEqual(["S1", "S2"]);
-    expect(m.shipments[0]?.value).toEqual({ amount: 10, currency: "USD" });
+    expect(m.shipments[0]?.controlNumber).toBe("PFTRPAPS0001");
+    expect(m.shipments[0]?.shipper).toEqual({
+      name: "A",
+      address: "1 Mill Rd, Hamilton, ON, CA",
+    });
+    expect(m.shipments[0]?.consignee).toEqual({ name: "B", address: null });
+    expect(m.shipments[0]?.commodities[0]?.value).toEqual({ amount: 10, currency: "USD" });
+    expect(m.shipments[0]?.commodities[0]?.hazmat).toEqual([
+      { unCode: "UN1203", description: "Gasoline" },
+    ]);
   });
   it("refuses incomplete movements", () => {
     expect(() => buildManifest({ ...src, driver: null })).toThrow(/driver/);
-    expect(() =>
-      buildManifest({ ...src, movement: { ...src.movement, port: null } }),
-    ).toThrow(/port/);
+    expect(() => buildManifest({ ...src, movement: { ...src.movement, port: null } })).toThrow(
+      /port/,
+    );
     expect(() =>
       buildManifest({ ...src, movement: { ...src.movement, carrierCode: null } }),
     ).toThrow(/carrier code/);
+    expect(() => buildManifest({ ...src, shipments: [] })).toThrow(/shipment/);
   });
 });
 

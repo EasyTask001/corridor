@@ -1,5 +1,5 @@
 import type { Regime } from "@corridor/domain";
-import type { ManifestPayload } from "./types";
+import type { ManifestPayload, ManifestParty } from "./types";
 
 /** Minimal structural input — the API passes its loaded movement + org. */
 export interface ManifestSource {
@@ -32,19 +32,58 @@ export interface ManifestSource {
   } | null;
   trailer: { unitNumber: string; plateNumber: string; plateJurisdiction: string } | null;
   seals: Array<{ sealNumber: string }>;
-  cargo: Array<{
-    lineNumber: number;
+  shipments: Array<{
+    controlNumber: string;
+    shipmentType: string | null;
+    cargoType: string | null;
+    entryNumber: string | null;
+    entryPortCode: string | null;
+    inBondEntryType: string | null;
+    inBondDestinationPortCode: string | null;
+    inBondNumber: string | null;
     shipperName: string | null;
+    shipperAddress: PostalAddress | null;
     consigneeName: string | null;
-    commodityDescription: string;
-    hsCode: string | null;
-    weightKg: number | null;
-    pieceCount: number | null;
-    valueAmount: number | null;
-    valueCurrency: string | null;
-    countryOfOrigin: string | null;
+    consigneeAddress: PostalAddress | null;
+    commodities: Array<{
+      commodityDescription: string;
+      hsCode: string | null;
+      quantity: number | null;
+      quantityUnit: string | null;
+      weightKg: number | null;
+      marksAndNumbers: string | null;
+      countryOfOrigin: string | null;
+      valueAmount: number | null;
+      valueCurrency: string | null;
+      hazmat: Array<{ unCode: string; description: string | null }>;
+    }>;
   }>;
 }
+
+interface PostalAddress {
+  line1?: string;
+  line2?: string;
+  city?: string;
+  region?: string;
+  postalCode?: string;
+  country?: string;
+}
+
+/** One printable line, the way a manifest prints an address. */
+function formatAddress(address: PostalAddress | null | undefined): string | null {
+  const parts = [
+    address?.line1,
+    address?.line2,
+    address?.city,
+    address?.region,
+    address?.postalCode,
+    address?.country,
+  ].filter((p): p is string => !!p && p.trim().length > 0);
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
+const party = (name: string | null, address: PostalAddress | null): ManifestParty | null =>
+  name ? { name, address: formatAddress(address) } : null;
 
 export function buildManifest(src: ManifestSource): ManifestPayload {
   if (!src.driver) throw new Error("manifest requires a driver");
@@ -52,6 +91,7 @@ export function buildManifest(src: ManifestSource): ManifestPayload {
   if (!src.movement.port) throw new Error("manifest requires a port of entry");
   if (!src.movement.carrierCode) throw new Error("manifest requires a carrier code");
   if (!src.movement.scheduledCrossingAt) throw new Error("manifest requires an ETA");
+  if (src.shipments.length === 0) throw new Error("manifest requires at least one shipment");
 
   const eta =
     typeof src.movement.scheduledCrossingAt === "string"
@@ -99,19 +139,35 @@ export function buildManifest(src: ManifestSource): ManifestPayload {
           },
         ]
       : [],
-    shipments: src.cargo.map((c) => ({
-      lineNumber: c.lineNumber,
-      shipper: c.shipperName,
-      consignee: c.consigneeName,
-      commodity: c.commodityDescription,
-      hsCode: c.hsCode,
-      weightKg: c.weightKg,
-      pieceCount: c.pieceCount,
-      value:
-        c.valueAmount != null && c.valueCurrency
-          ? { amount: c.valueAmount, currency: c.valueCurrency }
-          : null,
-      countryOfOrigin: c.countryOfOrigin,
+    shipments: src.shipments.map((s) => ({
+      controlNumber: s.controlNumber,
+      shipmentType: s.shipmentType,
+      cargoType: s.cargoType,
+      entryNumber: s.entryNumber,
+      entryPort: s.entryPortCode,
+      inBond: s.inBondEntryType
+        ? {
+            entryType: s.inBondEntryType,
+            destinationPort: s.inBondDestinationPortCode,
+            number: s.inBondNumber,
+          }
+        : null,
+      shipper: party(s.shipperName, s.shipperAddress),
+      consignee: party(s.consigneeName, s.consigneeAddress),
+      commodities: s.commodities.map((c) => ({
+        description: c.commodityDescription,
+        hsCode: c.hsCode,
+        quantity: c.quantity,
+        quantityUnit: c.quantityUnit,
+        weightKg: c.weightKg,
+        marksAndNumbers: c.marksAndNumbers,
+        hazmat: c.hazmat.map((h) => ({ unCode: h.unCode, description: h.description })),
+        countryOfOrigin: c.countryOfOrigin,
+        value:
+          c.valueAmount != null && c.valueCurrency
+            ? { amount: c.valueAmount, currency: c.valueCurrency }
+            : null,
+      })),
     })),
   };
 }

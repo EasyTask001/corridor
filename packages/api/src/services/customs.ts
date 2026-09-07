@@ -156,7 +156,21 @@ export function manifestFor(
     truck: full.truck,
     trailer: full.trailer,
     seals: full.seals,
-    cargo: full.cargo,
+    shipments: full.shipments.map((s) => ({
+      controlNumber: s.controlNumber,
+      shipmentType: s.shipmentType,
+      cargoType: s.cargoType,
+      entryNumber: s.entryNumber,
+      entryPortCode: s.entryPortCode,
+      inBondEntryType: s.inBondEntryType,
+      inBondDestinationPortCode: s.inBondDestinationPortCode,
+      inBondNumber: s.inBondNumber,
+      shipperName: s.shipperName,
+      shipperAddress: s.shipperAddress,
+      consigneeName: s.consigneeName,
+      consigneeAddress: s.consigneeAddress,
+      commodities: s.commodities,
+    })),
   });
 }
 

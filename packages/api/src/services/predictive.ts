@@ -13,7 +13,7 @@ import { isEditable, movementSuggestionPayload } from "@corridor/domain";
 import { suggestMovement, type MovementFingerprint } from "@corridor/ai";
 import { requireMovement } from "./movements";
 
-const { movements, movementSuggestions, cargo, ports } = schema;
+const { movements, movementSuggestions, shipments, ports } = schema;
 
 export async function generateMovementSuggestion(
   tx: RlsTransaction,
@@ -27,10 +27,10 @@ export async function generateMovementSuggestion(
   }
 
   const [targetLane] = await tx
-    .select({ shipperId: cargo.shipperId, consigneeId: cargo.consigneeId })
-    .from(cargo)
-    .where(eq(cargo.movementId, movementId))
-    .orderBy(cargo.lineNumber)
+    .select({ shipperId: shipments.shipperId, consigneeId: shipments.consigneeId })
+    .from(shipments)
+    .where(eq(shipments.movementId, movementId))
+    .orderBy(shipments.createdAt)
     .limit(1);
 
   const history = await tx
@@ -41,10 +41,10 @@ export async function generateMovementSuggestion(
       createdAt: movements.createdAt,
       shipperId: sql<
         string | null
-      >`(select c.shipper_id from public.cargo c where c.movement_id = ${movements.id} order by c.line_number limit 1)`,
+      >`(select s.shipper_id from public.shipments s where s.movement_id = ${movements.id} order by s.created_at limit 1)`,
       consigneeId: sql<
         string | null
-      >`(select c.consignee_id from public.cargo c where c.movement_id = ${movements.id} order by c.line_number limit 1)`,
+      >`(select s.consignee_id from public.shipments s where s.movement_id = ${movements.id} order by s.created_at limit 1)`,
     })
     .from(movements)
     .where(
@@ -56,7 +56,7 @@ export async function generateMovementSuggestion(
         isNotNull(movements.driverId),
         isNotNull(movements.truckId),
         sql`exists (
-          select 1 from public.cargo complete
+          select 1 from public.shipments complete
           where complete.movement_id = ${movements.id}
             and complete.shipper_id is not null
             and complete.consignee_id is not null
@@ -95,22 +95,6 @@ export async function generateMovementSuggestion(
     .where(and(eq(movements.id, best.movementId), eq(movements.organizationId, orgId)))
     .limit(1);
   if (!source) return null;
-  const sourceCargo = await tx
-    .select({
-      shipperId: cargo.shipperId,
-      consigneeId: cargo.consigneeId,
-      commodityDescription: cargo.commodityDescription,
-      hsCode: cargo.hsCode,
-      weightKg: cargo.weightKg,
-      pieceCount: cargo.pieceCount,
-      packagingType: cargo.packagingType,
-      valueAmount: cargo.valueAmount,
-      valueCurrency: cargo.valueCurrency,
-      countryOfOrigin: cargo.countryOfOrigin,
-    })
-    .from(cargo)
-    .where(eq(cargo.movementId, source.id))
-    .orderBy(cargo.lineNumber);
   // Snapshot the source's port (id + code/name), not just its id, so the
   // suggestion still displays correctly even if the port catalogue changes.
   const sourcePort = source.portId
@@ -130,7 +114,6 @@ export async function generateMovementSuggestion(
     driverId: source.driverId,
     truckId: source.truckId,
     trailerId: source.trailerId,
-    cargo: sourceCargo,
   });
   const [suggestion] = await tx
     .insert(movementSuggestions)
@@ -186,22 +169,6 @@ export async function acceptMovementSuggestion(
   };
   if (Object.keys(patch).length > 0) {
     await tx.update(movements).set(patch).where(eq(movements.id, movement.id));
-  }
-
-  const [existingCargo] = await tx
-    .select({ id: cargo.id })
-    .from(cargo)
-    .where(eq(cargo.movementId, movement.id))
-    .limit(1);
-  if (!existingCargo && payload.cargo.length > 0) {
-    await tx.insert(cargo).values(
-      payload.cargo.map((line, index) => ({
-        ...line,
-        movementId: movement.id,
-        organizationId: orgId,
-        lineNumber: index + 1,
-      })),
-    );
   }
 
   const [decided] = await tx

@@ -11,6 +11,7 @@ import { organizationRouter } from "./organization";
 import { partyRouter } from "./party";
 import { referenceRouter } from "./reference";
 import { reportingRouter } from "./reporting";
+import { shipmentRouter } from "./shipment";
 
 export const appRouter = router({
   health: publicProcedure.query(() => ({ ok: true, at: new Date().toISOString() })),
@@ -19,6 +20,7 @@ export const appRouter = router({
   alerts: alertsRouter,
   audit: auditRouter,
   movement: movementRouter,
+  shipment: shipmentRouter,
   integrations: integrationsRouter,
   billing: billingRouter,
   copilot: copilotRouter,

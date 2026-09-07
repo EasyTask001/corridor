@@ -1,5 +1,5 @@
 /**
- * Movement Builder core — headers, cargo, seals, transitions, amendments and
+ * Movement Builder core — headers, seals, transitions, amendments and
  * the append-only event timeline. Lifecycle primitives live in
  * services/movements.ts so background workers share them.
  */
@@ -8,8 +8,6 @@ import { z } from "zod";
 import { and, asc, desc, eq, ilike, inArray, or, schema, sql } from "@corridor/db";
 import {
   amendmentInput,
-  cargoRemoveInput,
-  cargoUpsertInput,
   customsResponseInput,
   hasBlockingIssues,
   isEditable,
@@ -31,7 +29,6 @@ import {
 } from "../trpc";
 import { transmitMovement } from "../services/customs";
 import { enqueueJob } from "../services/jobs";
-import { syncMovementRiskAlerts } from "../services/risk";
 import {
   acceptMovementSuggestion,
   dismissMovementSuggestion,
@@ -53,7 +50,6 @@ const {
   movements,
   movementAmendments,
   movementSuggestions,
-  cargo,
   seals,
   drivers,
   trucks,
@@ -115,7 +111,7 @@ export const movementRouter = router({
               driverName: sql<string | null>`${drivers.firstName} || ' ' || ${drivers.lastName}`,
               truckUnit: trucks.unitNumber,
               trailerUnit: trailers.unitNumber,
-              cargoCount: sql<number>`(select count(*)::int from public.cargo c where c.movement_id = ${movements.id})`,
+              shipmentCount: sql<number>`(select count(*)::int from public.shipments s where s.movement_id = ${movements.id})`,
               updatedAt: movements.updatedAt,
               createdAt: movements.createdAt,
             })
@@ -275,76 +271,6 @@ export const movementRouter = router({
       }
       return row;
     }),
-
-  cargo: router({
-    upsert: permissionProcedure("movement.write")
-      .input(cargoUpsertInput)
-      .mutation(({ ctx, input }) =>
-        ctx.rls(async (tx) => {
-          const { id, movementId, ...fields } = input;
-          const m = await requireMovement(tx, ctx.orgId, movementId);
-          requireEditable(m.status);
-          if (id) {
-            const [before] = await tx
-              .select()
-              .from(cargo)
-              .where(and(eq(cargo.id, id), eq(cargo.movementId, movementId)))
-              .limit(1);
-            const [row] = await tx
-              .update(cargo)
-              .set(fields)
-              .where(and(eq(cargo.id, id), eq(cargo.movementId, movementId)))
-              .returning();
-            if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-            await syncMovementRiskAlerts(tx, ctx.orgId, movementId);
-            await writeAudit(
-              tx,
-              ctx.orgId,
-              "movement.cargo_upsert",
-              "cargo",
-              row.id,
-              before ?? null,
-              row,
-            );
-            return row;
-          }
-          const nextRows = await tx
-            .select({ next: sql<number>`coalesce(max(${cargo.lineNumber}), 0) + 1` })
-            .from(cargo)
-            .where(eq(cargo.movementId, movementId));
-          const next = nextRows[0]?.next ?? 1;
-          const [row] = await tx
-            .insert(cargo)
-            .values({ ...fields, movementId, organizationId: ctx.orgId, lineNumber: next })
-            .returning();
-          await syncMovementRiskAlerts(tx, ctx.orgId, movementId);
-          await writeAudit(tx, ctx.orgId, "movement.cargo_upsert", "cargo", row!.id, null, row!);
-          return row!;
-        }),
-      ),
-    remove: permissionProcedure("movement.write")
-      .input(cargoRemoveInput)
-      .mutation(({ ctx, input }) =>
-        ctx.rls(async (tx) => {
-          const m = await requireMovement(tx, ctx.orgId, input.movementId);
-          requireEditable(m.status);
-          const [removed] = await tx
-            .delete(cargo)
-            .where(and(eq(cargo.id, input.id), eq(cargo.movementId, input.movementId)))
-            .returning();
-          await writeAudit(
-            tx,
-            ctx.orgId,
-            "movement.cargo_remove",
-            "cargo",
-            input.id,
-            removed ?? { movementId: input.movementId },
-            null,
-          );
-          return { id: input.id };
-        }),
-      ),
-  }),
 
   seals: router({
     add: permissionProcedure("movement.write")

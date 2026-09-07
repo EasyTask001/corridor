@@ -5,7 +5,8 @@
  * append-only timeline can never be bypassed.
  */
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, schema, sql, type RlsTransaction } from "@corridor/db";
+import { and, asc, desc, eq, schema, type RlsTransaction } from "@corridor/db";
+import { shipmentsForMovement } from "./shipments";
 import {
   actorMayTransition,
   transition,
@@ -18,7 +19,6 @@ const {
   movements,
   movementEvents,
   movementAmendments,
-  cargo,
   seals,
   drivers,
   trucks,
@@ -56,11 +56,14 @@ export async function addEvent(
     toStatus?: MovementStatus | null;
     payload?: Record<string, unknown>;
     actorType: ActorType;
+    /** The shipment this row is about, when it is about one. */
+    shipmentId?: string | null;
   },
 ) {
   await tx.insert(movementEvents).values({
     movementId,
     organizationId: actor.orgId,
+    shipmentId: e.shipmentId ?? null,
     eventType: e.eventType,
     fromStatus: e.fromStatus ?? null,
     toStatus: e.toStatus ?? null,
@@ -173,71 +176,60 @@ export async function applyCustomsDecision(
 
 export async function loadFull(tx: Tx, orgId: string, id: string) {
   const m = await requireMovement(tx, orgId, id);
-  const [driver, truck, trailer, port, cargoRows, sealRows, events, amendments] = await Promise.all([
-    m.driverId
-      ? tx
-          .select()
-          .from(drivers)
-          .where(eq(drivers.id, m.driverId))
-          .then((r) => r[0] ?? null)
-      : null,
-    m.truckId
-      ? tx
-          .select()
-          .from(trucks)
-          .where(eq(trucks.id, m.truckId))
-          .then((r) => r[0] ?? null)
-      : null,
-    m.trailerId
-      ? tx
-          .select()
-          .from(trailers)
-          .where(eq(trailers.id, m.trailerId))
-          .then((r) => r[0] ?? null)
-      : null,
-    m.portId
-      ? tx
-          .select()
-          .from(ports)
-          .where(eq(ports.id, m.portId))
-          .then((r) => r[0] ?? null)
-      : null,
-    tx
-      .select({
-        cargo: cargo,
-        shipperName: sql<
-          string | null
-        >`(select name from public.partners p where p.id = ${cargo.shipperId})`,
-        consigneeName: sql<
-          string | null
-        >`(select name from public.partners p where p.id = ${cargo.consigneeId})`,
-      })
-      .from(cargo)
-      .where(eq(cargo.movementId, id))
-      .orderBy(asc(cargo.lineNumber), asc(cargo.createdAt)),
-    tx.select().from(seals).where(eq(seals.movementId, id)).orderBy(asc(seals.createdAt)),
-    tx
-      .select({
-        id: movementEvents.id,
-        eventType: movementEvents.eventType,
-        fromStatus: movementEvents.fromStatus,
-        toStatus: movementEvents.toStatus,
-        payload: movementEvents.payload,
-        actorType: movementEvents.actorType,
-        actorId: movementEvents.actorId,
-        actorName: userProfiles.displayName,
-        occurredAt: movementEvents.occurredAt,
-      })
-      .from(movementEvents)
-      .leftJoin(userProfiles, eq(userProfiles.userId, movementEvents.actorId))
-      .where(eq(movementEvents.movementId, id))
-      .orderBy(desc(movementEvents.occurredAt)),
-    tx
-      .select()
-      .from(movementAmendments)
-      .where(eq(movementAmendments.movementId, id))
-      .orderBy(desc(movementAmendments.amendmentNumber)),
-  ]);
+  const [driver, truck, trailer, port, shipmentRows, sealRows, events, amendments] =
+    await Promise.all([
+      m.driverId
+        ? tx
+            .select()
+            .from(drivers)
+            .where(eq(drivers.id, m.driverId))
+            .then((r) => r[0] ?? null)
+        : null,
+      m.truckId
+        ? tx
+            .select()
+            .from(trucks)
+            .where(eq(trucks.id, m.truckId))
+            .then((r) => r[0] ?? null)
+        : null,
+      m.trailerId
+        ? tx
+            .select()
+            .from(trailers)
+            .where(eq(trailers.id, m.trailerId))
+            .then((r) => r[0] ?? null)
+        : null,
+      m.portId
+        ? tx
+            .select()
+            .from(ports)
+            .where(eq(ports.id, m.portId))
+            .then((r) => r[0] ?? null)
+        : null,
+      shipmentsForMovement(tx, id),
+      tx.select().from(seals).where(eq(seals.movementId, id)).orderBy(asc(seals.createdAt)),
+      tx
+        .select({
+          id: movementEvents.id,
+          eventType: movementEvents.eventType,
+          fromStatus: movementEvents.fromStatus,
+          toStatus: movementEvents.toStatus,
+          payload: movementEvents.payload,
+          actorType: movementEvents.actorType,
+          actorId: movementEvents.actorId,
+          actorName: userProfiles.displayName,
+          occurredAt: movementEvents.occurredAt,
+        })
+        .from(movementEvents)
+        .leftJoin(userProfiles, eq(userProfiles.userId, movementEvents.actorId))
+        .where(eq(movementEvents.movementId, id))
+        .orderBy(desc(movementEvents.occurredAt)),
+      tx
+        .select()
+        .from(movementAmendments)
+        .where(eq(movementAmendments.movementId, id))
+        .orderBy(desc(movementAmendments.amendmentNumber)),
+    ]);
 
   return {
     ...m,
@@ -245,11 +237,7 @@ export async function loadFull(tx: Tx, orgId: string, id: string) {
     truck,
     trailer,
     port,
-    cargo: cargoRows.map((r) => ({
-      ...r.cargo,
-      shipperName: r.shipperName,
-      consigneeName: r.consigneeName,
-    })),
+    shipments: shipmentRows,
     seals: sealRows,
     events,
     amendments,
@@ -288,16 +276,25 @@ export function validationFor(full: FullMovement) {
           status: full.trailer.status,
         }
       : null,
-    cargo: full.cargo.map((c) => ({
-      commodityDescription: c.commodityDescription,
-      hsCode: c.hsCode,
-      weightKg: c.weightKg,
-      pieceCount: c.pieceCount,
-      shipperId: c.shipperId,
-      consigneeId: c.consigneeId,
-      valueAmount: c.valueAmount,
-      valueCurrency: c.valueCurrency,
-      countryOfOrigin: c.countryOfOrigin,
+    shipments: full.shipments.map((s) => ({
+      controlNumber: s.controlNumber,
+      shipmentType: s.shipmentType,
+      cargoType: s.cargoType,
+      shipper: s.shipperName ? { name: s.shipperName, country: s.shipperCountry } : null,
+      consignee: s.consigneeName ? { name: s.consigneeName, country: s.consigneeCountry } : null,
+      entryNumber: s.entryNumber,
+      inBondEntryType: s.inBondEntryType,
+      inBondDestinationPortId: s.inBondDestinationPortId,
+      commodities: s.commodities.map((c) => ({
+        commodityDescription: c.commodityDescription,
+        hsCode: c.hsCode,
+        weightKg: c.weightKg,
+        quantity: c.quantity,
+        quantityUnit: c.quantityUnit,
+        valueAmount: c.valueAmount,
+        valueCurrency: c.valueCurrency,
+        countryOfOrigin: c.countryOfOrigin,
+      })),
     })),
     seals: full.seals.map((s) => ({ sealNumber: s.sealNumber })),
   });

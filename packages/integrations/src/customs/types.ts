@@ -1,5 +1,11 @@
 import type { Regime } from "@corridor/domain";
 
+/** A shipper/consignee as it is printed on the manifest. */
+export interface ManifestParty {
+  name: string;
+  address: string | null;
+}
+
 /** Provider-neutral e-manifest payload built from a movement (see manifest.ts). */
 export interface ManifestPayload {
   regime: Regime;
@@ -36,15 +42,27 @@ export interface ManifestPayload {
     seals: string[];
   }>;
   shipments: Array<{
-    lineNumber: number;
-    shipper: string | null;
-    consignee: string | null;
-    commodity: string;
-    hsCode: string | null;
-    weightKg: number | null;
-    pieceCount: number | null;
-    value: { amount: number; currency: string } | null;
-    countryOfOrigin: string | null;
+    controlNumber: string;
+    /** ACE files a shipment type, ACI a cargo type — exactly one is set. */
+    shipmentType: string | null;
+    cargoType: string | null;
+    entryNumber: string | null;
+    /** CBP port code the entry is filed at. */
+    entryPort: string | null;
+    inBond: { entryType: string; destinationPort: string | null; number: string | null } | null;
+    shipper: ManifestParty | null;
+    consignee: ManifestParty | null;
+    commodities: Array<{
+      description: string;
+      hsCode: string | null;
+      quantity: number | null;
+      quantityUnit: string | null;
+      weightKg: number | null;
+      marksAndNumbers: string | null;
+      hazmat: Array<{ unCode: string; description: string | null }>;
+      countryOfOrigin: string | null;
+      value: { amount: number; currency: string } | null;
+    }>;
   }>;
 }
 

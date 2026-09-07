@@ -6,7 +6,7 @@ import { translateReportQuestion, UnsupportedReportQuestionError } from "@corrid
 import { permissionProcedure, router } from "../trpc";
 import { writeAudit } from "../services/audit";
 
-const { movements, cargo, ports } = schema;
+const { movements, shipments, commodities, ports } = schema;
 
 const reportInput = z.object({ question: z.string().trim().min(1).max(500) });
 
@@ -42,13 +42,13 @@ function dimensionSql(dimension: ReportQuery["dimension"]): { label: SQL<string>
 function metricSql(metric: ReportQuery["metric"]): SQL<number> {
   switch (metric) {
     case "cargo_weight_kg":
-      return sql<number>`coalesce(sum(${cargo.weightKg}), 0)::float8`;
+      return sql<number>`coalesce(sum(${commodities.weightKg}), 0)::float8`;
     case "average_cargo_weight_kg":
-      return sql<number>`coalesce(sum(${cargo.weightKg}) / nullif(count(distinct ${movements.id}), 0), 0)::float8`;
+      return sql<number>`coalesce(sum(${commodities.weightKg}) / nullif(count(distinct ${movements.id}), 0), 0)::float8`;
     case "piece_count":
-      return sql<number>`coalesce(sum(${cargo.pieceCount}), 0)::float8`;
+      return sql<number>`coalesce(sum(${commodities.quantity}), 0)::float8`;
     case "declared_value":
-      return sql<number>`coalesce(sum(${cargo.valueAmount}), 0)::float8`;
+      return sql<number>`coalesce(sum(${commodities.valueAmount}), 0)::float8`;
     case "rejection_rate":
       return sql<number>`coalesce(
         100.0 * count(distinct ${movements.id}) filter (
@@ -82,14 +82,15 @@ async function executeReport(tx: RlsTransaction, orgId: string, query: ReportQue
     query.regime ? eq(movements.regime, query.regime) : undefined,
     query.status ? eq(movements.status, query.status) : undefined,
     query.metric === "declared_value" && query.currency
-      ? eq(cargo.valueCurrency, query.currency)
+      ? eq(commodities.valueCurrency, query.currency)
       : undefined,
   ];
 
   return tx
     .select({ label: dimension.label, value })
     .from(movements)
-    .leftJoin(cargo, eq(cargo.movementId, movements.id))
+    .leftJoin(shipments, eq(shipments.movementId, movements.id))
+    .leftJoin(commodities, eq(commodities.shipmentId, shipments.id))
     .leftJoin(ports, eq(ports.id, movements.portId))
     .where(and(...filters))
     .groupBy(dimension.group)

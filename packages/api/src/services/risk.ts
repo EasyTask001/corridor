@@ -20,7 +20,7 @@ import {
 } from "@corridor/db";
 import { notifyOrganization } from "./notifications";
 
-const { movements, cargo, partners, complianceAlerts } = schema;
+const { movements, shipments, commodities, partners, complianceAlerts } = schema;
 
 const LANE_HISTORY_LIMIT = 12;
 const REJECTED_WINDOW_DAYS = 90;
@@ -30,20 +30,21 @@ async function laneHistory(
   orgId: string,
   movement: typeof movements.$inferSelect,
 ) {
-  // "Lane" = same shipper+consignee if cargo already has them, else same port + regime.
-  const [firstLine] = await tx
-    .select({ shipperId: cargo.shipperId, consigneeId: cargo.consigneeId })
-    .from(cargo)
-    .where(eq(cargo.movementId, movement.id))
+  // "Lane" = same shipper+consignee if a shipment already names them, else
+  // same port + regime.
+  const [firstShipment] = await tx
+    .select({ shipperId: shipments.shipperId, consigneeId: shipments.consigneeId })
+    .from(shipments)
+    .where(eq(shipments.movementId, movement.id))
     .limit(1);
 
   const laneCond =
-    firstLine?.shipperId && firstLine?.consigneeId
+    firstShipment?.shipperId && firstShipment?.consigneeId
       ? sql`exists (
-          select 1 from public.cargo c2
-          where c2.movement_id = ${movements.id}
-            and c2.shipper_id = ${firstLine.shipperId}
-            and c2.consignee_id = ${firstLine.consigneeId}
+          select 1 from public.shipments s2
+          where s2.movement_id = ${movements.id}
+            and s2.shipper_id = ${firstShipment.shipperId}
+            and s2.consignee_id = ${firstShipment.consigneeId}
         )`
       : sql`${movements.regime} = ${movement.regime}
             and ${movements.portId} = ${movement.portId ?? null}`;
@@ -53,11 +54,12 @@ async function laneHistory(
       id: movements.id,
       status: movements.status,
       rejectedAt: movements.rejectedAt,
-      weightKg: cargo.weightKg,
-      valueAmount: cargo.valueAmount,
+      weightKg: commodities.weightKg,
+      valueAmount: commodities.valueAmount,
     })
     .from(movements)
-    .leftJoin(cargo, eq(cargo.movementId, movements.id))
+    .leftJoin(shipments, eq(shipments.movementId, movements.id))
+    .leftJoin(commodities, eq(commodities.shipmentId, shipments.id))
     .where(
       and(
         eq(movements.organizationId, orgId),
@@ -67,7 +69,7 @@ async function laneHistory(
       ),
     )
     .orderBy(desc(movements.createdAt))
-    .limit(LANE_HISTORY_LIMIT * 3); // multiple cargo rows per movement
+    .limit(LANE_HISTORY_LIMIT * 3); // multiple commodity rows per movement
 
   const seenMovements = new Set(past.map((p) => p.id)).size;
   const weights = past.map((p) => p.weightKg).filter((x): x is number => x != null);
@@ -93,24 +95,25 @@ export async function computeMovementRisk(
     .where(and(eq(movements.id, movementId), eq(movements.organizationId, orgId)));
   if (!movement) return [];
 
-  const [cargoRows, lane] = await Promise.all([
+  const [commodityRows, lane] = await Promise.all([
     tx
       .select({
-        lineNumber: cargo.lineNumber,
-        commodityDescription: cargo.commodityDescription,
-        hsCode: cargo.hsCode,
-        weightKg: cargo.weightKg,
-        valueAmount: cargo.valueAmount,
+        lineNumber: commodities.lineNumber,
+        commodityDescription: commodities.commodityDescription,
+        hsCode: commodities.hsCode,
+        weightKg: commodities.weightKg,
+        valueAmount: commodities.valueAmount,
       })
-      .from(cargo)
-      .where(eq(cargo.movementId, movementId)),
+      .from(commodities)
+      .innerJoin(shipments, eq(shipments.id, commodities.shipmentId))
+      .where(eq(shipments.movementId, movementId)),
     laneHistory(tx, orgId, movement),
   ]);
 
-  if (cargoRows.length === 0) return [];
+  if (commodityRows.length === 0) return [];
 
   let hasBroker = false;
-  const firstLine = cargoRows[0];
+  const firstLine = commodityRows[0];
   if (firstLine) {
     const [consignee] = await tx
       .select({ type: partners.type })
@@ -123,7 +126,7 @@ export async function computeMovementRisk(
   return evaluateMovementRisk({
     movementId,
     hasBroker,
-    cargo: cargoRows,
+    cargo: commodityRows,
     lane: { weights: lane.weights, values: lane.values, rejectedRecently: lane.rejectedRecently },
     lookupTariff: lookupHsCode,
   });

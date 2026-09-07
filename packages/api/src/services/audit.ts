@@ -81,7 +81,8 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
   "organization.members.acceptInvite": "member.accept_invite",
   "organization.sso.configure": "organization.sso_configure",
   "organization.sso.remove": "organization.sso_remove",
-  "organization.carrierCodes.upsert": "organization.carrier_code_create / organization.carrier_code_update",
+  "organization.carrierCodes.upsert":
+    "organization.carrier_code_create / organization.carrier_code_update",
   "organization.carrierCodes.remove": "organization.carrier_code_remove",
   "organization.carrierCodes.setDefault": "organization.carrier_code_set_default",
 
@@ -106,8 +107,6 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
   // --- movements ----------------------------------------------------------
   "movement.create": "movement.create",
   "movement.update": "movement.update",
-  "movement.cargo.upsert": "movement.cargo_upsert",
-  "movement.cargo.remove": "movement.cargo_remove",
   "movement.seals.add": "movement.seal_add",
   "movement.seals.remove": "movement.seal_remove",
   "movement.addNote": "movement.note_add",
@@ -119,6 +118,15 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
   "movement.suggestions.generate": "movement.suggestion_generate",
   "movement.suggestions.accept": "movement.suggestion_accept",
   "movement.suggestions.dismiss": "movement.suggestion_dismiss",
+
+  // --- shipments ----------------------------------------------------------
+  "shipment.create": "shipment.create",
+  "shipment.update": "shipment.update",
+  "shipment.remove": "shipment.remove",
+  "shipment.commodities.upsert": "shipment.commodity_upsert",
+  "shipment.commodities.remove": "shipment.commodity_remove",
+  "shipment.assign": "shipment.assign",
+  "shipment.unassign": "shipment.unassign",
 
   // --- integrations -------------------------------------------------------
   "integrations.configs.upsert": "integration.config_update",
