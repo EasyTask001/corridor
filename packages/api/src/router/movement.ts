@@ -232,7 +232,21 @@ export const movementRouter = router({
       });
       // Post-commit: no transaction of ours is open, so notifyUser's
       // service-role transaction is the only connection in play.
-      if (pending) await notifyUser(ctx.db, pending);
+      //
+      // Never rethrow. The assignment is already durably committed, and a
+      // notification that could not be delivered is not a reason to hand the
+      // dispatcher a failed mutation — they would retry an edit that already
+      // succeeded. Log it instead and return the row.
+      if (pending) {
+        try {
+          await notifyUser(ctx.db, pending);
+        } catch (error) {
+          console.error(
+            `[notifications] movement.assigned dispatch failed for movement ${input.id} / driver ${input.driverId ?? "unknown"} (the update itself is committed)`,
+            error,
+          );
+        }
+      }
       return row;
     }),
 

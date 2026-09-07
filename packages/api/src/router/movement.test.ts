@@ -242,6 +242,33 @@ describe("movement.update", () => {
     expect(notifyUser).toHaveBeenCalledWith(expect.anything(), ASSIGNMENT);
   });
 
+  /**
+   * The update is already durably committed by the time delivery is attempted,
+   * so a notification failure must never surface as a failed mutation — the
+   * dispatcher would retry an edit that already succeeded.
+   */
+  it("still returns the committed row when delivery fails, and logs it", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      resolveDriverAssignment.mockResolvedValue(ASSIGNMENT);
+      notifyUser.mockRejectedValue(new Error("expo is down"));
+      const { caller: api, db } = caller({ rows: rowsWithDriver(null) });
+
+      const row = await api.update({ id: MOVEMENT_ID, driverId: DRIVER_ID });
+
+      expect(row).toMatchObject({ id: MOVEMENT_ID, driverId: DRIVER_ID });
+      // The write really did land, not just the return value.
+      expect(db.table("movements")[0]).toMatchObject({ driverId: DRIVER_ID });
+      expect(logged).toHaveBeenCalledTimes(1);
+      const [message, error] = logged.mock.calls[0]!;
+      expect(String(message)).toContain(MOVEMENT_ID);
+      expect(String(message)).toContain(DRIVER_ID);
+      expect(error).toBeInstanceOf(Error);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
   it("sends nothing when the assignment resolves to no recipient", async () => {
     resolveDriverAssignment.mockResolvedValue(null);
     const { caller: api } = caller({ rows: rowsWithDriver(null) });
