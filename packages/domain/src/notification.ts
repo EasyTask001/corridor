@@ -35,7 +35,8 @@ export type NotificationChannel = z.infer<typeof notificationChannel>;
 export const notificationSchema = z.object({
   id: uuid,
   organizationId: uuid,
-  eventType: notificationEventType,
+  /** Matches the `notifications.type` column (the rule selector is `notification_rules.event_type`). */
+  type: notificationEventType,
   title: z.string(),
   body: z.string().nullable(),
   linkPath: z.string().nullable(),
@@ -55,6 +56,8 @@ export const notificationRuleInput = z.object({
   eventType: notificationEventType,
   enabled: z.boolean().default(true),
   channel: z.array(notificationChannel).min(1).default(["in_app"]),
+  /** Optional narrowing predicate stored on the rule, e.g. `{ regime: "ACE" }`. */
+  filters: z.record(z.string(), z.unknown()).default({}),
 });
 export type NotificationRuleInput = z.infer<typeof notificationRuleInput>;
 

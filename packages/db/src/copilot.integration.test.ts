@@ -192,6 +192,67 @@ describe("match_org_knowledge", () => {
   });
 });
 
+describe("organization_knowledge_embeddings write policies (0011)", () => {
+  it("copilot.use may update and delete own-org rows; other tenants cannot", async () => {
+    const content = "TEST-FIXTURE: superseded SOP paragraph";
+    const [row] = await withRls(db, as(dispatcherA), (tx) =>
+      tx
+        .insert(organizationKnowledgeEmbeddings)
+        .values({
+          organizationId: dispatcherA.orgId,
+          sourceType: "sop_document",
+          sourceId: null,
+          content,
+          embedding: mockEmbed(content),
+        })
+        .returning({ id: organizationKnowledgeEmbeddings.id }),
+    );
+
+    // Another tenant's update/delete match zero rows (policy USING clause).
+    const foreignUpdate = await withRls(db, as(ownerB), (tx) =>
+      tx
+        .update(organizationKnowledgeEmbeddings)
+        .set({ content: "TEST-FIXTURE: hijacked" })
+        .where(eq(organizationKnowledgeEmbeddings.id, row!.id))
+        .returning({ id: organizationKnowledgeEmbeddings.id }),
+    );
+    expect(foreignUpdate).toHaveLength(0);
+    const foreignDelete = await withRls(db, as(ownerB), (tx) =>
+      tx
+        .delete(organizationKnowledgeEmbeddings)
+        .where(eq(organizationKnowledgeEmbeddings.id, row!.id))
+        .returning({ id: organizationKnowledgeEmbeddings.id }),
+    );
+    expect(foreignDelete).toHaveLength(0);
+
+    // A member without copilot.use is equally blocked.
+    const readOnlyDelete = await withRls(db, as(readOnlyA), (tx) =>
+      tx
+        .delete(organizationKnowledgeEmbeddings)
+        .where(eq(organizationKnowledgeEmbeddings.id, row!.id))
+        .returning({ id: organizationKnowledgeEmbeddings.id }),
+    );
+    expect(readOnlyDelete).toHaveLength(0);
+
+    const updated = await withRls(db, as(dispatcherA), (tx) =>
+      tx
+        .update(organizationKnowledgeEmbeddings)
+        .set({ content: "TEST-FIXTURE: revised SOP paragraph" })
+        .where(eq(organizationKnowledgeEmbeddings.id, row!.id))
+        .returning({ content: organizationKnowledgeEmbeddings.content }),
+    );
+    expect(updated[0]?.content).toBe("TEST-FIXTURE: revised SOP paragraph");
+
+    const deleted = await withRls(db, as(dispatcherA), (tx) =>
+      tx
+        .delete(organizationKnowledgeEmbeddings)
+        .where(eq(organizationKnowledgeEmbeddings.id, row!.id))
+        .returning({ id: organizationKnowledgeEmbeddings.id }),
+    );
+    expect(deleted).toHaveLength(1);
+  });
+});
+
 describe("regulation_embeddings dimension guard", () => {
   it("rejects an embedding of the wrong dimensionality", async () => {
     const wrongSize = new Array(MOCK_DIMENSIONS + 1).fill(0);

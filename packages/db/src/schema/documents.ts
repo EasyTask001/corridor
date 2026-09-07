@@ -47,7 +47,10 @@ export const sourceDocuments = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    index("source_documents_org_created_idx").on(t.organizationId, t.createdAt),
+    index("source_documents_org_created_idx").on(t.organizationId, t.createdAt.desc()),
     index("source_documents_org_status_idx").on(t.organizationId, t.uploadStatus),
+    index("source_documents_movement_idx")
+      .on(t.movementId)
+      .where(sql`${t.movementId} is not null`),
   ],
 );

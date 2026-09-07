@@ -57,7 +57,13 @@ export const regulationEmbeddings = pgTable(
     metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [unique("regulation_embeddings_doc_chunk_key").on(t.regulationDocumentId, t.chunkIndex)],
+  (t) => [
+    unique("regulation_embeddings_regulation_document_id_chunk_index_key").on(
+      t.regulationDocumentId,
+      t.chunkIndex,
+    ),
+    index("regulation_embeddings_hnsw_idx").using("hnsw", t.embedding.op("vector_cosine_ops")),
+  ],
 );
 
 export const organizationKnowledgeEmbeddings = pgTable(
@@ -78,5 +84,8 @@ export const organizationKnowledgeEmbeddings = pgTable(
     metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("org_knowledge_embeddings_org_idx").on(t.organizationId)],
+  (t) => [
+    index("org_knowledge_embeddings_org_idx").on(t.organizationId),
+    index("org_knowledge_embeddings_hnsw_idx").using("hnsw", t.embedding.op("vector_cosine_ops")),
+  ],
 );

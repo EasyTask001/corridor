@@ -150,6 +150,15 @@ export interface ProcessResult {
   results: Array<{ id: number; jobType: string; ok: boolean; error?: string; result?: unknown }>;
 }
 
+/**
+ * How many jobs one organization may have running at once. Keeps a tenant with
+ * a large AI backlog from starving every other tenant's queue.
+ */
+function jobOrgCap(): number {
+  const configured = Number(process.env.CORRIDOR_JOB_ORG_CAP);
+  return Number.isInteger(configured) && configured > 0 ? configured : 2;
+}
+
 /** Claim and run due jobs. Safe to call concurrently from multiple workers. */
 export async function processDueJobs(
   db: DatabaseClient,
@@ -157,8 +166,9 @@ export async function processDueJobs(
 ): Promise<ProcessResult> {
   const limit = opts.limit ?? 10;
   const worker = opts.worker ?? `worker-${process.pid}`;
+  const orgCap = jobOrgCap();
   const claimed = await withServiceRole(db, (tx) =>
-    tx.execute<Job>(sql`select * from public.claim_jobs(${limit}, ${worker})`),
+    tx.execute<Job>(sql`select * from public.claim_jobs(${limit}, ${worker}, ${orgCap})`),
   );
   const out: ProcessResult = { claimed: claimed.length, succeeded: 0, failed: 0, results: [] };
 

@@ -8,9 +8,10 @@ import {
   smallint,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { authUsers, organizations } from "./core";
+import { authUsers, citext, organizations } from "./core";
 
 const registryStatus = ["active", "inactive", "archived"] as const;
 
@@ -44,12 +45,22 @@ export const drivers = pgTable(
     dateOfBirth: date("date_of_birth"),
     citizenship: text("citizenship"),
     phone: text("phone"),
-    email: text("email"),
+    email: citext("email"),
   },
   (t) => [
     index("drivers_organization_id_idx").on(t.organizationId),
     index("drivers_org_created_idx").on(t.organizationId, t.createdAt),
     index("drivers_org_status_idx").on(t.organizationId, t.status),
+    uniqueIndex("drivers_org_license_unique")
+      .on(t.organizationId, t.licenseJurisdiction, t.licenseNumber)
+      .where(sql`${t.status} <> 'archived'`),
+    index("drivers_name_search_idx").using(
+      "gin",
+      sql`to_tsvector('simple', ${t.firstName} || ' ' || ${t.lastName})`,
+    ),
+    uniqueIndex("drivers_org_user_unique")
+      .on(t.organizationId, t.userId)
+      .where(sql`${t.userId} is not null`),
   ],
 );
 
@@ -73,6 +84,12 @@ export const trucks = pgTable(
   (t) => [
     index("trucks_organization_id_idx").on(t.organizationId),
     index("trucks_org_created_idx").on(t.organizationId, t.createdAt),
+    uniqueIndex("trucks_org_unit_unique")
+      .on(t.organizationId, t.unitNumber)
+      .where(sql`${t.status} <> 'archived'`),
+    uniqueIndex("trucks_org_vin_unique")
+      .on(t.organizationId, t.vin)
+      .where(sql`${t.vin} is not null and ${t.status} <> 'archived'`),
   ],
 );
 
@@ -97,6 +114,9 @@ export const trailers = pgTable(
   (t) => [
     index("trailers_organization_id_idx").on(t.organizationId),
     index("trailers_org_created_idx").on(t.organizationId, t.createdAt),
+    uniqueIndex("trailers_org_unit_unique")
+      .on(t.organizationId, t.unitNumber)
+      .where(sql`${t.status} <> 'archived'`),
   ],
 );
 
@@ -119,12 +139,13 @@ export const partners = pgTable(
       .default({}),
     taxId: text("tax_id"),
     contactName: text("contact_name"),
-    contactEmail: text("contact_email"),
+    contactEmail: citext("contact_email"),
     contactPhone: text("contact_phone"),
   },
   (t) => [
     index("partners_organization_id_idx").on(t.organizationId),
     index("partners_org_created_idx").on(t.organizationId, t.createdAt),
     index("partners_org_type_idx").on(t.organizationId, t.type),
+    index("partners_name_search_idx").using("gin", sql`to_tsvector('simple', ${t.name})`),
   ],
 );

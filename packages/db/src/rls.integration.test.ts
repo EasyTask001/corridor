@@ -12,7 +12,14 @@ import { createClient } from "@supabase/supabase-js";
 import { eq, sql } from "drizzle-orm";
 import { createDb } from "./client";
 import { withRls } from "./rls";
-import { auditLog, organizationMembers, organizations, roles } from "./schema";
+import {
+  auditLog,
+  organizationMembers,
+  organizations,
+  permissions,
+  rolePermissions,
+  roles,
+} from "./schema";
 
 const DB_URL =
   process.env.DIRECT_DATABASE_URL ?? "postgresql://postgres:postgres@127.0.0.1:55322/postgres";
@@ -209,6 +216,40 @@ describe("organization_members RLS", () => {
         ),
       );
       expect(message).toMatch(/does not belong to organization/i);
+    } finally {
+      await db.delete(roles).where(eq(roles.id, foreignRole!.id));
+    }
+  });
+});
+
+describe("role_permissions RLS", () => {
+  it("cross-tenant: Org A sees zero rows of an Org B custom role", async () => {
+    const [foreignRole] = await db
+      .insert(roles)
+      .values({ organizationId: ownerB.orgId, name: `Foreign RP Role ${Date.now()}` })
+      .returning({ id: roles.id });
+    const [permission] = await db.select({ id: permissions.id }).from(permissions).limit(1);
+    await db
+      .insert(rolePermissions)
+      .values({ roleId: foreignRole!.id, permissionId: permission!.id });
+
+    try {
+      const seen = await withRls(db, as(ownerA), (tx) =>
+        tx.select().from(rolePermissions).where(eq(rolePermissions.roleId, foreignRole!.id)),
+      );
+      expect(seen).toHaveLength(0);
+
+      // The role itself is invisible too, so Org A cannot even discover its id.
+      const roleSeen = await withRls(db, as(ownerA), (tx) =>
+        tx.select().from(roles).where(eq(roles.id, foreignRole!.id)),
+      );
+      expect(roleSeen).toHaveLength(0);
+
+      // Org B's owner does see them — proving the rows exist and only RLS hides them.
+      const seenByB = await withRls(db, as(ownerB), (tx) =>
+        tx.select().from(rolePermissions).where(eq(rolePermissions.roleId, foreignRole!.id)),
+      );
+      expect(seenByB).toHaveLength(1);
     } finally {
       await db.delete(roles).where(eq(roles.id, foreignRole!.id));
     }

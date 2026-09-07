@@ -45,6 +45,7 @@ export const integrationConfigs = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    index("integration_configs_org_idx").on(t.organizationId),
     unique("integration_configs_organization_id_provider_key").on(t.organizationId, t.provider),
   ],
 );
@@ -69,7 +70,15 @@ export const integrationEvents = pgTable(
     correlationId: text("correlation_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("integration_events_org_created_idx").on(t.organizationId, t.createdAt)],
+  (t) => [
+    index("integration_events_org_created_idx").on(t.organizationId, t.createdAt.desc()),
+    index("integration_events_movement_idx")
+      .on(t.movementId)
+      .where(sql`${t.movementId} is not null`),
+    index("integration_events_correlation_idx")
+      .on(t.correlationId)
+      .where(sql`${t.correlationId} is not null`),
+  ],
 );
 
 export const backgroundJobs = pgTable(
@@ -94,7 +103,12 @@ export const backgroundJobs = pgTable(
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
-  (t) => [index("background_jobs_org_idx").on(t.organizationId, t.createdAt)],
+  (t) => [
+    index("background_jobs_org_idx").on(t.organizationId, t.createdAt.desc()),
+    index("background_jobs_due_idx")
+      .on(t.runAt)
+      .where(sql`${t.status} = 'pending'`),
+  ],
 );
 
 export const subscriptions = pgTable("subscriptions", {

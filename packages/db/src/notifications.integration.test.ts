@@ -86,7 +86,9 @@ describe("notify_organization", () => {
       tx.select().from(notifications).where(eq(notifications.title, title)),
     );
     expect(stored).toHaveLength(1);
-    expect(stored[0]).toMatchObject({ linkPath: "/alerts", readAt: null });
+    // `notifications.type` (renamed from event_type in 0011) is what
+    // notify_organization writes.
+    expect(stored[0]).toMatchObject({ type: "alert.critical", linkPath: "/alerts", readAt: null });
   });
 
   it("respects a per-user opt-out (enabled=false) and does not notify that user", async () => {
@@ -199,7 +201,7 @@ describe("notifications RLS", () => {
           .values({
             organizationId: ownerA.orgId,
             userId: ownerA.userId,
-            eventType: "alert.critical",
+            type: "alert.critical",
             title: "direct insert",
           })
           .returning(),
@@ -240,5 +242,75 @@ describe("notification_rules RLS", () => {
     await withServiceRole(db, (tx) =>
       tx.delete(notificationRules).where(eq(notificationRules.id, row!.id)),
     );
+  });
+
+  it("cross-tenant: Org A sees zero Org B notification_rules rows", async () => {
+    const [foreign] = await withServiceRole(db, (tx) =>
+      tx
+        .insert(notificationRules)
+        .values({
+          organizationId: ownerB.orgId,
+          userId: ownerB.userId,
+          eventType: "customs.decision",
+          enabled: false,
+        })
+        .onConflictDoUpdate({
+          target: [
+            notificationRules.organizationId,
+            notificationRules.userId,
+            notificationRules.eventType,
+          ],
+          set: { enabled: false },
+        })
+        .returning({ id: notificationRules.id }),
+    );
+    try {
+      const targeted = await withRls(db, as(ownerA), (tx) =>
+        tx.select().from(notificationRules).where(eq(notificationRules.id, foreign!.id)),
+      );
+      expect(targeted).toHaveLength(0);
+      const all = await withRls(db, as(ownerA), (tx) => tx.select().from(notificationRules));
+      expect(all.every((r) => r.organizationId === ownerA.orgId)).toBe(true);
+      expect(all.every((r) => r.userId === ownerA.userId)).toBe(true);
+    } finally {
+      await withServiceRole(db, (tx) =>
+        tx.delete(notificationRules).where(eq(notificationRules.id, foreign!.id)),
+      );
+    }
+  });
+
+  it("stores per-rule filters alongside the channel preference", async () => {
+    const [row] = await withRls(db, as(dispatcherA), (tx) =>
+      tx
+        .insert(notificationRules)
+        .values({
+          organizationId: dispatcherA.orgId,
+          userId: dispatcherA.userId,
+          eventType: "document.review_needed",
+          filters: { regime: "ACE" },
+        })
+        .returning(),
+    );
+    try {
+      expect(row?.filters).toEqual({ regime: "ACE" });
+      const [defaulted] = await withServiceRole(db, (tx) =>
+        tx
+          .insert(notificationRules)
+          .values({
+            organizationId: ownerB.orgId,
+            userId: ownerB.userId,
+            eventType: "document.review_needed",
+          })
+          .returning(),
+      );
+      expect(defaulted?.filters).toEqual({});
+      await withServiceRole(db, (tx) =>
+        tx.delete(notificationRules).where(eq(notificationRules.id, defaulted!.id)),
+      );
+    } finally {
+      await withServiceRole(db, (tx) =>
+        tx.delete(notificationRules).where(eq(notificationRules.id, row!.id)),
+      );
+    }
   });
 });

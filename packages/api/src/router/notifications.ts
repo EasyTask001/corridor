@@ -110,6 +110,7 @@ export const notificationsRouter = router({
             description: def.description,
             enabled: existing?.enabled ?? true,
             channel: existing?.channel ?? ["in_app"],
+            filters: existing?.filters ?? {},
           };
         });
       }),
@@ -125,6 +126,7 @@ export const notificationsRouter = router({
             eventType: input.eventType,
             enabled: input.enabled,
             channel: input.channel,
+            filters: input.filters,
           })
           .onConflictDoUpdate({
             target: [
@@ -132,7 +134,7 @@ export const notificationsRouter = router({
               notificationRules.userId,
               notificationRules.eventType,
             ],
-            set: { enabled: input.enabled, channel: input.channel },
+            set: { enabled: input.enabled, channel: input.channel, filters: input.filters },
           })
           .returning();
         return row!;

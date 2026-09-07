@@ -26,6 +26,7 @@ export function NotificationRulesPanel({ initial }: { initial: Rules }) {
       eventType: rule.eventType,
       enabled: rule.enabled,
       channel: next.length ? next : ["in_app"],
+      filters: rule.filters,
     });
   };
 
@@ -50,6 +51,7 @@ export function NotificationRulesPanel({ initial }: { initial: Rules }) {
                     eventType: rule.eventType,
                     enabled: e.target.checked,
                     channel: rule.channel,
+                    filters: rule.filters,
                   })
                 }
               />

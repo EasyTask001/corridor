@@ -1,6 +1,16 @@
 import { sql } from "drizzle-orm";
-import { date, index, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import {
+  date,
+  index,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { authUsers, organizations } from "./core";
+import { movements } from "./movements";
 import { drivers, trailers, trucks } from "./registry";
 
 export const complianceAlerts = pgTable(
@@ -12,7 +22,7 @@ export const complianceAlerts = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    movementId: uuid("movement_id"),
+    movementId: uuid("movement_id").references(() => movements.id, { onDelete: "cascade" }),
     driverId: uuid("driver_id").references(() => drivers.id, { onDelete: "cascade" }),
     truckId: uuid("truck_id").references(() => trucks.id, { onDelete: "cascade" }),
     trailerId: uuid("trailer_id").references(() => trailers.id, { onDelete: "cascade" }),
@@ -44,5 +54,22 @@ export const complianceAlerts = pgTable(
     index("compliance_alerts_organization_id_idx").on(t.organizationId),
     index("compliance_alerts_org_type_status_idx").on(t.organizationId, t.alertType, t.status),
     index("compliance_alerts_org_status_severity_idx").on(t.organizationId, t.status, t.severity),
+    index("compliance_alerts_driver_idx")
+      .on(t.driverId)
+      .where(sql`${t.driverId} is not null`),
+    index("compliance_alerts_truck_idx")
+      .on(t.truckId)
+      .where(sql`${t.truckId} is not null`),
+    index("compliance_alerts_trailer_idx")
+      .on(t.trailerId)
+      .where(sql`${t.trailerId} is not null`),
+    index("compliance_alerts_movement_idx")
+      .on(t.movementId)
+      .where(sql`${t.movementId} is not null`),
+    uniqueIndex("compliance_alerts_open_dedupe_unique")
+      .on(t.organizationId, t.dedupeKey)
+      .where(sql`${t.dedupeKey} is not null and ${t.status} in ('open','acknowledged')`),
+    // 0011
+    index("compliance_alerts_org_created_idx").on(t.organizationId, t.createdAt.desc()),
   ],
 );

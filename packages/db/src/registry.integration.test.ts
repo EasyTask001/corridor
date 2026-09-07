@@ -7,7 +7,14 @@ import { createClient } from "@supabase/supabase-js";
 import { and, eq } from "drizzle-orm";
 import { createDb } from "./client";
 import { withRls } from "./rls";
-import { complianceAlerts, drivers, organizationMembers, partners, trucks } from "./schema";
+import {
+  complianceAlerts,
+  drivers,
+  organizationMembers,
+  partners,
+  trailers,
+  trucks,
+} from "./schema";
 
 const DB_URL =
   process.env.DIRECT_DATABASE_URL ?? "postgresql://postgres:postgres@127.0.0.1:55322/postgres";
@@ -134,6 +141,28 @@ describe("registries RLS", () => {
           .returning(),
       ),
     );
+  });
+
+  it("cross-tenant: Org A sees zero Org B trailers rows", async () => {
+    const [foreign] = await db
+      .insert(trailers)
+      .values({
+        organizationId: ownerB.orgId,
+        unitNumber: `TR-XT-${Date.now()}`,
+        plateNumber: "XT0001",
+        plateJurisdiction: "BC",
+      })
+      .returning({ id: trailers.id });
+    try {
+      const targeted = await withRls(db, as(ownerA), (tx) =>
+        tx.select().from(trailers).where(eq(trailers.id, foreign!.id)),
+      );
+      expect(targeted).toHaveLength(0);
+      const all = await withRls(db, as(ownerA), (tx) => tx.select().from(trailers));
+      expect(all.every((r) => r.organizationId === ownerA.orgId)).toBe(true);
+    } finally {
+      await db.delete(trailers).where(eq(trailers.id, foreign!.id));
+    }
   });
 
   it("cross-tenant update of a driver returns zero rows", async () => {

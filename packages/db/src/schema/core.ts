@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  customType,
   index,
   jsonb,
   pgSchema,
@@ -9,8 +10,20 @@ import {
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+
+/**
+ * Postgres `citext` (case-insensitive text). Drizzle has no native type, so the
+ * columns that are citext in SQL declare it here — otherwise `drizzle-kit`
+ * introspection reports drift on every email column.
+ */
+export const citext = customType<{ data: string; driverData: string }>({
+  dataType() {
+    return "citext";
+  },
+});
 
 /** Reference to Supabase's auth.users — never queried directly, only for FKs. */
 export const authSchema = pgSchema("auth");
@@ -34,7 +47,7 @@ export const organizations = pgTable("organizations", {
   canadianCarrierCode: text("canadian_carrier_code"),
   usDotNumber: text("us_dot_number"),
   mcNumber: text("mc_number"),
-  billingEmail: text("billing_email"),
+  billingEmail: citext("billing_email"),
   stripeCustomerId: text("stripe_customer_id").unique(),
   subscriptionPlan: text("subscription_plan", {
     enum: ["trial", "starter", "professional", "enterprise"],
@@ -72,7 +85,18 @@ export const roles = pgTable(
     isSystem: boolean("is_system").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("roles_organization_id_idx").on(t.organizationId)],
+  (t) => [
+    index("roles_organization_id_idx").on(t.organizationId),
+    uniqueIndex("roles_system_name_unique")
+      .on(t.name)
+      .where(sql`${t.organizationId} is null`),
+    uniqueIndex("roles_org_name_unique")
+      .on(t.organizationId, t.name)
+      .where(sql`${t.organizationId} is not null`),
+    uniqueIndex("roles_organization_name_unique")
+      .on(t.organizationId, sql`lower(${t.name})`)
+      .where(sql`${t.organizationId} is not null`),
+  ],
 );
 
 export const rolePermissions = pgTable(
@@ -104,7 +128,7 @@ export const organizationMembers = pgTable(
     status: text("status", { enum: ["invited", "active", "suspended"] })
       .notNull()
       .default("invited"),
-    invitedEmail: text("invited_email"),
+    invitedEmail: citext("invited_email"),
     inviteToken: text("invite_token").unique(),
     inviteExpiresAt: timestamp("invite_expires_at", { withTimezone: true }),
     invitedBy: uuid("invited_by").references(() => authUsers.id, { onDelete: "set null" }),
@@ -113,6 +137,12 @@ export const organizationMembers = pgTable(
   (t) => [
     index("organization_members_user_id_idx").on(t.userId),
     index("organization_members_organization_id_idx").on(t.organizationId),
+    uniqueIndex("organization_members_org_user_unique")
+      .on(t.organizationId, t.userId)
+      .where(sql`${t.userId} is not null`),
+    uniqueIndex("organization_members_org_invite_email_unique")
+      .on(t.organizationId, t.invitedEmail)
+      .where(sql`${t.status} = 'invited'`),
   ],
 );
 
@@ -140,5 +170,8 @@ export const auditLog = pgTable(
     after: jsonb("after"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("audit_log_org_created_idx").on(t.organizationId, t.createdAt)],
+  (t) => [
+    index("audit_log_org_created_idx").on(t.organizationId, t.createdAt),
+    index("audit_log_entity_idx").on(t.organizationId, t.entityType, t.entityId),
+  ],
 );

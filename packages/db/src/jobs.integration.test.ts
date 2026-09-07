@@ -13,6 +13,7 @@ import {
   integrationConfigs,
   integrationEvents,
   organizationMembers,
+  organizations,
   subscriptions,
 } from "./schema";
 
@@ -90,12 +91,13 @@ describe("background_jobs queue", () => {
         )
         .returning({ id: backgroundJobs.id }),
     );
-    // three workers race for 5 each
+    // three workers race for 5 each. The per-org cap is raised out of the way
+    // here — this test is about SKIP LOCKED, not the cap (covered separately).
     const claims = await Promise.all(
       ["w1", "w2", "w3"].map((w) =>
         withServiceRole(db, (tx) =>
           tx.execute<{ id: number; locked_by: string }>(
-            sql`select id, locked_by from public.claim_jobs(5, ${w})`,
+            sql`select id, locked_by from public.claim_jobs(5, ${w}, 1000)`,
           ),
         ),
       ),
@@ -185,6 +187,103 @@ describe("background_jobs queue", () => {
       tx.delete(backgroundJobs).where(eq(backgroundJobs.id, j!.id)),
     );
   });
+
+  it("caps how many jobs one organization may have running at once", async () => {
+    // Throwaway orgs so the global 'running' counts of the seeded orgs can't
+    // interfere with the cap arithmetic.
+    const [orgA, orgB] = await db
+      .insert(organizations)
+      .values([{ name: `Job Cap A ${Date.now()}` }, { name: `Job Cap B ${Date.now()}` }])
+      .returning({ id: organizations.id });
+
+    // Well in the past so these sort ahead of anything else that may be due.
+    const runAt = new Date(Date.now() - 2 * 3600_000);
+    const claim = (worker: string) =>
+      withServiceRole(db, (tx) =>
+        tx.execute<{ id: number; organization_id: string }>(
+          sql`select id, organization_id from public.claim_jobs(10, ${worker})`,
+        ),
+      );
+    const forOrg = <T extends { organization_id: string }>(rows: T[], orgId: string) =>
+      rows.filter((r) => r.organization_id === orgId);
+
+    try {
+      await withServiceRole(db, (tx) =>
+        tx.insert(backgroundJobs).values([
+          { organizationId: orgA!.id, jobType: "noop.test", runAt },
+          { organizationId: orgA!.id, jobType: "noop.test", runAt },
+          { organizationId: orgA!.id, jobType: "noop.test", runAt },
+          { organizationId: orgB!.id, jobType: "noop.test", runAt },
+        ]),
+      );
+
+      // Default cap is 2: Org A's third job waits, Org B is unaffected by it.
+      const first = await claim("cap-w1");
+      expect(forOrg(first, orgA!.id)).toHaveLength(2);
+      expect(forOrg(first, orgB!.id)).toHaveLength(1);
+
+      // Org A is at its cap, so the third job stays pending.
+      const second = await claim("cap-w2");
+      expect(forOrg(second, orgA!.id)).toHaveLength(0);
+
+      // Finishing one frees a slot.
+      await withServiceRole(db, (tx) =>
+        tx
+          .update(backgroundJobs)
+          .set({ status: "succeeded", finishedAt: new Date() })
+          .where(eq(backgroundJobs.id, Number(forOrg(first, orgA!.id)[0]!.id))),
+      );
+      const third = await claim("cap-w3");
+      expect(forOrg(third, orgA!.id)).toHaveLength(1);
+
+      // An explicit higher cap is honoured (nothing is left pending here, but a
+      // cap of 0 must claim nothing even when jobs are due).
+      await withServiceRole(db, (tx) =>
+        tx.insert(backgroundJobs).values({ organizationId: orgA!.id, jobType: "noop.test", runAt }),
+      );
+      const capped = await withServiceRole(db, (tx) =>
+        tx.execute<{ id: number; organization_id: string }>(
+          sql`select id, organization_id from public.claim_jobs(10, 'cap-w4', 1)`,
+        ),
+      );
+      expect(forOrg(capped, orgA!.id)).toHaveLength(0);
+    } finally {
+      // cascades to the jobs
+      await db.delete(organizations).where(inArray(organizations.id, [orgA!.id, orgB!.id]));
+    }
+  });
+
+  it("never caps jobs with no organization (internal/system work)", async () => {
+    const runAt = new Date(Date.now() - 2 * 3600_000);
+    const ids = await withServiceRole(db, (tx) =>
+      tx
+        .insert(backgroundJobs)
+        .values(
+          Array.from({ length: 4 }, () => ({
+            organizationId: null,
+            jobType: "noop.test",
+            runAt,
+          })),
+        )
+        .returning({ id: backgroundJobs.id }),
+    );
+    try {
+      const claimed = await withServiceRole(db, (tx) =>
+        tx.execute<{ id: number }>(sql`select id from public.claim_jobs(10, 'sys-w', 2)`),
+      );
+      const mine = claimed.map((r) => Number(r.id)).filter((id) => ids.some((x) => x.id === id));
+      expect(mine).toHaveLength(4);
+    } finally {
+      await withServiceRole(db, (tx) =>
+        tx.delete(backgroundJobs).where(
+          inArray(
+            backgroundJobs.id,
+            ids.map((x) => x.id),
+          ),
+        ),
+      );
+    }
+  });
 });
 
 describe("integration tables RLS", () => {
@@ -257,5 +356,50 @@ describe("integration tables RLS", () => {
     expect(org).toMatchObject({ subscription_plan: "professional", subscription_status: "active" });
     const visible = await withRls(db, as(readOnlyA), (tx) => tx.select().from(subscriptions));
     expect(visible.every((s) => s.organizationId === readOnlyA.orgId)).toBe(true);
+  });
+
+  it("cross-tenant: Org A sees zero Org B integration_events rows", async () => {
+    const [ev] = await withServiceRole(db, (tx) =>
+      tx
+        .insert(integrationEvents)
+        .values({
+          organizationId: ownerB.orgId,
+          provider: "test",
+          direction: "outbound",
+          operation: "cross-tenant-probe",
+          success: true,
+        })
+        .returning({ id: integrationEvents.id }),
+    );
+    try {
+      const seen = await withRls(db, as(ownerA), (tx) =>
+        tx.select().from(integrationEvents).where(eq(integrationEvents.id, ev!.id)),
+      );
+      expect(seen).toHaveLength(0);
+      const all = await withRls(db, as(ownerA), (tx) => tx.select().from(integrationEvents));
+      expect(all.every((r) => r.organizationId === ownerA.orgId)).toBe(true);
+    } finally {
+      await withServiceRole(db, (tx) =>
+        tx.delete(integrationEvents).where(eq(integrationEvents.id, ev!.id)),
+      );
+    }
+  });
+
+  it("cross-tenant: Org A sees zero Org B subscriptions rows", async () => {
+    await withServiceRole(db, (tx) =>
+      tx
+        .insert(subscriptions)
+        .values({ organizationId: ownerB.orgId, plan: "professional", status: "active" })
+        .onConflictDoUpdate({
+          target: subscriptions.organizationId,
+          set: { plan: "professional", status: "active" },
+        }),
+    );
+    const seen = await withRls(db, as(ownerA), (tx) =>
+      tx.select().from(subscriptions).where(eq(subscriptions.organizationId, ownerB.orgId)),
+    );
+    expect(seen).toHaveLength(0);
+    const all = await withRls(db, as(ownerA), (tx) => tx.select().from(subscriptions));
+    expect(all.every((r) => r.organizationId === ownerA.orgId)).toBe(true);
   });
 });

@@ -12,10 +12,12 @@ import { withRls } from "./rls";
 import {
   cargo,
   drivers,
+  movementAmendments,
   movementEvents,
   movementSuggestions,
   movements,
   organizationMembers,
+  seals,
 } from "./schema";
 
 const DB_URL =
@@ -283,6 +285,158 @@ describe("movements RLS", () => {
       tx.select().from(movementEvents).where(eq(movementEvents.movementId, m.id)),
     );
     expect(events).toHaveLength(0);
+  });
+
+  it("only draft movements are deletable, and only with movement.write (0011)", async () => {
+    const draft = await createDraft(dispatcherA);
+    const readOnlyAttempt = await withRls(db, as(readOnlyA), (tx) =>
+      tx.delete(movements).where(eq(movements.id, draft.id)).returning({ id: movements.id }),
+    );
+    expect(readOnlyAttempt).toHaveLength(0);
+
+    const sent = await createDraft(dispatcherA);
+    await withRls(db, as(dispatcherA), (tx) =>
+      tx.update(movements).set({ status: "sent" }).where(eq(movements.id, sent.id)),
+    );
+    const sentAttempt = await withRls(db, as(dispatcherA), (tx) =>
+      tx.delete(movements).where(eq(movements.id, sent.id)).returning({ id: movements.id }),
+    );
+    expect(sentAttempt).toHaveLength(0);
+
+    // A draft with lines and a timeline deletes too — the child guards let the
+    // cascade through even though both tables reject ordinary deletes.
+    await withRls(db, as(dispatcherA), (tx) =>
+      tx.insert(cargo).values({
+        movementId: draft.id,
+        organizationId: dispatcherA.orgId,
+        commodityDescription: "Line on a deletable draft",
+      }),
+    );
+    await withRls(db, as(dispatcherA), (tx) =>
+      tx.insert(movementEvents).values({
+        movementId: draft.id,
+        organizationId: dispatcherA.orgId,
+        eventType: "note",
+        actorType: "user",
+        actorId: dispatcherA.userId,
+        payload: { body: "created" },
+      }),
+    );
+    const draftDeleted = await withRls(db, as(dispatcherA), (tx) =>
+      tx.delete(movements).where(eq(movements.id, draft.id)).returning({ id: movements.id }),
+    );
+    expect(draftDeleted).toHaveLength(1);
+    const orphanCargo = await db.select().from(cargo).where(eq(cargo.movementId, draft.id));
+    const orphanEvents = await db
+      .select()
+      .from(movementEvents)
+      .where(eq(movementEvents.movementId, draft.id));
+    expect(orphanCargo).toHaveLength(0);
+    expect(orphanEvents).toHaveLength(0);
+  });
+
+  it("only draft amendments are deletable (0011)", async () => {
+    const m = await createDraft(dispatcherA);
+    const [draft, submitted] = await db
+      .insert(movementAmendments)
+      .values([
+        {
+          movementId: m.id,
+          organizationId: dispatcherA.orgId,
+          amendmentNumber: 1,
+          reason: "draft amendment",
+          status: "draft" as const,
+        },
+        {
+          movementId: m.id,
+          organizationId: dispatcherA.orgId,
+          amendmentNumber: 2,
+          reason: "submitted amendment",
+        },
+      ])
+      .returning({ id: movementAmendments.id });
+
+    const submittedAttempt = await withRls(db, as(dispatcherA), (tx) =>
+      tx
+        .delete(movementAmendments)
+        .where(eq(movementAmendments.id, submitted!.id))
+        .returning({ id: movementAmendments.id }),
+    );
+    expect(submittedAttempt).toHaveLength(0);
+
+    const draftDeleted = await withRls(db, as(dispatcherA), (tx) =>
+      tx
+        .delete(movementAmendments)
+        .where(eq(movementAmendments.id, draft!.id))
+        .returning({ id: movementAmendments.id }),
+    );
+    expect(draftDeleted).toHaveLength(1);
+
+    await db.delete(movements).where(eq(movements.id, m.id));
+  });
+
+  it("cross-tenant: Org A sees zero Org B cargo, seals and movement_amendments rows", async () => {
+    // Built with the owning connection (not RLS) so Org B needs no fixtures.
+    const [foreign] = await db
+      .insert(movements)
+      .values({
+        organizationId: ownerB.orgId,
+        regime: "ACI",
+        movementNumber: `XT-${Date.now()}`,
+      })
+      .returning({ id: movements.id });
+    try {
+      const [line] = await db
+        .insert(cargo)
+        .values({
+          movementId: foreign!.id,
+          organizationId: ownerB.orgId,
+          commodityDescription: "Cross-tenant probe cargo",
+        })
+        .returning({ id: cargo.id });
+      const [seal] = await db
+        .insert(seals)
+        .values({
+          movementId: foreign!.id,
+          organizationId: ownerB.orgId,
+          sealNumber: `XT-SEAL-${Date.now()}`,
+        })
+        .returning({ id: seals.id });
+      const [amendment] = await db
+        .insert(movementAmendments)
+        .values({
+          movementId: foreign!.id,
+          organizationId: ownerB.orgId,
+          amendmentNumber: 1,
+          reason: "Cross-tenant probe",
+        })
+        .returning({ id: movementAmendments.id });
+
+      const seenCargo = await withRls(db, as(dispatcherA), (tx) =>
+        tx.select().from(cargo).where(eq(cargo.id, line!.id)),
+      );
+      const seenSeals = await withRls(db, as(dispatcherA), (tx) =>
+        tx.select().from(seals).where(eq(seals.id, seal!.id)),
+      );
+      const seenAmendments = await withRls(db, as(dispatcherA), (tx) =>
+        tx.select().from(movementAmendments).where(eq(movementAmendments.id, amendment!.id)),
+      );
+      expect(seenCargo).toHaveLength(0);
+      expect(seenSeals).toHaveLength(0);
+      expect(seenAmendments).toHaveLength(0);
+
+      const allCargo = await withRls(db, as(dispatcherA), (tx) => tx.select().from(cargo));
+      const allSeals = await withRls(db, as(dispatcherA), (tx) => tx.select().from(seals));
+      const allAmendments = await withRls(db, as(dispatcherA), (tx) =>
+        tx.select().from(movementAmendments),
+      );
+      expect(allCargo.every((r) => r.organizationId === dispatcherA.orgId)).toBe(true);
+      expect(allSeals.every((r) => r.organizationId === dispatcherA.orgId)).toBe(true);
+      expect(allAmendments.every((r) => r.organizationId === dispatcherA.orgId)).toBe(true);
+    } finally {
+      // cascades to cargo / seals / amendments
+      await db.delete(movements).where(eq(movements.id, foreign!.id));
+    }
   });
 });
 

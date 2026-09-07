@@ -1,3 +1,11 @@
+/**
+ * Drizzle mirror of the SQL schema. `supabase/migrations/*.sql` is the source
+ * of truth (it also carries RLS policies, triggers and functions Drizzle cannot
+ * express); these files exist so application queries are typed.
+ *
+ * Verified column-for-column and index-for-index against migrations 0001–0011.
+ * When you add a migration, mirror it here in the same change.
+ */
 export * from "./core";
 export * from "./registry";
 export * from "./alerts";

@@ -1,18 +1,40 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   index,
   integer,
   jsonb,
   numeric,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import type { MovementSuggestionPayload } from "@corridor/domain";
 import { authUsers, organizations } from "./core";
+import { sourceDocuments } from "./documents";
 import { drivers, partners, trailers, trucks } from "./registry";
+
+/**
+ * Per-organization sequence counters behind next_movement_number(). No RLS
+ * policy exists for it on purpose — only that SECURITY DEFINER function writes
+ * here — but it is mirrored so the Drizzle schema matches the migrations.
+ */
+export const organizationCounters = pgTable(
+  "organization_counters",
+  {
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    value: bigint("value", { mode: "number" }).notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.organizationId, t.key] })],
+);
 
 export const MOVEMENT_STATUSES = [
   "draft",
@@ -58,7 +80,17 @@ export const movements = pgTable(
   (t) => [
     index("movements_organization_id_idx").on(t.organizationId),
     index("movements_org_status_idx").on(t.organizationId, t.status),
-    index("movements_org_created_idx").on(t.organizationId, t.createdAt),
+    index("movements_org_created_idx").on(t.organizationId, t.createdAt.desc()),
+    index("movements_org_scheduled_idx").on(t.organizationId, t.scheduledCrossingAt),
+    index("movements_driver_idx")
+      .on(t.driverId)
+      .where(sql`${t.driverId} is not null`),
+    index("movements_truck_idx")
+      .on(t.truckId)
+      .where(sql`${t.truckId} is not null`),
+    index("movements_trailer_idx")
+      .on(t.trailerId)
+      .where(sql`${t.trailerId} is not null`),
     unique("movements_organization_id_movement_number_key").on(t.organizationId, t.movementNumber),
   ],
 );
@@ -90,8 +122,8 @@ export const movementSuggestions = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    index("movement_suggestions_org_created_idx").on(t.organizationId, t.createdAt),
-    index("movement_suggestions_movement_idx").on(t.movementId, t.createdAt),
+    index("movement_suggestions_org_created_idx").on(t.organizationId, t.createdAt.desc()),
+    index("movement_suggestions_movement_idx").on(t.movementId, t.createdAt.desc()),
   ],
 );
 
@@ -118,7 +150,10 @@ export const movementEvents = pgTable(
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("movement_events_movement_idx").on(t.movementId, t.occurredAt)],
+  (t) => [
+    index("movement_events_movement_idx").on(t.movementId, t.occurredAt),
+    index("movement_events_org_idx").on(t.organizationId, t.occurredAt.desc()),
+  ],
 );
 
 export const movementAmendments = pgTable(
@@ -145,7 +180,15 @@ export const movementAmendments = pgTable(
     createdBy: uuid("created_by").references(() => authUsers.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("movement_amendments_movement_idx").on(t.movementId)],
+  (t) => [
+    index("movement_amendments_movement_idx").on(t.movementId),
+    unique("movement_amendments_movement_id_amendment_number_key").on(
+      t.movementId,
+      t.amendmentNumber,
+    ),
+    // 0011
+    index("movement_amendments_organization_id_idx").on(t.organizationId),
+  ],
 );
 
 export const cargo = pgTable(
@@ -173,7 +216,9 @@ export const cargo = pgTable(
     valueAmount: numeric("value_amount", { precision: 14, scale: 2, mode: "number" }),
     valueCurrency: text("value_currency", { enum: ["USD", "CAD"] }),
     countryOfOrigin: text("country_of_origin"),
-    sourceDocumentId: uuid("source_document_id"),
+    sourceDocumentId: uuid("source_document_id").references((): AnyPgColumn => sourceDocuments.id, {
+      onDelete: "set null",
+    }),
     extractionConfidence: numeric("extraction_confidence", {
       precision: 4,
       scale: 3,
@@ -182,7 +227,14 @@ export const cargo = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("cargo_movement_idx").on(t.movementId, t.lineNumber)],
+  (t) => [
+    index("cargo_movement_idx").on(t.movementId, t.lineNumber),
+    index("cargo_organization_id_idx").on(t.organizationId),
+    index("cargo_commodity_search_idx").using(
+      "gin",
+      sql`to_tsvector('simple', ${t.commodityDescription})`,
+    ),
+  ],
 );
 
 export const seals = pgTable(
@@ -204,5 +256,10 @@ export const seals = pgTable(
     appliedAt: timestamp("applied_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("seals_movement_idx").on(t.movementId)],
+  (t) => [
+    index("seals_movement_idx").on(t.movementId),
+    uniqueIndex("seals_movement_number_unique").on(t.movementId, t.sealNumber),
+    // 0011
+    index("seals_organization_id_idx").on(t.organizationId),
+  ],
 );
