@@ -1,0 +1,28 @@
+Corridor — Proprietary License
+
+Copyright (c) 2026 <legal entity — TODO: replace with the registered owner's
+name before this repository is shared outside the owning organisation>.
+All rights reserved.
+
+This software and its source code, documentation, database schemas, and
+associated materials (the "Software") are the confidential and proprietary
+property of the copyright holder.
+
+No part of the Software may be used, copied, modified, merged, published,
+distributed, sublicensed, sold, or otherwise made available, in whole or in
+part, without the prior written permission of the copyright holder.
+
+Access to this repository does not grant any license or right, express or
+implied, to the Software or to any patent, trademark, or other intellectual
+property of the copyright holder, other than the right to use the Software
+for the purpose the access was granted.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Third-party dependencies are licensed under their own terms; see the
+respective packages under node_modules and pnpm-lock.yaml.

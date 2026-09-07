@@ -115,4 +115,4 @@ Pull requests and issues use the templates in `.github/`.
 
 ## License
 
-Proprietary — all rights reserved.
+Proprietary — all rights reserved. See `LICENSE`.

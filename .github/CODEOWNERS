@@ -1,0 +1,26 @@
+# Code owners are requested for review automatically on every pull request
+# that touches a matching path. The last matching line wins.
+#
+# EasyTask001 is currently the only collaborator with admin rights, so every
+# path resolves to them. The explicit sections below are the paths that must
+# keep an owner-level reviewer when more maintainers are added: change the
+# `*` line for general code, leave these as they are.
+
+# Default: everything
+*                                   @EasyTask001
+
+# Tenant boundary — schema, RLS policies, SECURITY DEFINER functions
+/supabase/                          @EasyTask001
+/packages/db/                       @EasyTask001
+/packages/auth/                     @EasyTask001
+
+# Anything that can spend money or reach a third party
+/packages/integrations/             @EasyTask001
+/apps/web/src/app/api/webhooks/     @EasyTask001
+/apps/web/src/app/api/jobs/         @EasyTask001
+
+# Repository policy, CI and security documentation
+/.github/                           @EasyTask001
+/SECURITY.md                        @EasyTask001
+/docs/security-review.md            @EasyTask001
+/LICENSE                            @EasyTask001
