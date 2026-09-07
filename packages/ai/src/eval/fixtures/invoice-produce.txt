@@ -1,0 +1,11 @@
+COMMERCIAL INVOICE
+Invoice: INV-88213
+Date: 2026-09-03
+
+Shipper: Erie Produce Co, 88 Market Ave, Buffalo NY 14203
+Consignee: Erie Produce Co (Canada), 12 Harbour St, Fort Erie ON
+
+Line: Fresh apples, bulk bins | 0808.10 | 18200 kg | 40 bins | 22000 USD | US
+Line: Fresh pears | 0808.30 | 2600 kg | 6 bins | 4100 USD | US
+
+Terms: FOB Buffalo

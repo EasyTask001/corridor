@@ -1,0 +1,15 @@
+{
+  "documentType": "bol",
+  "documentNumber": "BOL-7781",
+  "shipper": { "name": "Northern Millwork Ltd" },
+  "consignee": { "name": null },
+  "cargo": [
+    {
+      "commodityDescription": "Kiln-dried pine lumber, bundles",
+      "hsCode": null,
+      "weightKg": null,
+      "pieceCount": 14
+    }
+  ],
+  "_expectLowConfidence": true
+}

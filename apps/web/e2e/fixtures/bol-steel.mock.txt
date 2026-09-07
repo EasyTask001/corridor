@@ -1,0 +1,9 @@
+STRAIGHT BILL OF LADING
+BOL: BOL-E2E-5001
+Date: 2026-09-05
+
+Shipper: Maple Ridge Steel Ltd, 400 Industrial Pkwy, Hamilton ON
+Consignee: Great Lakes Fabrication Inc, 1200 Ford Rd, Dearborn MI
+
+Line: Hot-rolled steel coils | 7208.10 | 21500 kg | 12 coils | 48000 USD | CA
+Line: Galvanized sheet, coils | 7210.49 | 4000 kg | 3 coils | 9000 USD | CA

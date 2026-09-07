@@ -1,0 +1,27 @@
+{
+  "documentType": "bol",
+  "documentNumber": "BOL-2026-1001",
+  "documentDate": "2026-09-01",
+  "shipper": { "name": "Maple Ridge Steel Ltd" },
+  "consignee": { "name": "Great Lakes Fabrication Inc" },
+  "cargo": [
+    {
+      "commodityDescription": "Hot-rolled steel coils",
+      "hsCode": "7208.10",
+      "weightKg": 21500,
+      "pieceCount": 12,
+      "valueAmount": 48000,
+      "valueCurrency": "USD",
+      "countryOfOrigin": "CA"
+    },
+    {
+      "commodityDescription": "Galvanized sheet, coils",
+      "hsCode": "7210.49",
+      "weightKg": 4000,
+      "pieceCount": 3,
+      "valueAmount": 9000,
+      "valueCurrency": "USD",
+      "countryOfOrigin": "CA"
+    }
+  ]
+}

@@ -1,0 +1,152 @@
+import { z } from "zod";
+import { isoDate, isoDateTime, uuid } from "./common";
+import { cargoInput, countryCode, currency, hsCode } from "./movement";
+
+export const documentType = z.enum(["bol", "invoice", "rate_confirmation", "other"]);
+export type DocumentType = z.infer<typeof documentType>;
+
+export const uploadStatus = z.enum(["uploaded", "processing", "extracted", "failed", "applied"]);
+export type UploadStatus = z.infer<typeof uploadStatus>;
+
+export const ALLOWED_DOCUMENT_MIME_TYPES = [
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/tiff",
+  "text/plain",
+  "application/json",
+] as const;
+export const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
+
+/** 0..1 confidence attached to every extracted field. */
+export const confidence = z.number().min(0).max(1);
+
+/** A party (shipper / consignee / broker) as it appears on paper. */
+export const extractedParty = z.object({
+  name: z.string().trim().max(160).nullable(),
+  address: z.string().trim().max(300).nullable(),
+  taxId: z.string().trim().max(40).nullable(),
+  confidence,
+});
+export type ExtractedParty = z.infer<typeof extractedParty>;
+
+/**
+ * One shipment line as extracted. Field names mirror `cargoInput` so review →
+ * apply is a straight mapping; `confidence` is per-line.
+ */
+export const extractedCargoLine = z.object({
+  commodityDescription: z.string().trim().max(500),
+  hsCode: hsCode.nullable(),
+  weightKg: z.number().positive().max(100_000).nullable(),
+  pieceCount: z.number().int().positive().nullable(),
+  packagingType: z.string().trim().max(60).nullable(),
+  valueAmount: z.number().nonnegative().nullable(),
+  valueCurrency: currency.nullable(),
+  countryOfOrigin: countryCode.nullable(),
+  confidence,
+});
+export type ExtractedCargoLine = z.infer<typeof extractedCargoLine>;
+
+/**
+ * THE extraction contract. The same schema validates the model's structured
+ * output (`generateObject`) and the review form, so AI output can never
+ * bypass domain validation on its way into `cargo`.
+ */
+export const extractedDocument = z.object({
+  documentType,
+  documentNumber: z.string().trim().max(60).nullable(),
+  documentDate: isoDate.nullable(),
+  shipper: extractedParty,
+  consignee: extractedParty,
+  broker: extractedParty.nullable(),
+  cargo: z.array(extractedCargoLine).max(50),
+  totals: z
+    .object({
+      weightKg: z.number().nonnegative().nullable(),
+      pieceCount: z.number().int().nonnegative().nullable(),
+      valueAmount: z.number().nonnegative().nullable(),
+      valueCurrency: currency.nullable(),
+    })
+    .nullable(),
+  /** Anything the extractor was unsure about, for the reviewer. */
+  notes: z.array(z.string().max(300)).max(20),
+  /** overall confidence — min of the required-field confidences, see pipeline */
+  confidence,
+});
+export type ExtractedDocument = z.infer<typeof extractedDocument>;
+
+/** Threshold below which a document (or line) raises a compliance alert for review. */
+export const LOW_CONFIDENCE_THRESHOLD = 0.7;
+
+export const sourceDocumentSchema = z.object({
+  id: uuid,
+  organizationId: uuid,
+  movementId: uuid.nullable(),
+  documentType,
+  detectedType: documentType.nullable(),
+  storagePath: z.string(),
+  originalFilename: z.string(),
+  mimeType: z.string(),
+  sizeBytes: z.number().nullable(),
+  uploadStatus,
+  extractedJson: extractedDocument.nullable(),
+  extractionModel: z.string().nullable(),
+  extractionConfidence: confidence.nullable(),
+  extractionError: z.string().nullable(),
+  createdAt: isoDateTime,
+  updatedAt: isoDateTime,
+});
+export type SourceDocument = z.infer<typeof sourceDocumentSchema>;
+
+// ---------------------------------------------------------------------------
+// API inputs
+// ---------------------------------------------------------------------------
+
+export const getUploadUrlInput = z.object({
+  filename: z.string().trim().min(1).max(200),
+  mimeType: z.enum(ALLOWED_DOCUMENT_MIME_TYPES),
+  sizeBytes: z.number().int().positive().max(MAX_DOCUMENT_BYTES),
+  documentType: documentType.default("other"),
+  movementId: uuid.optional(),
+});
+export type GetUploadUrlInput = z.infer<typeof getUploadUrlInput>;
+
+export const finalizeUploadInput = z.object({ documentId: uuid });
+
+export const documentListInput = z.object({
+  status: z.array(uploadStatus).optional(),
+  movementId: uuid.optional(),
+  limit: z.number().int().min(1).max(200).default(50),
+  offset: z.number().int().min(0).default(0),
+});
+
+/** Reviewer-confirmed lines to apply to a movement (already validated against cargoInput). */
+export const applyExtractionInput = z.object({
+  documentId: uuid,
+  movementId: uuid,
+  shipperId: uuid.nullable().optional(),
+  consigneeId: uuid.nullable().optional(),
+  lines: z
+    .array(cargoInput.omit({ sourceDocumentId: true, shipperId: true, consigneeId: true }))
+    .min(1)
+    .max(50),
+  /** replace existing cargo lines on the movement (draft only) or append */
+  mode: z.enum(["append", "replace"]).default("append"),
+});
+export type ApplyExtractionInput = z.infer<typeof applyExtractionInput>;
+
+/** Map an extracted line to a cargoInput-compatible object (confidence carried along). */
+export function extractedLineToCargo(line: ExtractedCargoLine) {
+  return {
+    commodityDescription: line.commodityDescription,
+    hsCode: line.hsCode,
+    weightKg: line.weightKg,
+    pieceCount: line.pieceCount,
+    packagingType: line.packagingType,
+    valueAmount: line.valueAmount,
+    valueCurrency: line.valueCurrency,
+    countryOfOrigin: line.countryOfOrigin,
+    extractionConfidence: line.confidence,
+  };
+}

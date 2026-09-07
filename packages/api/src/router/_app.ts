@@ -1,6 +1,7 @@
 import { publicProcedure, router } from "../trpc";
 import { alertsRouter } from "./alerts";
 import { billingRouter } from "./billing";
+import { documentsRouter } from "./documents";
 import { integrationsRouter } from "./integrations";
 import { movementRouter } from "./movement";
 import { organizationRouter } from "./organization";
@@ -14,6 +15,7 @@ export const appRouter = router({
   movement: movementRouter,
   integrations: integrationsRouter,
   billing: billingRouter,
+  documents: documentsRouter,
 });
 
 export type AppRouter = typeof appRouter;

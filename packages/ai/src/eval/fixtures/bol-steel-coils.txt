@@ -1,0 +1,13 @@
+STRAIGHT BILL OF LADING — NOT NEGOTIABLE
+BOL: BOL-2026-1001
+Date: 2026-09-01
+Carrier: Pathfinder Trans Inc  SCAC PFTR
+
+Shipper: Maple Ridge Steel Ltd, 400 Industrial Pkwy, Hamilton ON L8E 2W1
+Consignee: Great Lakes Fabrication Inc, 1200 Ford Rd, Dearborn MI 48126
+Broker: Northgate Customs Brokers, Fort Erie ON
+
+Line: Hot-rolled steel coils | 7208.10 | 21500 kg | 12 coils | 48000 USD | CA
+Line: Galvanized sheet, coils | 7210.49 | 4000 kg | 3 coils | 9000 USD | CA
+
+Seal: SL-100231   Trailer: TR-501

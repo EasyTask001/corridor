@@ -13,6 +13,7 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "@corridor/ai": "workspace:*",
     "@corridor/api": "workspace:*",
     "@corridor/auth": "workspace:*",
     "@corridor/db": "workspace:*",

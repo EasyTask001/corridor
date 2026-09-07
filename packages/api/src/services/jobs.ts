@@ -19,7 +19,7 @@ import { applyCustomsDecision, loadFull, loadOrganization, requireMovement } fro
 
 const { backgroundJobs, movements } = schema;
 
-export type JobType = "customs.decide" | "compliance.scan";
+export type JobType = "customs.decide" | "compliance.scan" | "document.extract";
 
 export async function enqueueJob(
   tx: RlsTransaction,
@@ -107,6 +107,12 @@ const handlers: Record<JobType, Handler> = {
       });
     }
     return { decision: decision.decision, status: updated.status };
+  },
+
+  "document.extract": async (tx, job) => {
+    const { extractDocumentJob } = await import("./documents");
+    if (!job.organizationId) throw new Error("document.extract requires organization_id");
+    return extractDocumentJob(tx, job.organizationId, String(job.payload.documentId));
   },
 
   "compliance.scan": async (tx, job) => {

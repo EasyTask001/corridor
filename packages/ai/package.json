@@ -1,5 +1,5 @@
 {
-  "name": "@corridor/api",
+  "name": "@corridor/ai",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -11,18 +11,13 @@
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "eval": "vitest run src/eval"
   },
   "dependencies": {
-    "@corridor/ai": "workspace:*",
-    "@corridor/auth": "workspace:*",
-    "@corridor/db": "workspace:*",
+    "@ai-sdk/openai": "^4.0.60",
     "@corridor/domain": "workspace:*",
-    "@corridor/integrations": "workspace:*",
-    "@supabase/supabase-js": "^2.57.4",
-    "@trpc/server": "^11.18.0",
-    "drizzle-orm": "^0.45.2",
-    "superjson": "^2.2.6",
+    "ai": "^7.0.93",
     "zod": "^4.1.5"
   },
   "devDependencies": {

@@ -8,3 +8,4 @@ export * from "./alert";
 export * from "./compliance";
 export * from "./movement-inputs";
 export * from "./movement-validation";
+export * from "./document";

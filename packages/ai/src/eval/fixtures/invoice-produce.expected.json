@@ -1,0 +1,27 @@
+{
+  "documentType": "invoice",
+  "documentNumber": "INV-88213",
+  "documentDate": "2026-09-03",
+  "shipper": { "name": "Erie Produce Co" },
+  "consignee": { "name": "Erie Produce Co (Canada)" },
+  "cargo": [
+    {
+      "commodityDescription": "Fresh apples, bulk bins",
+      "hsCode": "0808.10",
+      "weightKg": 18200,
+      "pieceCount": 40,
+      "valueAmount": 22000,
+      "valueCurrency": "USD",
+      "countryOfOrigin": "US"
+    },
+    {
+      "commodityDescription": "Fresh pears",
+      "hsCode": "0808.30",
+      "weightKg": 2600,
+      "pieceCount": 6,
+      "valueAmount": 4100,
+      "valueCurrency": "USD",
+      "countryOfOrigin": "US"
+    }
+  ]
+}
