@@ -20,12 +20,33 @@ export const movementPatch = z.object({
   /** Server defaults to the regime's default carrier code when omitted. */
   carrierCode: carrierCode.nullable().optional(),
   scheduledCrossingAt: isoDateTime.nullable().optional(),
-  driverId: uuid.nullable().optional(),
   truckId: uuid.nullable().optional(),
   trailerId: uuid.nullable().optional(),
   notes: z.string().trim().max(4000).nullable().optional(),
 });
 export type MovementPatch = z.infer<typeof movementPatch>;
+
+// ---------------------------------------------------------------------------
+// Crew
+// ---------------------------------------------------------------------------
+
+/**
+ * Exactly one `person_in_charge` per crossing (movement_crew_pic_unique in
+ * migration 0020); everyone else is a working crew member or a passenger.
+ */
+export const CREW_ROLES = ["person_in_charge", "crew_member", "passenger"] as const;
+export const crewRole = z.enum(CREW_ROLES);
+export type CrewRole = z.infer<typeof crewRole>;
+
+export const crewInput = z.object({
+  movementId: uuid,
+  driverId: uuid,
+  role: crewRole.default("crew_member"),
+});
+export type CrewInput = z.infer<typeof crewInput>;
+
+export const crewRemoveInput = z.object({ movementId: uuid, driverId: uuid });
+export const crewSetRoleInput = z.object({ movementId: uuid, driverId: uuid, role: crewRole });
 
 export const sealAddInput = sealInput.extend({ movementId: uuid });
 export const sealRemoveInput = z.object({ movementId: uuid, id: uuid });

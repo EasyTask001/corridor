@@ -6,6 +6,7 @@
  * mobile app's offline pre-flight checks.
  */
 import type { AlertSeverity } from "./alert";
+import { DRIVER_DOCUMENT_LABELS, type DriverDocumentType } from "./registry";
 
 export type ExpiryEntityType = "driver" | "truck" | "trailer";
 
@@ -114,30 +115,35 @@ export function evaluateExpiries(
 // Document sets per entity type — single place the UI, API and scan agree on.
 // ---------------------------------------------------------------------------
 
-export function driverDocuments(d: {
-  licenseExpiry: string | null;
-  fastCardNumber?: string | null;
-  fastCardExpiry: string | null;
-  medicalCertExpiry: string | null;
-}): ExpiryDocument[] {
+/**
+ * `travelDocuments` are the driver_documents rows (migration 0020) — the FAST
+ * card lives there now, alongside passports, NEXUS cards and visas. Each one
+ * uses its `document_type` as the field, so the dedupe key stays
+ * `driver:<id>:<field>`. A travel document with no expiry on file is normal
+ * (a birth certificate never expires), so it is not itself a finding.
+ */
+export function driverDocuments(
+  d: {
+    licenseExpiry: string | null;
+    medicalCertExpiry: string | null;
+    personType?: string | null;
+  },
+  travelDocuments: Array<{ documentType: DriverDocumentType; expiresOn: string | null }> = [],
+): ExpiryDocument[] {
   return [
     {
       field: "license_expiry",
       label: "Driver's license",
       expiry: d.licenseExpiry,
-      requiredForCrossing: true,
+      // A passenger has no licence to expire.
+      requiredForCrossing: d.personType !== "passenger",
     },
-    // FAST card is optional; only track it if the driver has one.
-    ...(d.fastCardNumber
-      ? [
-          {
-            field: "fast_card_expiry",
-            label: "FAST card",
-            expiry: d.fastCardExpiry,
-            requiredForCrossing: true,
-          },
-        ]
-      : []),
+    ...travelDocuments.map((t) => ({
+      field: t.documentType,
+      label: DRIVER_DOCUMENT_LABELS[t.documentType],
+      expiry: t.expiresOn,
+      requiredForCrossing: false,
+    })),
     {
       field: "medical_cert_expiry",
       label: "Medical certificate",

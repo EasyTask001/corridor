@@ -26,21 +26,50 @@ export const vin = z
 const optionalDate = isoDate.nullable().optional();
 const optionalText = (max: number) => z.string().trim().max(max).nullable().optional();
 
+/** Free-form postal address — shared by partners, drivers and shipments. */
+export const address = z.object({
+  line1: z.string().trim().max(120).optional(),
+  line2: z.string().trim().max(120).optional(),
+  city: z.string().trim().max(80).optional(),
+  region: z.string().trim().max(40).optional(),
+  postalCode: z.string().trim().max(20).optional(),
+  country: countryCode2.optional(),
+});
+export type Address = z.infer<typeof address>;
+
 // ---------------------------------------------------------------------------
 // Drivers
 // ---------------------------------------------------------------------------
 
+/** A person the carrier declares in the cab: one drives, the other rides. */
+export const PERSON_TYPES = ["driver", "passenger"] as const;
+export const personType = z.enum(PERSON_TYPES);
+export type PersonType = z.infer<typeof personType>;
+
+/** As CBP/CBSA record it on a crew list. */
+export const GENDERS = ["M", "F", "X"] as const;
+export const gender = z.enum(GENDERS);
+export type Gender = z.infer<typeof gender>;
+
+/**
+ * Licence number/jurisdiction are optional here because a passenger has
+ * neither; `drivers_license_required_check` (migration 0020) is what makes them
+ * mandatory for anyone whose person type is `driver`.
+ */
 export const driverInput = z.object({
   firstName: nonEmpty.max(80),
   lastName: nonEmpty.max(80),
-  licenseNumber: nonEmpty.max(40),
-  licenseJurisdiction: jurisdiction,
+  personType: personType.default("driver"),
+  licenseNumber: optionalText(40),
+  licenseJurisdiction: jurisdiction.nullable().optional(),
   licenseExpiry: optionalDate,
-  fastCardNumber: optionalText(40),
-  fastCardExpiry: optionalDate,
   medicalCertExpiry: optionalDate,
   dateOfBirth: optionalDate,
   citizenship: countryCode2.nullable().optional(),
+  gender: gender.nullable().optional(),
+  hazmatEndorsement: z.boolean().default(false),
+  /** US destination address CBP asks for from a non-US crew member. */
+  usAddress: address.default({}),
   phone: optionalText(40),
   email: email.nullable().optional(),
   status: registryStatus.default("active"),
@@ -55,6 +84,75 @@ export const driverSchema = driverInput.extend({
   updatedAt: isoDateTime,
 });
 export type Driver = z.infer<typeof driverSchema>;
+
+// ---------------------------------------------------------------------------
+// Driver travel documents (CBP/CBSA WHTI list)
+// ---------------------------------------------------------------------------
+
+export const DRIVER_DOCUMENT_TYPES = [
+  "passport",
+  "us_passport_card",
+  "fast",
+  "nexus",
+  "sentri",
+  "enhanced_drivers_license",
+  "permanent_resident_card",
+  "us_alien_registration",
+  "visa_immigrant",
+  "visa_non_immigrant",
+  "laser_visa_bcc",
+  "military_id",
+  "merchant_mariner",
+  "native_american_inac",
+  "dhs_reentry_permit",
+  "dhs_refugee_travel",
+  "birth_certificate",
+  "citizenship_card",
+  "certificate_of_naturalization",
+  "other",
+] as const;
+export const driverDocumentType = z.enum(DRIVER_DOCUMENT_TYPES);
+export type DriverDocumentType = z.infer<typeof driverDocumentType>;
+
+/** Printable labels — shared by the registry UI and the compliance scanner. */
+export const DRIVER_DOCUMENT_LABELS: Record<DriverDocumentType, string> = {
+  passport: "Passport",
+  us_passport_card: "US passport card",
+  fast: "FAST card",
+  nexus: "NEXUS card",
+  sentri: "SENTRI card",
+  enhanced_drivers_license: "Enhanced driver's licence",
+  permanent_resident_card: "Permanent resident card",
+  us_alien_registration: "US alien registration",
+  visa_immigrant: "Immigrant visa",
+  visa_non_immigrant: "Non-immigrant visa",
+  laser_visa_bcc: "Laser visa / BCC",
+  military_id: "Military ID",
+  merchant_mariner: "Merchant mariner document",
+  native_american_inac: "Native American / INAC card",
+  dhs_reentry_permit: "DHS re-entry permit",
+  dhs_refugee_travel: "DHS refugee travel document",
+  birth_certificate: "Birth certificate",
+  citizenship_card: "Citizenship card",
+  certificate_of_naturalization: "Certificate of naturalization",
+  other: "Other document",
+};
+
+export const driverDocumentInput = z.object({
+  /** Present = update that row, absent = insert a new one. */
+  id: uuid.optional(),
+  driverId: uuid,
+  documentType: driverDocumentType,
+  documentNumber: nonEmpty.max(40),
+  issuingCountry: countryCode2.nullable().optional(),
+  issuingState: optionalText(40),
+  issuedOn: optionalDate,
+  expiresOn: optionalDate,
+  isPrimary: z.boolean().default(false),
+});
+export type DriverDocumentInput = z.infer<typeof driverDocumentInput>;
+
+export const driverDocumentRemoveInput = z.object({ driverId: uuid, id: uuid });
 
 // ---------------------------------------------------------------------------
 // Trucks
@@ -130,16 +228,6 @@ export type Trailer = z.infer<typeof trailerSchema>;
 
 export const partnerType = z.enum(["shipper", "consignee", "broker", "both"]);
 export type PartnerType = z.infer<typeof partnerType>;
-
-export const address = z.object({
-  line1: z.string().trim().max(120).optional(),
-  line2: z.string().trim().max(120).optional(),
-  city: z.string().trim().max(80).optional(),
-  region: z.string().trim().max(40).optional(),
-  postalCode: z.string().trim().max(20).optional(),
-  country: countryCode2.optional(),
-});
-export type Address = z.infer<typeof address>;
 
 export const partnerInput = z.object({
   name: nonEmpty.max(160),

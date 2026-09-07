@@ -5,6 +5,8 @@
  */
 import { daysBetween, todayIso } from "./compliance";
 import type { Regime } from "./movement";
+import type { CrewRole } from "./movement-inputs";
+import type { Address, DriverDocumentType, PersonType } from "./registry";
 import type { AceShipmentType, AciCargoType, InBondEntryType } from "./shipment";
 
 export type IssueSeverity = "blocking" | "warning";
@@ -48,6 +50,19 @@ export interface ShipmentForValidation {
   commodities: CommodityForValidation[];
 }
 
+/** One person on the crossing, as `movement_crew` joined to `drivers` stores it. */
+export interface CrewForValidation {
+  role: CrewRole;
+  personType: PersonType;
+  displayName: string;
+  licenseExpiry: string | null;
+  status: string;
+  citizenship: string | null;
+  /** Empty `{}` when no US address is on file (the column default). */
+  usAddress: Address;
+  documents: Array<{ documentType: DriverDocumentType; expiresOn: string | null }>;
+}
+
 export interface MovementForValidation {
   regime: Regime;
   /** The port of entry / CBSA office, or null when not yet selected. */
@@ -55,13 +70,7 @@ export interface MovementForValidation {
   /** The carrier code this movement files under (migration 0018). */
   carrierCode: string | null;
   scheduledCrossingAt: string | null;
-  driver: {
-    licenseExpiry: string | null;
-    fastCardNumber?: string | null;
-    fastCardExpiry?: string | null;
-    citizenship?: string | null;
-    status: string;
-  } | null;
+  crew: CrewForValidation[];
   truck: {
     registrationExpiry: string | null;
     insuranceExpiry: string | null;
@@ -116,27 +125,49 @@ export function validateForTransmit(
   }
 
   // --- crew ---
-  if (!m.driver) block("driver_missing", "Assign a driver.", "crew");
-  else {
-    if (m.driver.status !== "active")
-      block("driver_inactive", "Assigned driver is not active.", "crew");
-    if (!m.driver.licenseExpiry)
-      block("driver_license_unknown", "Driver's license expiry is not on file.", "crew");
-    else if (expired(m.driver.licenseExpiry, today))
-      block("driver_license_expired", "Driver's license has expired.", "crew");
-    if (m.driver.fastCardNumber && expired(m.driver.fastCardExpiry, today))
-      warn(
-        "driver_fast_expired",
-        "Driver's FAST card has expired — FAST lanes unavailable.",
+  const pic = m.crew.find((c) => c.role === "person_in_charge");
+  if (!pic) block("crew_pic_missing", "Assign a person in charge (the driver).", "crew");
+  else if (pic.personType !== "driver")
+    block(
+      "crew_pic_not_driver",
+      `${pic.displayName} is recorded as a passenger and cannot be the person in charge.`,
+      "crew",
+    );
+
+  m.crew.forEach((c, i) => {
+    const at = (suffix: string) => `crew_${i}_${suffix}`;
+    if (c.status !== "active")
+      block(at("inactive"), `${c.displayName} is not an active crew record.`, "crew");
+
+    if (c.personType === "driver") {
+      if (!c.licenseExpiry)
+        block(at("license_unknown"), `${c.displayName}: license expiry is not on file.`, "crew");
+      else if (expired(c.licenseExpiry, today))
+        block(at("license_expired"), `${c.displayName}: license has expired.`, "crew");
+    } else if (c.documents.length === 0) {
+      block(
+        at("passenger_document_missing"),
+        `${c.displayName}: a passenger needs at least one travel document.`,
         "crew",
       );
-    if (!m.driver.citizenship)
+    }
+
+    for (const d of c.documents) {
+      if ((d.documentType === "fast" || d.documentType === "nexus") && expired(d.expiresOn, today))
+        warn(
+          at(`${d.documentType}_expired`),
+          `${c.displayName}: ${d.documentType === "fast" ? "FAST" : "NEXUS"} card has expired — trusted-traveller lanes unavailable.`,
+          "crew",
+        );
+    }
+
+    if (!c.citizenship)
       warn(
-        "driver_citizenship_unknown",
-        "Driver citizenship is not recorded (required on ACI/ACE crew data).",
+        at("citizenship_unknown"),
+        `${c.displayName}: citizenship is not recorded (required on ACE/ACI crew data).`,
         "crew",
       );
-  }
+  });
 
   // --- shipments ---
   // ACE moves goods into the US, so the shipper is normally Canadian and the
@@ -200,6 +231,23 @@ export function validateForTransmit(
         warn(code("origin"), `${line}: country of origin missing.`, "commodity");
     });
   });
+
+  // --- crew x shipments ---
+  // CBP wants a US destination address for a passenger riding along on an ACE
+  // crossing whose goods are not consigned to a US party.
+  if (
+    m.regime === "ACE" &&
+    m.shipments.some((s) => s.consignee?.country && s.consignee.country !== "US")
+  ) {
+    m.crew.forEach((c, i) => {
+      if (c.personType === "passenger" && Object.keys(c.usAddress).length === 0)
+        warn(
+          `crew_${i}_us_address_missing`,
+          `${c.displayName}: ACE needs a US address for a passenger when the consignee is not US.`,
+          "crew",
+        );
+    });
+  }
 
   // --- trailer ---
   if (!m.trailer) warn("trailer_missing", "No trailer assigned (bobtail?).", "trailer");

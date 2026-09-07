@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   hasBlockingIssues,
   validateForTransmit,
+  type CrewForValidation,
   type MovementForValidation,
   type ShipmentForValidation,
 } from "./movement-validation";
@@ -31,17 +32,23 @@ const shipment: ShipmentForValidation = {
   ],
 };
 
+const pic: CrewForValidation = {
+  role: "person_in_charge",
+  personType: "driver",
+  displayName: "Gurpreet Singh",
+  licenseExpiry: "2027-01-01",
+  status: "active",
+  citizenship: "CA",
+  usAddress: {},
+  documents: [],
+};
+
 const ready: MovementForValidation = {
   regime: "ACE",
   port: { code: "3801" },
   carrierCode: "PFTR",
   scheduledCrossingAt: "2026-09-08T14:00:00Z",
-  driver: {
-    licenseExpiry: "2027-01-01",
-    fastCardNumber: null,
-    citizenship: "CA",
-    status: "active",
-  },
+  crew: [pic],
   truck: {
     registrationExpiry: "2027-01-01",
     insuranceExpiry: "2027-01-01",
@@ -62,9 +69,9 @@ describe("validateForTransmit", () => {
     expect(hasBlockingIssues(issues)).toBe(false);
   });
 
-  it("blocks on missing driver, truck, crossing, carrier code and shipments", () => {
+  it("blocks on missing crew, truck, crossing, carrier code and shipments", () => {
     const issues = validateForTransmit(
-      { ...ready, driver: null, truck: null, port: null, carrierCode: null, shipments: [] },
+      { ...ready, crew: [], truck: null, port: null, carrierCode: null, shipments: [] },
       TODAY,
     );
     expect(issues.filter((i) => i.severity === "blocking").map((i) => i.code)).toEqual(
@@ -72,30 +79,83 @@ describe("validateForTransmit", () => {
         "crossing_point_missing",
         "carrier_code_missing",
         "truck_missing",
-        "driver_missing",
+        "crew_pic_missing",
         "shipments_missing",
       ]),
     );
   });
 
-  it("blocks on expired driver license / truck docs; warns on expired FAST", () => {
+  it("blocks when the person in charge is a passenger", () => {
+    expect(
+      codes({ ...ready, crew: [{ ...pic, personType: "passenger", documents: [] }] }),
+    ).toContain("crew_pic_not_driver");
+  });
+
+  it("blocks a passenger with no travel document", () => {
+    const passenger: CrewForValidation = {
+      ...pic,
+      role: "passenger",
+      personType: "passenger",
+      displayName: "Ada Rider",
+      licenseExpiry: null,
+    };
+    expect(codes({ ...ready, crew: [pic, passenger] })).toContain(
+      "crew_1_passenger_document_missing",
+    );
+    expect(
+      codes({
+        ...ready,
+        crew: [pic, { ...passenger, documents: [{ documentType: "passport", expiresOn: null }] }],
+      }),
+    ).not.toContain("crew_1_passenger_document_missing");
+  });
+
+  it("blocks on expired license / truck docs; warns on expired FAST and NEXUS", () => {
     const issues = validateForTransmit(
       {
         ...ready,
-        driver: {
-          ...ready.driver!,
-          licenseExpiry: "2026-09-01",
-          fastCardNumber: "F",
-          fastCardExpiry: "2026-01-01",
-        },
+        crew: [
+          {
+            ...pic,
+            licenseExpiry: "2026-09-01",
+            documents: [
+              { documentType: "fast", expiresOn: "2026-01-01" },
+              { documentType: "nexus", expiresOn: "2026-01-01" },
+            ],
+          },
+        ],
         truck: { ...ready.truck!, insuranceExpiry: "2026-09-05" },
       },
       TODAY,
     );
     const byCode = Object.fromEntries(issues.map((i) => [i.code, i.severity]));
-    expect(byCode.driver_license_expired).toBe("blocking");
+    expect(byCode.crew_0_license_expired).toBe("blocking");
     expect(byCode.truck_insurance_expired).toBe("blocking");
-    expect(byCode.driver_fast_expired).toBe("warning");
+    expect(byCode.crew_0_fast_expired).toBe("warning");
+    expect(byCode.crew_0_nexus_expired).toBe("warning");
+  });
+
+  it("warns when an ACE passenger has no US address and the consignee is not US", () => {
+    const passenger: CrewForValidation = {
+      ...pic,
+      role: "passenger",
+      personType: "passenger",
+      displayName: "Ada Rider",
+      licenseExpiry: null,
+      documents: [{ documentType: "passport", expiresOn: "2030-01-01" }],
+    };
+    const foreignConsignee = {
+      ...ready,
+      crew: [pic, passenger],
+      shipments: [{ ...shipment, consignee: { name: "Maple Ridge", country: "CA" } }],
+    };
+    expect(codes(foreignConsignee)).toContain("crew_1_us_address_missing");
+    expect(
+      codes({
+        ...foreignConsignee,
+        crew: [pic, { ...passenger, usAddress: { city: "Detroit", country: "US" } }],
+      }),
+    ).not.toContain("crew_1_us_address_missing");
   });
 
   it("requires a shipper and a consignee on every shipment", () => {

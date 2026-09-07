@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { uuid } from "./common";
+import { crewRole } from "./movement-inputs";
 
 /**
  * Historical values offered to a dispatcher; nothing is applied until accept.
@@ -18,7 +19,8 @@ export const movementSuggestionPayload = z.object({
    * if the port catalogue changes later. */
   port: z.object({ id: uuid, code: z.string(), name: z.string() }).nullable(),
   carrierCode: z.string().nullable(),
-  driverId: uuid.nullable(),
+  /** The source movement's crew, offered as a whole (0020). */
+  crew: z.array(z.object({ driverId: uuid, role: crewRole })),
   truckId: uuid.nullable(),
   trailerId: uuid.nullable(),
 });
