@@ -9,12 +9,17 @@
  * with it, which is the behaviour we want — an action that did not happen is
  * not billed.
  */
-import { and, eq, schema, sql, type RlsTransaction } from "@corridor/db";
+import { and, asc, eq, isNull, lt, schema, sql, type RlsTransaction } from "@corridor/db";
 import { USAGE_METRICS, type UsageMetric } from "@corridor/domain";
-import { planUsageFor, type PlanUsage } from "@corridor/integrations";
+import {
+  planUsageFor,
+  reportUsage,
+  type PlanUsage,
+  type UsageMeterRecord,
+} from "@corridor/integrations";
 import type { SubscriptionPlan } from "@corridor/domain";
 
-const { usageRecords } = schema;
+const { organizations, usageRecords } = schema;
 
 export type UsageTotals = Record<UsageMetric, number>;
 
@@ -130,4 +135,89 @@ export async function usageForPlan(
   periodStart: string = periodStartOf(),
 ): Promise<UsageProjection> {
   return projectUsage(planUsageFor(plan), await usageTotals(tx, orgId, periodStart), periodStart);
+}
+
+/**
+ * How long a metered event settles before it is reported. Long enough that the
+ * transaction that wrote it is committed and any same-request retry has played
+ * out, short enough to stay well inside Stripe's meter-event window.
+ */
+const USAGE_SETTLE_MS = 60 * 60 * 1000;
+
+/** How many usage records one reporter run settles. */
+const USAGE_REPORT_BATCH = 500;
+
+/**
+ * A type alias, not an interface, so it satisfies the job dispatcher's
+ * `Record<string, unknown>` handler return type (interfaces get no implicit
+ * index signature).
+ */
+export type UsageReportResult = {
+  reported: number;
+  organizations: number;
+  failures: Array<{ organizationId: string; error: string }>;
+};
+
+/**
+ * Hand every settled, unreported meter event to Stripe and stamp the rows —
+ * the body of the `billing.report_usage` job (services/jobs.ts).
+ *
+ * Runs queue-wide under the service role, so it reports every organization in
+ * one pass, batched per org: a Stripe failure for one tenant is caught and
+ * leaves that tenant's rows unreported for the next run rather than stranding
+ * everybody else's. `reported_at` is the idempotency marker on our side; the
+ * record id is what Stripe deduplicates on.
+ *
+ * `report` is injectable so tests can drive the failure path without a Stripe
+ * key or a network stub; production always uses the real reporter, which
+ * itself degrades to synthetic ids when no key is configured.
+ */
+export async function reportPendingUsage(
+  tx: RlsTransaction,
+  report: (
+    records: UsageMeterRecord[],
+  ) => Promise<Array<{ id: number; eventId: string }>> = reportUsage,
+  now: Date = new Date(),
+): Promise<UsageReportResult> {
+  const cutoff = new Date(now.getTime() - USAGE_SETTLE_MS);
+  const pending = await tx
+    .select({
+      id: usageRecords.id,
+      organizationId: usageRecords.organizationId,
+      metric: usageRecords.metric,
+      quantity: usageRecords.quantity,
+      occurredAt: usageRecords.occurredAt,
+      stripeCustomerId: organizations.stripeCustomerId,
+    })
+    .from(usageRecords)
+    .innerJoin(organizations, eq(organizations.id, usageRecords.organizationId))
+    .where(and(isNull(usageRecords.reportedAt), lt(usageRecords.occurredAt, cutoff)))
+    .orderBy(asc(usageRecords.occurredAt), asc(usageRecords.id))
+    .limit(USAGE_REPORT_BATCH);
+  if (pending.length === 0) return { reported: 0, organizations: 0, failures: [] };
+
+  const byOrg = new Map<string, UsageMeterRecord[]>();
+  for (const row of pending) {
+    const list = byOrg.get(row.organizationId) ?? [];
+    list.push(row);
+    byOrg.set(row.organizationId, list);
+  }
+
+  let reported = 0;
+  const failures: UsageReportResult["failures"] = [];
+  for (const [organizationId, records] of byOrg) {
+    try {
+      const results = await report(records);
+      for (const result of results) {
+        await tx
+          .update(usageRecords)
+          .set({ reportedAt: new Date(), stripeMeterEventId: result.eventId })
+          .where(eq(usageRecords.id, result.id));
+        reported++;
+      }
+    } catch (e) {
+      failures.push({ organizationId, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return { reported, organizations: byOrg.size, failures };
 }

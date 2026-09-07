@@ -77,12 +77,10 @@ export const billingRouter = router({
         .select()
         .from(subscriptions)
         .where(eq(subscriptions.organizationId, ctx.orgId));
-      // usage_records is readable under `billing.manage` (migration 0013), the
-      // same permission that may change the plan it is billed against. Return
-      // null rather than a silently-empty meter for a billing.read-only caller.
-      const usage = ctx.session.permissions.has("billing.manage")
-        ? await usageForPlan(tx, ctx.orgId, org!.plan)
-        : null;
+      // usage_records is readable under `billing.read` (migration 0013) — the
+      // same permission that gates this procedure — so every caller who can see
+      // the plan can see the meter it is billed against.
+      const usage = await usageForPlan(tx, ctx.orgId, org!.plan);
       return { ...org!, subscription: sub ?? null, mode: billingMode(), usage };
     }),
   ),

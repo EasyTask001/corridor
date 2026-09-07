@@ -7,15 +7,14 @@ import { useTRPC } from "@/lib/trpc/client";
 
 type Status = inferRouterOutputs<AppRouter>["billing"]["status"];
 type Plans = inferRouterOutputs<AppRouter>["billing"]["plans"]["plans"];
-type Usage = NonNullable<Status["usage"]>;
+type Usage = Status["usage"];
 
 const usd = (n: number) => `$${n.toFixed(2)}`;
 const count = (n: number) => n.toLocaleString("en-CA");
 
 /**
- * This period's meter against the plan's allowance. Only rendered for callers
- * with `billing.manage` — usage_records is readable under that permission, so
- * the API returns null rather than an empty meter for anyone else.
+ * This period's meter against the plan's allowance. Visible to every caller who
+ * can read billing: `usage_records` is gated on the same `billing.read`.
  */
 function UsageTable({ usage }: { usage: Usage }) {
   const rows = [
@@ -153,7 +152,7 @@ export function BillingPanel({
         )}
       </section>
 
-      {status.usage && <UsageTable usage={status.usage} />}
+      <UsageTable usage={status.usage} />
 
       <section className="grid gap-4 md:grid-cols-3">
         {plans.map((p) => {

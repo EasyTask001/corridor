@@ -5,23 +5,20 @@
  */
 import {
   and,
-  asc,
   eq,
   inArray,
-  isNull,
-  lt,
   schema,
   sql,
   withServiceRole,
   type DatabaseClient,
   type RlsTransaction,
 } from "@corridor/db";
-import { reportUsage, type ManifestPayload, type UsageMeterRecord } from "@corridor/integrations";
+import type { ManifestPayload } from "@corridor/integrations";
 import { customsClientFor, logIntegrationEvent, manifestFor } from "./customs";
 import { applyCustomsDecision, loadFull, loadOrganization, requireMovement } from "./movements";
-import { recordUsage } from "./usage";
+import { recordUsage, reportPendingUsage } from "./usage";
 
-const { backgroundJobs, movements, organizations, usageRecords } = schema;
+const { backgroundJobs, movements } = schema;
 
 export type JobType =
   | "customs.decide"
@@ -29,9 +26,6 @@ export type JobType =
   | "document.extract"
   | "copilot.embed_knowledge"
   | "billing.report_usage";
-
-/** How many usage records one `billing.report_usage` run settles. */
-const USAGE_REPORT_BATCH = 500;
 
 export async function enqueueJob(
   tx: RlsTransaction,
@@ -59,7 +53,12 @@ export async function enqueueJob(
 type Job = typeof backgroundJobs.$inferSelect;
 type Handler = (tx: RlsTransaction, job: Job) => Promise<Record<string, unknown> | void>;
 
-const handlers: Record<JobType, Handler> = {
+/**
+ * The dispatch table. Exported so a test can drive one handler directly rather
+ * than racing every other worker for a claim; `processDueJobs` is the only
+ * production caller.
+ */
+export const jobHandlers: Record<JobType, Handler> = {
   /**
    * Ask the customs gateway for its decision on a transmitted manifest and
    * apply it. Chains the next decision (accepted → released/held → released)
@@ -163,60 +162,11 @@ const handlers: Record<JobType, Handler> = {
   },
 
   /**
-   * Push metered usage to Stripe. Queue-wide (organization_id is null): it
-   * reports every organization's unreported records in one pass, batched per
-   * org so one tenant's Stripe failure cannot strand another's.
-   *
-   * The one-hour settling window keeps a record out of the meter until the
-   * transaction that wrote it is long committed and any same-request retry has
-   * played out; `reported_at` is the idempotency marker on our side and the
-   * record id is the one Stripe sees.
+   * Push metered usage to Stripe. Queue-wide (organization_id is null): the
+   * body lives in services/usage.ts so it can be exercised directly by
+   * jobs.integration.test.ts.
    */
-  "billing.report_usage": async (tx) => {
-    const cutoff = new Date(Date.now() - 60 * 60 * 1000);
-    const pending = await tx
-      .select({
-        id: usageRecords.id,
-        organizationId: usageRecords.organizationId,
-        metric: usageRecords.metric,
-        quantity: usageRecords.quantity,
-        occurredAt: usageRecords.occurredAt,
-        stripeCustomerId: organizations.stripeCustomerId,
-      })
-      .from(usageRecords)
-      .innerJoin(organizations, eq(organizations.id, usageRecords.organizationId))
-      .where(and(isNull(usageRecords.reportedAt), lt(usageRecords.occurredAt, cutoff)))
-      .orderBy(asc(usageRecords.occurredAt), asc(usageRecords.id))
-      .limit(USAGE_REPORT_BATCH);
-    if (pending.length === 0) return { reported: 0, organizations: 0 };
-
-    const byOrg = new Map<string, UsageMeterRecord[]>();
-    for (const row of pending) {
-      const list = byOrg.get(row.organizationId) ?? [];
-      list.push(row);
-      byOrg.set(row.organizationId, list);
-    }
-
-    let reported = 0;
-    const failures: Array<{ organizationId: string; error: string }> = [];
-    for (const [organizationId, records] of byOrg) {
-      try {
-        const results = await reportUsage(records);
-        for (const result of results) {
-          await tx
-            .update(usageRecords)
-            .set({ reportedAt: new Date(), stripeMeterEventId: result.eventId })
-            .where(eq(usageRecords.id, result.id));
-          reported++;
-        }
-      } catch (e) {
-        // One tenant's Stripe outage must not strand the rest of the batch;
-        // its records stay unreported and are picked up on the next run.
-        failures.push({ organizationId, error: e instanceof Error ? e.message : String(e) });
-      }
-    }
-    return { reported, organizations: byOrg.size, failures };
-  },
+  "billing.report_usage": (tx) => reportPendingUsage(tx),
 };
 
 export interface ProcessResult {
@@ -264,7 +214,7 @@ export async function processDueJobs(
   for (const raw of claimed) {
     // execute() returns snake_case columns; normalise the ones we use.
     const job = normalise(raw as unknown as Record<string, unknown>);
-    const handler = handlers[job.jobType as JobType];
+    const handler = jobHandlers[job.jobType as JobType];
     try {
       if (!handler) throw new Error(`no handler for job type ${job.jobType}`);
       const result = await withServiceRole(db, async (tx) => {

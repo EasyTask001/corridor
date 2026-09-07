@@ -40,6 +40,10 @@
     "test:integration": {
       "dependsOn": ["^build"],
       "cache": false
+    },
+    "@corridor/api#test:integration": {
+      "dependsOn": ["^build", "@corridor/db#test:integration"],
+      "cache": false
     }
   }
 }

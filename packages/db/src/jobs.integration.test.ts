@@ -76,7 +76,7 @@ async function rejection(p: Promise<unknown>): Promise<string> {
 }
 
 describe("background_jobs queue", () => {
-  it("claim_jobs hands each due job to exactly one of several concurrent workers", async () => {
+  it("claim_jobs never hands the same job to two workers, and drains the queue", async () => {
     const tag = `test-${Date.now()}`;
     const ids = await withServiceRole(db, (tx) =>
       tx
@@ -91,42 +91,109 @@ describe("background_jobs queue", () => {
         )
         .returning({ id: backgroundJobs.id }),
     );
-    // three workers race for 5 each. The per-org cap is raised out of the way
-    // here — this test is about SKIP LOCKED, not the cap (covered separately).
-    const claims = await Promise.all(
-      ["w1", "w2", "w3"].map((w) =>
-        withServiceRole(db, (tx) =>
-          tx.execute<{ id: number; locked_by: string }>(
-            sql`select id, locked_by from public.claim_jobs(5, ${w}, 1000)`,
+    const mineIds = new Set(ids.map((x) => x.id));
+    // The per-org cap is raised out of the way here — this test is about
+    // SKIP LOCKED, not the cap (covered separately).
+    const claimRound = (workers: string[]) =>
+      Promise.all(
+        workers.map((w) =>
+          withServiceRole(db, (tx) =>
+            tx.execute<{ id: number; locked_by: string }>(
+              sql`select id, locked_by from public.claim_jobs(5, ${w}, 1000)`,
+            ),
           ),
         ),
-      ),
-    );
-    const all = claims.flat().map((r) => Number(r.id));
-    const mine = all.filter((id) => ids.some((x) => x.id === id));
-    expect(new Set(mine).size).toBe(mine.length); // no duplicates
-    expect(mine.length).toBe(12); // 5+5+2, everything claimed exactly once
-    const rows = await withServiceRole(db, (tx) =>
-      tx
-        .select({ status: backgroundJobs.status, attempts: backgroundJobs.attempts })
-        .from(backgroundJobs)
-        .where(
-          inArray(
-            backgroundJobs.id,
-            ids.map((x) => x.id),
+      );
+
+    try {
+      const claimed: number[] = [];
+      // Three workers race. A round may claim fewer than 12: a worker whose
+      // snapshot still shows a row as pending spends part of its budget on a
+      // row another worker committed first, and claim_jobs re-checks the live
+      // row and declines it. That is the safe outcome — the job waits for the
+      // next poll rather than running twice — so the invariants under test are
+      // "never twice" and "eventually all", not "all in one round".
+      for (let round = 0; round < 5; round++) {
+        const rows = (await claimRound(["w1", "w2", "w3"])).flat();
+        claimed.push(...rows.map((r) => Number(r.id)).filter((id) => mineIds.has(id)));
+        if (claimed.length === mineIds.size) break;
+      }
+      // Never twice, across every worker and every round.
+      expect(new Set(claimed).size).toBe(claimed.length);
+      // Eventually all of them, each claimed exactly once.
+      expect(new Set(claimed)).toEqual(mineIds);
+
+      const rows = await withServiceRole(db, (tx) =>
+        tx
+          .select({ status: backgroundJobs.status, attempts: backgroundJobs.attempts })
+          .from(backgroundJobs)
+          .where(inArray(backgroundJobs.id, [...mineIds])),
+      );
+      expect(rows).toHaveLength(12);
+      expect(rows.every((r) => r.status === "running" && r.attempts === 1)).toBe(true);
+    } finally {
+      await withServiceRole(db, (tx) =>
+        tx.delete(backgroundJobs).where(inArray(backgroundJobs.id, [...mineIds])),
+      );
+    }
+  });
+
+  it("under heavy contention no job is ever claimed twice", async () => {
+    // Regression guard for the READ COMMITTED race the final UPDATE's
+    // claimability re-check closes (migration 0013): without it a worker whose
+    // snapshot predates another worker's commit re-claims rows that are
+    // already running, and the same job runs twice.
+    //
+    // The race only exists in the first round against a batch of pending jobs,
+    // so the test races several fresh batches rather than polling one.
+    const [org] = await db
+      .insert(organizations)
+      .values({ name: `Job Contention ${Date.now()}` })
+      .returning({ id: organizations.id });
+    const workers = ["c1", "c2", "c3", "c4", "c5", "c6"];
+    try {
+      for (let batch = 0; batch < 4; batch++) {
+        const ids = await withServiceRole(db, (tx) =>
+          tx
+            .insert(backgroundJobs)
+            .values(
+              Array.from({ length: 40 }, () => ({
+                organizationId: org!.id,
+                jobType: "noop.test",
+                runAt: new Date(Date.now() - 1000),
+              })),
+            )
+            .returning({ id: backgroundJobs.id }),
+        );
+        const mineIds = new Set(ids.map((x) => x.id));
+        const rows = await Promise.all(
+          workers.map((w) =>
+            withServiceRole(db, (tx) =>
+              tx.execute<{ id: number }>(sql`select id from public.claim_jobs(10, ${w}, 1000)`),
+            ),
           ),
-        ),
-    );
-    expect(rows.every((r) => r.status === "running" && r.attempts === 1)).toBe(true);
-    // cleanup
-    await withServiceRole(db, (tx) =>
-      tx.delete(backgroundJobs).where(
-        inArray(
-          backgroundJobs.id,
-          ids.map((x) => x.id),
-        ),
-      ),
-    );
+        );
+        const claimed = rows
+          .flat()
+          .map((r) => Number(r.id))
+          .filter((id) => mineIds.has(id));
+        const duplicates = claimed.filter((id, i) => claimed.indexOf(id) !== i);
+        expect(duplicates, `batch ${batch} handed the same job to two workers`).toEqual([]);
+        // Nothing is ever attempted more than once by a single round either.
+        const attempts = await withServiceRole(db, (tx) =>
+          tx
+            .select({ attempts: backgroundJobs.attempts })
+            .from(backgroundJobs)
+            .where(inArray(backgroundJobs.id, [...mineIds])),
+        );
+        expect(attempts.every((r) => r.attempts <= 1)).toBe(true);
+        await withServiceRole(db, (tx) =>
+          tx.delete(backgroundJobs).where(inArray(backgroundJobs.id, [...mineIds])),
+        );
+      }
+    } finally {
+      await db.delete(organizations).where(eq(organizations.id, org!.id));
+    }
   });
 
   it("future jobs are not claimable yet", async () => {
@@ -352,30 +419,68 @@ describe("background_jobs queue", () => {
     }
   });
 
-  it("stops reclaiming once a stale job has used up max_attempts", async () => {
+  it("retires a stale job that has used up max_attempts instead of leaving it running", async () => {
     const [org] = await db
       .insert(organizations)
       .values({ name: `Job Lease Max ${Date.now()}` })
       .returning({ id: organizations.id });
     try {
-      const [exhausted] = await withServiceRole(db, (tx) =>
+      const [exhausted, alsoExhausted] = await withServiceRole(db, (tx) =>
         tx
           .insert(backgroundJobs)
-          .values({
-            organizationId: org!.id,
-            jobType: "noop.test",
-            status: "running" as const,
-            attempts: 3,
-            maxAttempts: 3,
-            lockedBy: "dead-worker",
-            lockedAt: new Date(Date.now() - 60 * 60_000),
-          })
+          .values([
+            {
+              organizationId: org!.id,
+              jobType: "noop.test",
+              status: "running" as const,
+              attempts: 3,
+              maxAttempts: 3,
+              lockedBy: "dead-worker",
+              lockedAt: new Date(Date.now() - 60 * 60_000),
+            },
+            // Same, but it already recorded why it failed — that message must survive.
+            {
+              organizationId: org!.id,
+              jobType: "noop.test",
+              status: "running" as const,
+              attempts: 2,
+              maxAttempts: 2,
+              lastError: "boom",
+              lockedBy: "dead-worker",
+              lockedAt: new Date(Date.now() - 60 * 60_000),
+            },
+          ])
           .returning({ id: backgroundJobs.id }),
       );
       const claimed = await withServiceRole(db, (tx) =>
         tx.execute<{ id: number }>(sql`select id from public.claim_jobs(10, 'reaper2', 5, 600)`),
       );
-      expect(claimed.map((r) => Number(r.id))).not.toContain(exhausted!.id);
+      const claimedIds = claimed.map((r) => Number(r.id));
+      expect(claimedIds).not.toContain(exhausted!.id);
+      expect(claimedIds).not.toContain(alsoExhausted!.id);
+
+      // Not re-claimed, and not left `running` for ever either: terminally failed,
+      // unlocked (so it stops holding one of the org's cap slots) and finished.
+      const rows = await withServiceRole(db, (tx) =>
+        tx
+          .select()
+          .from(backgroundJobs)
+          .where(inArray(backgroundJobs.id, [exhausted!.id, alsoExhausted!.id])),
+      );
+      const retired = rows.find((r) => r.id === exhausted!.id)!;
+      expect(retired).toMatchObject({
+        status: "failed",
+        attempts: 3,
+        lockedAt: null,
+        lockedBy: null,
+        lastError: "lease expired after max attempts",
+      });
+      expect(retired.finishedAt).not.toBeNull();
+      // An existing last_error is the real diagnosis — do not overwrite it.
+      expect(rows.find((r) => r.id === alsoExhausted!.id)).toMatchObject({
+        status: "failed",
+        lastError: "boom",
+      });
     } finally {
       await db.delete(organizations).where(eq(organizations.id, org!.id));
     }

@@ -11,7 +11,8 @@
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --project unit",
+    "test:integration": "vitest run --project integration"
   },
   "dependencies": {
     "@corridor/ai": "workspace:*",

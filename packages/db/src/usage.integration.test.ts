@@ -1,7 +1,7 @@
 /**
  * Usage metering (migration 0013): record_usage() is the only write path open
  * to a session, it refuses to meter an organization the caller is not in, and
- * usage_records is readable only by a member with `billing.manage`.
+ * usage_records is readable only by a member with `billing.read`.
  *
  *   pnpm db:reset && pnpm db:seed && pnpm --filter @corridor/db test:integration
  */
@@ -28,6 +28,7 @@ interface Actor {
 
 let ownerA: Actor;
 let readOnlyA: Actor;
+let dispatchA: Actor;
 let ownerB: Actor;
 
 async function actorFor(email: string): Promise<Actor> {
@@ -48,9 +49,10 @@ async function actorFor(email: string): Promise<Actor> {
 }
 
 beforeAll(async () => {
-  [ownerA, readOnlyA, ownerB] = await Promise.all([
+  [ownerA, readOnlyA, dispatchA, ownerB] = await Promise.all([
     actorFor("owner@pathfinder.demo"),
     actorFor("readonly@pathfinder.demo"),
+    actorFor("dispatch@pathfinder.demo"),
     actorFor("owner@northbound.demo"),
   ]);
   expect(ownerA.orgId).not.toBe(ownerB.orgId);
@@ -196,13 +198,27 @@ describe("usage_records RLS", () => {
     expect(everything.every((r) => r.organizationId === ownerB.orgId)).toBe(true);
   });
 
-  it("a member without billing.manage sees nothing, even in their own org", async () => {
+  it("a member with billing.read but not billing.manage still sees the meter", async () => {
+    // Read-Only holds every *.read key, Admin holds billing.read without
+    // billing.manage — both must see the usage the billing page shows them.
     const id = await recordAs(ownerA, ownerA.orgId, "ai_suggestions", "permission");
     const seen = await withRls(db, as(readOnlyA), (tx) =>
       tx
         .select()
         .from(usageRecords)
         .where(and(eq(usageRecords.id, id), eq(usageRecords.organizationId, readOnlyA.orgId))),
+    );
+    expect(seen).toHaveLength(1);
+  });
+
+  it("a member without billing.read sees nothing, even in their own org", async () => {
+    // Dispatcher has no billing permission at all.
+    const id = await recordAs(ownerA, ownerA.orgId, "ai_suggestions", "no-billing-read");
+    const seen = await withRls(db, as(dispatchA), (tx) =>
+      tx
+        .select()
+        .from(usageRecords)
+        .where(and(eq(usageRecords.id, id), eq(usageRecords.organizationId, dispatchA.orgId))),
     );
     expect(seen).toHaveLength(0);
   });
