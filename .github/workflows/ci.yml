@@ -56,8 +56,83 @@ jobs:
             echo "DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55322/postgres"
             echo "DIRECT_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55322/postgres"
           } >> "$GITHUB_ENV"
+      # The migrations are applied by `supabase start`, so this is the first
+      # point the linter has a schema to look at. `--fail-on warning` means a
+      # new SECURITY DEFINER without a pinned search_path, or an unchecked
+      # plpgsql type error, breaks the build rather than the review.
+      - run: pnpm db:lint
       - run: pnpm db:seed
       - run: pnpm turbo run test:integration
+      - if: always()
+        run: supabase stop --no-backup
+
+  e2e:
+    name: Playwright e2e (local Supabase)
+    runs-on: ubuntu-latest
+    needs: [integration]
+    env:
+      # `next start` sets NODE_ENV=production, which drops the in-memory rate
+      # limiter's ×10 dev multiplier back to the trial ceilings (5/min on the
+      # `ai` tier). The document specs would trip that within one test file.
+      CORRIDOR_RATELIMIT_MULTIPLIER: 100
+      # No AI key in CI: keep the deterministic extractor.
+      CORRIDOR_EXTRACTOR: mock
+      CORRIDOR_EMBEDDER: mock
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      PLAYWRIGHT_BASE_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Start local Supabase (applies migrations + seed.sql)
+        run: supabase start -x studio,imgproxy,inbucket,edge-runtime,logflare,vector
+      - name: Export local credentials
+        run: |
+          eval "$(supabase status -o env)"
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:55321"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=${ANON_KEY}"
+            echo "SUPABASE_SERVICE_ROLE_KEY=${SERVICE_ROLE_KEY}"
+            echo "DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55322/postgres"
+            echo "DIRECT_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55322/postgres"
+          } >> "$GITHUB_ENV"
+      - run: pnpm db:seed
+      # Built against the Supabase started above, not the placeholder the
+      # `build` job uses — the specs sign in as the seeded demo users.
+      - run: pnpm turbo run build --filter=web
+      - run: pnpm --filter web exec playwright install --with-deps chromium
+      # Backgrounded so it survives into the Playwright step. `PLAYWRIGHT_BASE_URL`
+      # is set, so playwright.config.ts starts no server of its own.
+      - name: Start the built app
+        run: |
+          nohup pnpm --filter web start > next-start.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if curl -sf http://localhost:3000/api/health > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          echo "web server never became healthy:"
+          cat next-start.log
+          exit 1
+      - run: pnpm --filter web exec playwright test
+      - if: failure()
+        run: cat next-start.log || true
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+            next-start.log
+          retention-days: 7
+          if-no-files-found: ignore
       - if: always()
         run: supabase stop --no-backup
 
@@ -78,3 +153,120 @@ jobs:
           NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:55321
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
           DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:55322/postgres
+
+  # ---------------------------------------------------------------------------
+  # Jobs below are optional: they run only where the corresponding secret is
+  # configured. `if: ${{ secrets.X != '' }}` is NOT valid at job level — the
+  # `secrets` context is unavailable in a job-level `if` — so this job reads the
+  # secrets into `env` inside a step (where the context *is* available) and
+  # exports booleans the dependent jobs can condition on.
+  # ---------------------------------------------------------------------------
+  guard:
+    name: Optional-secret probe
+    runs-on: ubuntu-latest
+    outputs:
+      has_vercel: ${{ steps.probe.outputs.has_vercel }}
+      has_ai_key: ${{ steps.probe.outputs.has_ai_key }}
+    steps:
+      - id: probe
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+        run: |
+          if [ -n "$VERCEL_TOKEN" ]; then has_vercel=true; else has_vercel=false; fi
+          if [ -n "$OPENAI_API_KEY$AI_GATEWAY_API_KEY" ]; then
+            has_ai_key=true
+          else
+            has_ai_key=false
+          fi
+          {
+            echo "has_vercel=${has_vercel}"
+            echo "has_ai_key=${has_ai_key}"
+          } >> "$GITHUB_OUTPUT"
+
+  preview:
+    name: Vercel preview deploy
+    runs-on: ubuntu-latest
+    needs: [guard, check, build]
+    if: needs.guard.outputs.has_vercel == 'true' && github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --global vercel@latest
+      # `vercel build` locally, then `deploy --prebuilt`: the build runs with
+      # this workflow's Node and the PR's lockfile, and Vercel only receives the
+      # output, so a preview cannot diverge from what CI just checked.
+      - run: vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
+      - run: vercel build --token="$VERCEL_TOKEN"
+      - id: deploy
+        run: |
+          url="$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")"
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+      - uses: actions/github-script@v7
+        env:
+          PREVIEW_URL: ${{ steps.deploy.outputs.url }}
+        with:
+          script: |
+            const url = process.env.PREVIEW_URL;
+            const marker = '<!-- corridor-preview -->';
+            const body = `${marker}\n**Preview:** ${url}\n\nBuilt from \`${context.sha.slice(0, 7)}\`.`;
+            const { data: comments } = await github.rest.issues.listComments({
+              ...context.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find((c) => c.body?.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+  model-eval:
+    name: Extraction eval (real model)
+    runs-on: ubuntu-latest
+    needs: [guard, check]
+    if: needs.guard.outputs.has_ai_key == 'true'
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            eval:
+              - 'packages/ai/src/document-intelligence/**'
+              - 'packages/ai/src/eval/**'
+              - 'packages/domain/src/document.ts'
+      - if: steps.changes.outputs.eval == 'true'
+        uses: pnpm/action-setup@v4
+      - if: steps.changes.outputs.eval == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - if: steps.changes.outputs.eval == 'true'
+        run: pnpm install --frozen-lockfile
+      # The eval runs against the mock extractor by default (that is what
+      # `pnpm test` covers); CORRIDOR_EVAL_EXTRACTOR=model is what makes it
+      # spend tokens, which is why it is gated on both a key and a path change.
+      - if: steps.changes.outputs.eval == 'true'
+        run: CORRIDOR_EVAL_EXTRACTOR=model pnpm --filter @corridor/ai exec vitest run src/eval
+        env:
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

@@ -6,7 +6,10 @@ export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? "github" : "list",
+  // On CI the annotations reporter alone leaves nothing to upload when a run
+  // fails, so pair it with an HTML report — that plus the retained traces is
+  // what the `e2e` job attaches as an artifact.
+  reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
   use: {
     baseURL,
     trace: "retain-on-failure",

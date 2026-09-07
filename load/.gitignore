@@ -1,0 +1,2 @@
+# Produced by scripts/login.mjs — real access tokens, never commit.
+.sessions.json
