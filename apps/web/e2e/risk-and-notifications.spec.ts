@@ -41,24 +41,31 @@ test.describe("risk detection", () => {
     const movementId = url.split("/movements/")[1]!;
 
     await page.getByLabel("Trip number").fill("RISK-TRIP");
-    await page
-      .getByLabel("Port of entry")
-      .selectOption({ label: "3801 · Detroit — Ambassador Bridge, MI" });
+    await page.getByLabel("Port of entry").fill("3801");
+    await page.getByRole("button", { name: /^3801 — DETROIT/ }).click();
     await page.getByLabel("Estimated crossing").fill(localDateTime(2));
     await page.getByRole("button", { name: "Save trip" }).click();
 
-    await page.getByRole("button", { name: /^Shipment/ }).click();
-    await page.getByRole("button", { name: "Add shipment line" }).click();
-    const form = page.getByRole("form", { name: "New shipment line" });
+    const reference = `PAPS${Date.now().toString(36).toUpperCase()}`;
+    const controlNumber = `PFTR${reference}`;
+    await page.getByRole("button", { name: /^Shipments/ }).click();
+    await page.getByRole("button", { name: "Add shipment", exact: true }).click();
+    const shipment = page.getByRole("form", { name: "New shipment" });
+    await shipment.getByLabel("Control reference").fill(reference);
+    await shipment.getByLabel("Shipper").selectOption({ label: "Maple Ridge Steel Ltd" });
+    await shipment.getByLabel("Consignee").selectOption({ label: "Great Lakes Fabrication Inc" });
+    await shipment.getByRole("button", { name: "Save shipment" }).click();
+    await page.getByRole("button", { name: controlNumber }).click();
+    await page.getByRole("button", { name: "+ Add commodity line" }).click();
+    const form = page.getByRole("form", { name: "New commodity line" });
     await form.getByLabel("Commodity description").fill("Hot-rolled steel coils");
-    await form.getByLabel("Shipper").selectOption({ label: "Maple Ridge Steel Ltd" });
-    await form.getByLabel("Consignee").selectOption({ label: "Great Lakes Fabrication Inc" });
     await form.getByLabel("HS code").fill("7208.10");
     // Within the 100,000kg schema max, but far above the seeded lane average (~17-22k).
-    await form.getByLabel("Weight (kg)").fill("99000");
-    await form.getByLabel("Pieces").fill("12");
+    await form.getByLabel("Weight", { exact: true }).fill("99000");
+    await form.getByLabel("Quantity", { exact: true }).fill("12");
+    await form.getByLabel("Quantity unit").selectOption("Coil");
     await form.getByRole("button", { name: "Save line" }).click();
-    await expect(page.getByRole("cell", { name: "Hot-rolled steel coils" })).toBeVisible();
+    await expect(page.getByText("Hot-rolled steel coils")).toBeVisible();
 
     // Risk findings land as compliance alerts (a separate concern from the
     // pre-transmit validation checklist on the Review step), linked to this movement.
@@ -70,10 +77,11 @@ test.describe("risk detection", () => {
 
     // Correcting the value back in range resolves the alert automatically.
     await page.goto(url);
-    await page.getByRole("button", { name: /^Shipment/ }).click();
+    await page.getByRole("button", { name: /^Shipments/ }).click();
+    await page.getByRole("button", { name: controlNumber }).click();
     await page.getByRole("button", { name: "Edit" }).click();
-    const editForm = page.getByRole("form", { name: "Edit shipment line" });
-    await editForm.getByLabel("Weight (kg)").fill("21000");
+    const editForm = page.getByRole("form", { name: "Edit commodity line" });
+    await editForm.getByLabel("Weight", { exact: true }).fill("21000");
     await editForm.getByRole("button", { name: "Save line" }).click();
 
     await page.goto("/alerts");

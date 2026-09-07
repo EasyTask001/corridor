@@ -29,6 +29,9 @@ const localDateTime = (days: number) => {
   return d.toISOString().slice(0, 16);
 };
 
+/** A control reference no other run has used, so the unique control number holds. */
+const controlReference = () => `PAPS${Date.now().toString(36).toUpperCase()}`;
+
 /** Create a new ACE movement and fill every step so it passes validation. Returns its URL. */
 async function buildReadyMovement(page: Page) {
   await page.goto("/movements");
@@ -36,10 +39,11 @@ async function buildReadyMovement(page: Page) {
   await expect(page).toHaveURL(/\/movements\/[0-9a-f-]{36}/);
   await page.getByLabel("Trip number").fill("E2E-TRIP");
   await page.getByLabel("Port of entry").fill("3801");
-  await page.getByRole("button", { name: /^3801 — Detroit/ }).click();
+  // The port catalogue is imported from CBP's CSV, so the name is theirs.
+  await page.getByRole("button", { name: /^3801 — DETROIT/ }).click();
   await page.getByLabel("Estimated crossing").fill(localDateTime(2));
   await page.getByRole("button", { name: "Save trip" }).click();
-  await expect(page.getByText(/Detroit — Ambassador Bridge · ETA/)).toBeVisible();
+  await expect(page.getByText(/DETROIT · ETA/)).toBeVisible();
 
   await page.getByRole("button", { name: /^Truck/ }).click();
   await page.getByLabel("Truck", { exact: true }).selectOption({ label: "T-101 · AB12345" });
@@ -48,20 +52,7 @@ async function buildReadyMovement(page: Page) {
   await page.getByRole("button", { name: /^Trailer/ }).click();
   await page.getByLabel("Trailer", { exact: true }).selectOption({ label: "TR-501 · dry van" });
 
-  await page.getByRole("button", { name: /^Shipment/ }).click();
-  await page.getByRole("button", { name: "Add shipment line" }).click();
-  const form = page.getByRole("form", { name: "New shipment line" });
-  await form.getByLabel("Commodity description").fill("Hot-rolled steel coils");
-  await form.getByLabel("Shipper").selectOption({ label: "Maple Ridge Steel Ltd" });
-  await form.getByLabel("Consignee").selectOption({ label: "Great Lakes Fabrication Inc" });
-  await form.getByLabel("HS code").fill("7208.10");
-  await form.getByLabel("Weight (kg)").fill("21500");
-  await form.getByLabel("Pieces").fill("12");
-  await form.getByLabel("Value", { exact: true }).fill("48000");
-  await form.getByLabel("Currency").selectOption("USD");
-  await form.getByLabel("Country of origin").fill("CA");
-  await form.getByRole("button", { name: "Save line" }).click();
-  await expect(page.getByRole("cell", { name: "Hot-rolled steel coils" })).toBeVisible();
+  await addShipmentWithLine(page, controlReference());
 
   await page.getByRole("button", { name: /^Seals/ }).click();
   await page.getByLabel("Seal number").fill("SL-E2E-1");
@@ -71,6 +62,35 @@ async function buildReadyMovement(page: Page) {
   await page.getByRole("button", { name: /^Review/ }).click();
   await expect(page.getByText("All checks pass")).toBeVisible();
   return page.url();
+}
+
+/** Add a shipment to the open movement and give it one complete commodity line. */
+async function addShipmentWithLine(page: Page, reference: string) {
+  await page.getByRole("button", { name: /^Shipments/ }).click();
+  await page.getByRole("button", { name: "Add shipment", exact: true }).click();
+  const shipment = page.getByRole("form", { name: "New shipment" });
+  await shipment.getByLabel("Control reference").fill(reference);
+  await shipment.getByLabel("Shipper").selectOption({ label: "Maple Ridge Steel Ltd" });
+  await shipment.getByLabel("Consignee").selectOption({ label: "Great Lakes Fabrication Inc" });
+  await shipment.getByRole("button", { name: "Save shipment" }).click();
+
+  const controlNumber = `PFTR${reference}`;
+  const row = page.getByRole("button", { name: controlNumber });
+  await expect(row).toBeVisible();
+  await row.click();
+  await page.getByRole("button", { name: "+ Add commodity line" }).click();
+  const line = page.getByRole("form", { name: "New commodity line" });
+  await line.getByLabel("Commodity description").fill("Hot-rolled steel coils");
+  await line.getByLabel("HS code").fill("7208.10");
+  await line.getByLabel("Weight", { exact: true }).fill("21500");
+  await line.getByLabel("Quantity", { exact: true }).fill("12");
+  await line.getByLabel("Quantity unit").selectOption("Coil");
+  await line.getByLabel("Value", { exact: true }).fill("48000");
+  await line.getByLabel("Currency").selectOption("USD");
+  await line.getByLabel("Country of origin").fill("CA");
+  await line.getByRole("button", { name: "Save line" }).click();
+  await expect(page.getByText("Hot-rolled steel coils")).toBeVisible();
+  return controlNumber;
 }
 
 const heading = (page: Page) => page.getByRole("heading", { name: /ACE-\d{2}-\d{5}/ });
@@ -112,8 +132,12 @@ test.describe("movement builder", () => {
     await expect(page.getByText("AI suggested · not applied")).toHaveCount(0);
     await expect(page.getByText(/No port selected/)).toHaveCount(0);
 
-    await page.getByRole("button", { name: /^Shipment/ }).click();
-    await expect(page.getByText("No shipment lines yet.")).toHaveCount(0);
+    // The lane and the equipment are applied; shipments are not — a control
+    // number cannot be cloned from an earlier trip.
+    await page.getByRole("button", { name: /^Truck/ }).click();
+    await expect(page.getByLabel("Truck", { exact: true })).not.toHaveValue("");
+    await page.getByRole("button", { name: /^Shipments/ }).click();
+    await expect(page.getByText("No shipments on this movement yet.")).toBeVisible();
   });
 
   test("walk a movement through every transition with attributed timeline rows", async ({

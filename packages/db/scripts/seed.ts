@@ -278,6 +278,49 @@ export async function seed() {
       const glf = await ids("partners", "name", "Great Lakes Fabrication Inc");
       const erie = await ids("partners", "name", "Erie Produce Co");
 
+      /** One shipment plus its commodity lines; `movementId` null = unassigned. */
+      const seedShipment = async (spec: {
+        regime: "ACE" | "ACI";
+        carrierCode: string;
+        /** Defaults to the regime's plain filing (ACE regular_bill / ACI regular). */
+        type?: string;
+        controlReference: string;
+        shipper: string;
+        consignee: string;
+        movementId: string | null;
+        isPars?: boolean;
+        commodities: Array<{
+          desc: string;
+          hs: string;
+          kg: number;
+          qty: number;
+          unit: string;
+          value: number;
+          ccy: "USD" | "CAD";
+          origin: string;
+        }>;
+      }) => {
+        const [shipment] = await sql<{ id: string }[]>`
+          insert into public.shipments (organization_id, regime, movement_id, carrier_code,
+            shipment_type, cargo_type, control_reference, is_pars, shipper_id, consignee_id)
+          values (${orgId}, ${spec.regime}, ${spec.movementId}, ${spec.carrierCode},
+            ${spec.regime === "ACE" ? (spec.type ?? "regular_bill") : null},
+            ${spec.regime === "ACI" ? (spec.type ?? "regular") : null},
+            ${spec.controlReference}, ${spec.isPars ?? false}, ${spec.shipper}, ${spec.consignee})
+          returning id`;
+        let line = 0;
+        for (const c of spec.commodities) {
+          line++;
+          await sql`
+            insert into public.commodities (shipment_id, organization_id, line_number, commodity_description,
+              hs_code, weight_kg, weight_unit, quantity, quantity_unit, packaging_type, value_amount,
+              value_currency, country_of_origin)
+            values (${shipment!.id}, ${orgId}, ${line}, ${c.desc}, ${c.hs}, ${c.kg}, 'KG', ${c.qty},
+              ${c.unit}, 'pallet', ${c.value}, ${c.ccy}, ${c.origin})`;
+        }
+        return shipment!.id;
+      };
+
       const CUSTOMS_DRIVEN = new Set(["accepted", "rejected", "released", "held"]);
       let seq = 0;
       const seedMovement = async (spec: {
@@ -287,16 +330,20 @@ export async function seed() {
         trailer: string | null;
         portCode: string;
         etaDays: number;
-        cargo: Array<{
-          desc: string;
-          hs: string;
-          kg: number;
-          pcs: number;
+        shipments: Array<{
+          controlReference: string;
           shipper: string;
           consignee: string;
-          value: number;
-          ccy: "USD" | "CAD";
-          origin: string;
+          commodities: Array<{
+            desc: string;
+            hs: string;
+            kg: number;
+            qty: number;
+            unit: string;
+            value: number;
+            ccy: "USD" | "CAD";
+            origin: string;
+          }>;
         }>;
         seals: string[];
         path: Array<
@@ -322,14 +369,13 @@ export async function seed() {
         await sql`
           insert into public.movement_events (movement_id, organization_id, event_type, from_status, to_status, actor_type, actor_id, payload)
           values (${id}, ${orgId}, 'status_change', null, 'draft', 'user', ${dispatcherId}, ${sql.json({ movementNumber: number })})`;
-        let line = 0;
-        for (const c of spec.cargo) {
-          line++;
-          await sql`
-            insert into public.cargo (movement_id, organization_id, line_number, shipper_id, consignee_id, commodity_description,
-              hs_code, weight_kg, piece_count, packaging_type, value_amount, value_currency, country_of_origin)
-            values (${id}, ${orgId}, ${line}, ${c.shipper}, ${c.consignee}, ${c.desc}, ${c.hs}, ${c.kg}, ${c.pcs}, 'pallet',
-              ${c.value}, ${c.ccy}, ${c.origin})`;
+        for (const spec_shipment of spec.shipments) {
+          await seedShipment({
+            ...spec_shipment,
+            regime: spec.regime,
+            carrierCode,
+            movementId: id,
+          });
         }
         for (const s of spec.seals) {
           await sql`
@@ -358,39 +404,59 @@ export async function seed() {
       const BUF = "0901"; // Buffalo — Peace Bridge, NY
       const WIN = "0453"; // Windsor — Ambassador Bridge, ON
       const FE = "0410"; // Fort Erie — Peace Bridge, ON
-      const steel = {
+      const steelLine = {
         desc: "Hot-rolled steel coils",
         hs: "7208.10",
         kg: 21500,
-        pcs: 12,
-        shipper: maple,
-        consignee: glf,
+        qty: 12,
+        unit: "Coil",
         value: 48000,
         ccy: "USD" as const,
         origin: "CA",
       };
-      const produce = {
+      const produceLine = {
         desc: "Fresh apples, bulk bins",
         hs: "0808.10",
         kg: 18200,
-        pcs: 40,
-        shipper: erie,
-        consignee: erie,
+        qty: 40,
+        unit: "Crate",
         value: 22000,
         ccy: "USD" as const,
         origin: "US",
       };
-      const fab = {
+      const fabLine = {
         desc: "Fabricated steel brackets",
         hs: "7308.90",
         kg: 9800,
-        pcs: 22,
-        shipper: glf,
-        consignee: maple,
+        qty: 22,
+        unit: "Pallet",
         value: 31000,
         ccy: "CAD" as const,
         origin: "US",
       };
+
+      // ACE bills are PAPS-numbered, ACI ones PARS-numbered.
+      let bill = 0;
+      const nextRef = (regime: "ACE" | "ACI") =>
+        `${regime === "ACE" ? "PAPS" : "PARS"}${String(++bill).padStart(5, "0")}`;
+      const steel = (regime: "ACE" | "ACI") => ({
+        controlReference: nextRef(regime),
+        shipper: maple,
+        consignee: glf,
+        commodities: [steelLine],
+      });
+      const produce = (regime: "ACE" | "ACI") => ({
+        controlReference: nextRef(regime),
+        shipper: erie,
+        consignee: erie,
+        commodities: [produceLine],
+      });
+      const fab = (regime: "ACE" | "ACI") => ({
+        controlReference: nextRef(regime),
+        shipper: glf,
+        consignee: maple,
+        commodities: [fabLine],
+      });
 
       await seedMovement({
         regime: "ACE",
@@ -399,7 +465,7 @@ export async function seed() {
         trailer: tr501,
         portCode: DET,
         etaDays: 2,
-        cargo: [steel],
+        shipments: [steel("ACE")],
         seals: ["SL-100231"],
         path: [],
       });
@@ -410,15 +476,21 @@ export async function seed() {
         trailer: tr503,
         portCode: BUF,
         etaDays: 1,
-        cargo: [
-          steel,
+        shipments: [
           {
-            ...steel,
-            desc: "Galvanized sheet, coils",
-            hs: "7210.49",
-            kg: 4000,
-            pcs: 3,
-            value: 9000,
+            ...steel("ACE"),
+            commodities: [
+              steelLine,
+              {
+                ...steelLine,
+                desc: "Galvanized sheet, coils",
+                hs: "7210.49",
+                kg: 4000,
+                qty: 3,
+                unit: "Coil",
+                value: 9000,
+              },
+            ],
           },
         ],
         seals: ["SL-100232"],
@@ -431,7 +503,7 @@ export async function seed() {
         trailer: tr501,
         portCode: DET,
         etaDays: 0,
-        cargo: [steel],
+        shipments: [steel("ACE")],
         seals: ["SL-100233"],
         path: ["sent", "accepted"],
         ref: "ACE-A7K2Q9",
@@ -443,7 +515,7 @@ export async function seed() {
         trailer: tr503,
         portCode: WIN,
         etaDays: 0,
-        cargo: [fab],
+        shipments: [fab("ACI")],
         seals: ["SL-200101"],
         path: ["sent", "accepted", "released"],
         ref: "ACI-88213Q",
@@ -455,7 +527,7 @@ export async function seed() {
         trailer: tr501,
         portCode: FE,
         etaDays: 0,
-        cargo: [produce],
+        shipments: [produce("ACI")],
         seals: ["SL-200102"],
         path: ["sent", "accepted", "held"],
         ref: "ACI-88214H",
@@ -467,7 +539,7 @@ export async function seed() {
         trailer: tr503,
         portCode: BUF,
         etaDays: 3,
-        cargo: [produce],
+        shipments: [produce("ACE")],
         seals: [],
         path: ["sent", "rejected"],
         ref: "ACE-R0011X",
@@ -479,7 +551,7 @@ export async function seed() {
         trailer: tr501,
         portCode: DET,
         etaDays: -3,
-        cargo: [steel],
+        shipments: [steel("ACE")],
         seals: ["SL-100229"],
         path: ["sent", "accepted", "released", "arrived"],
         ref: "ACE-D4M1Z2",
@@ -491,9 +563,42 @@ export async function seed() {
         trailer: null,
         portCode: WIN,
         etaDays: -1,
-        cargo: [fab],
+        shipments: [fab("ACI")],
         seals: [],
         path: ["cancelled"],
+      });
+
+      // Unassigned shipments: keyed in from a broker's email, waiting for a trip.
+      await seedShipment({
+        regime: "ACE",
+        carrierCode: "PFTR",
+        type: "regular_bill",
+        controlReference: "PAPS90001",
+        shipper: maple,
+        consignee: glf,
+        movementId: null,
+        commodities: [steelLine],
+      });
+      await seedShipment({
+        regime: "ACE",
+        carrierCode: "PFTR",
+        type: "section_321",
+        controlReference: "PAPS90002",
+        shipper: erie,
+        consignee: glf,
+        movementId: null,
+        commodities: [{ ...produceLine, kg: 900, qty: 4, value: 780 }],
+      });
+      await seedShipment({
+        regime: "ACI",
+        carrierCode: "7ELU",
+        type: "regular",
+        controlReference: "PARS90003",
+        shipper: glf,
+        consignee: maple,
+        movementId: null,
+        isPars: true,
+        commodities: [fabLine],
       });
 
       await sql`
