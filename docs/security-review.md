@@ -184,8 +184,11 @@ rotation, and rejects anything older than a 5-minute replay window
 stated grounds that a dependency that can verify signatures can forge them.
 
 Cron endpoints authenticate with `CRON_SECRET` compared under `timingSafeEqual`
-after a length check (`apps/web/src/app/api/jobs/expiry-scan/route.ts`,
-`apps/web/src/app/api/jobs/process/route.ts`) — see Finding 1.
+after a length check. Both routes (`apps/web/src/app/api/jobs/expiry-scan/route.ts`,
+`apps/web/src/app/api/jobs/process/route.ts`) go through the same
+`apps/web/src/lib/cron-auth.ts`, which fails closed in both directions: 503 when
+no secret is configured, 401 when it does not match, and no `NODE_ENV` input —
+see Finding 1.
 
 ## 8. Service-role usage is enumerated and bounded
 
@@ -259,14 +262,17 @@ Nothing here is a live exploit. They are ordered by how much they would matter
 if the surrounding assumption ever stopped holding.
 
 **F1 — `/api/jobs/process` is unauthenticated when `CRON_SECRET` is unset
-(low).** `apps/web/src/app/api/jobs/process/route.ts:22-25` authorises when
-`!secret && process.env.NODE_ENV !== "production"`. That is a deliberate local-dev
-affordance, and Vercel builds every environment (including previews) with
-`NODE_ENV=production`, so it does not open in practice. It is worth noting that
-the sibling route `expiry-scan` fails **closed** on the same condition — the
-inconsistency is the thing to watch, because someone reading one route will not
-expect the other to differ. Suggested: make `process` fail closed too and set
-`CRON_SECRET` in `.env.local`, or at minimum comment the asymmetry.
+(low). RESOLVED in 5a89236.** `apps/web/src/app/api/jobs/process/route.ts:22-25`
+authorised when `!secret && process.env.NODE_ENV !== "production"`, a deliberate
+local-dev affordance that the sibling `expiry-scan` route did not share — the
+inconsistency being the thing to watch, because someone reading one route would
+not expect the other to differ. Both routes now call `cronAuthFailure()` from
+`apps/web/src/lib/cron-auth.ts`: an unset secret is a deployment fault (503), a
+wrong one is 401 under `timingSafeEqual`, and the build environment is no longer
+an authorisation input. Covered by `apps/web/src/lib/cron-auth.test.ts`, which
+also asserts neither route reintroduces a `NODE_ENV` branch. The request-tail
+worker (`apps/web/src/lib/jobs.ts`) calls `processDueJobs` directly rather than
+the route, so local job processing is unaffected.
 
 **F2 — the rate limiter fails open (low, accepted).** `rateLimitFor().check()`
 catches a Redis error and allows the request, on the stated grounds that a cache
