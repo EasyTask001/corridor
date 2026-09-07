@@ -28,7 +28,7 @@ const documentRow = (over: Row = {}): Row => ({
   id: DOCUMENT_ID,
   organizationId: TEST_ORG_ID,
   movementId: null,
-  documentType: "bill_of_lading",
+  documentType: "bol",
   storagePath: `${TEST_ORG_ID}/${DOCUMENT_ID}/bol-steel-coils.pdf`,
   originalFilename: "bol-steel-coils.pdf",
   mimeType: "application/pdf",
