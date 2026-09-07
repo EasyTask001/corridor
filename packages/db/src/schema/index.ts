@@ -3,8 +3,11 @@
  * of truth (it also carries RLS policies, triggers and functions Drizzle cannot
  * express); these files exist so application queries are typed.
  *
- * Verified column-for-column and index-for-index against migrations 0001–0011.
- * When you add a migration, mirror it here in the same change.
+ * Verified column-for-column and index-for-index (key columns, order and sort
+ * direction) against migrations 0001–0011. When you add a migration, mirror it
+ * here in the same change and re-check with:
+ *
+ *   pnpm db:reset && pnpm --filter @corridor/db verify:mirror
  */
 export * from "./core";
 export * from "./registry";

@@ -49,7 +49,7 @@ export const drivers = pgTable(
   },
   (t) => [
     index("drivers_organization_id_idx").on(t.organizationId),
-    index("drivers_org_created_idx").on(t.organizationId, t.createdAt),
+    index("drivers_org_created_idx").on(t.organizationId, t.createdAt.desc()),
     index("drivers_org_status_idx").on(t.organizationId, t.status),
     uniqueIndex("drivers_org_license_unique")
       .on(t.organizationId, t.licenseJurisdiction, t.licenseNumber)
@@ -83,7 +83,7 @@ export const trucks = pgTable(
   },
   (t) => [
     index("trucks_organization_id_idx").on(t.organizationId),
-    index("trucks_org_created_idx").on(t.organizationId, t.createdAt),
+    index("trucks_org_created_idx").on(t.organizationId, t.createdAt.desc()),
     uniqueIndex("trucks_org_unit_unique")
       .on(t.organizationId, t.unitNumber)
       .where(sql`${t.status} <> 'archived'`),
@@ -113,7 +113,7 @@ export const trailers = pgTable(
   },
   (t) => [
     index("trailers_organization_id_idx").on(t.organizationId),
-    index("trailers_org_created_idx").on(t.organizationId, t.createdAt),
+    index("trailers_org_created_idx").on(t.organizationId, t.createdAt.desc()),
     uniqueIndex("trailers_org_unit_unique")
       .on(t.organizationId, t.unitNumber)
       .where(sql`${t.status} <> 'archived'`),
@@ -144,7 +144,7 @@ export const partners = pgTable(
   },
   (t) => [
     index("partners_organization_id_idx").on(t.organizationId),
-    index("partners_org_created_idx").on(t.organizationId, t.createdAt),
+    index("partners_org_created_idx").on(t.organizationId, t.createdAt.desc()),
     index("partners_org_type_idx").on(t.organizationId, t.type),
     index("partners_name_search_idx").using("gin", sql`to_tsvector('simple', ${t.name})`),
   ],

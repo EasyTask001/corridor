@@ -15,7 +15,8 @@
     "test": "vitest run --project unit --passWithNoTests",
     "test:integration": "vitest run --project integration",
     "seed": "tsx scripts/seed.ts",
-    "seed:generate": "tsx scripts/generate-seed-sql.ts"
+    "seed:generate": "tsx scripts/generate-seed-sql.ts",
+    "verify:mirror": "tsx scripts/verify-schema-mirror.ts"
   },
   "dependencies": {
     "@corridor/ai": "workspace:*",
