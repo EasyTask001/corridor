@@ -27,6 +27,9 @@ if (!SERVICE_ROLE_KEY) {
   process.exit(1);
 }
 
+/** What `postgres`'s `sql.json()` accepts. */
+type Json = Parameters<ReturnType<typeof postgres>["json"]>[0];
+
 export const DEMO_ORG = {
   name: "Pathfinder Trans Inc",
   legalName: "PATHFINDER TRANS INC",
@@ -485,6 +488,156 @@ export async function seed() {
       `seeded org ${DEMO_ORG.name} (${orgId}) with ${DEMO_USERS.length} users + registries + movements`,
     );
     console.log(`seeded org ${OTHER_ORG.name} (${otherOrgId}) with 1 user`);
+
+    // 4b. document intelligence: one reviewed-ready extraction and one failure,
+    //     so /documents demos both halves without an upload + model round-trip.
+    //     Idempotent on original_filename (storage_path is unique anyway).
+    const [uploader] = await sql<{ id: string }[]>`
+      select id from auth.users where email = 'dispatch@pathfinder.demo'`;
+    const [draft] = await sql<{ id: string }[]>`
+      select id from public.movements
+      where organization_id = ${orgId} and status = 'draft'
+      order by movement_number limit 1`;
+    const bolExtraction = JSON.parse(
+      readFileSync(
+        resolve(here, "../../ai/src/eval/fixtures/bol-steel-coils.expected.json"),
+        "utf8",
+      ),
+    ) as Json;
+
+    const seedDocument = async (doc: {
+      filename: string;
+      documentType: "bol" | "invoice";
+      status: "extracted" | "failed";
+      movementId: string | null;
+      extractedJson?: Json;
+      confidence?: number;
+      error?: string;
+    }) => {
+      const [existing] = await sql<{ id: string }[]>`
+        select id from public.source_documents
+        where organization_id = ${orgId} and original_filename = ${doc.filename} limit 1`;
+      if (existing) return existing.id;
+      const [row] = await sql<{ id: string }[]>`
+        insert into public.source_documents (
+          organization_id, movement_id, document_type, detected_type, storage_path,
+          original_filename, mime_type, size_bytes, upload_status, extracted_json,
+          extraction_model, extraction_confidence, extraction_error,
+          extraction_started_at, extraction_completed_at, uploaded_by)
+        values (
+          ${orgId}, ${doc.movementId}, ${doc.documentType},
+          ${doc.status === "extracted" ? doc.documentType : null},
+          ${`${orgId}/seed-${doc.filename}`}, ${doc.filename}, 'application/pdf', 248_000,
+          ${doc.status}, ${doc.extractedJson ? sql.json(doc.extractedJson) : null},
+          'mock', ${doc.confidence ?? null}, ${doc.error ?? null},
+          now() - interval '4 minutes', now() - interval '3 minutes', ${uploader?.id ?? null})
+        returning id`;
+      return row!.id;
+    };
+
+    await seedDocument({
+      filename: "bol-steel-coils.pdf",
+      documentType: "bol",
+      status: "extracted",
+      movementId: draft?.id ?? null,
+      extractedJson: bolExtraction,
+      confidence: 0.82,
+    });
+    await seedDocument({
+      filename: "invoice-erie-produce.pdf",
+      documentType: "invoice",
+      status: "failed",
+      movementId: null,
+      error: "extraction produced no usable lines | commodity description missing on every row",
+    });
+
+    // 4c. compliance alerts across the three statuses a reviewer works through.
+    //     The truck alert carries the dedupe key the expiry rules generate, so a
+    //     rescan reconciles it in place instead of raising a duplicate; the two
+    //     movement alerts use a `demo:` key no rule engine produces.
+    const [t102] = await sql<{ id: string }[]>`
+      select id from public.trucks where organization_id = ${orgId} and unit_number = 'T-102' limit 1`;
+    const [heldMovement] = await sql<{ id: string; movement_number: string }[]>`
+      select id, movement_number from public.movements
+      where organization_id = ${orgId} and status = 'held' limit 1`;
+    const [complianceUser] = await sql<{ id: string }[]>`
+      select id from auth.users where email = 'compliance@pathfinder.demo'`;
+
+    const seedAlert = async (alert: {
+      dedupeKey: string;
+      alertType: "document_expiry" | "risk_flag" | "hs_code_mismatch";
+      severity: "info" | "warning" | "critical";
+      status: "open" | "acknowledged" | "resolved";
+      source: "rules" | "ai" | "user";
+      title: string;
+      description: string;
+      truckId?: string | null;
+      movementId?: string | null;
+      dueAt?: string | null;
+      metadata?: Json;
+    }) => {
+      const [existing] = await sql<{ id: string }[]>`
+        select id from public.compliance_alerts
+        where organization_id = ${orgId} and dedupe_key = ${alert.dedupeKey} limit 1`;
+      if (existing) return;
+      await sql`
+        insert into public.compliance_alerts (
+          organization_id, movement_id, truck_id, alert_type, severity, title, description,
+          status, dedupe_key, source, due_at, acknowledged_by, acknowledged_at,
+          resolved_by, resolved_at, metadata)
+        values (
+          ${orgId}, ${alert.movementId ?? null}, ${alert.truckId ?? null}, ${alert.alertType},
+          ${alert.severity}, ${alert.title}, ${alert.description}, ${alert.status},
+          ${alert.dedupeKey}, ${alert.source}, ${alert.dueAt ?? null},
+          ${alert.status === "acknowledged" ? (complianceUser?.id ?? null) : null},
+          ${alert.status === "acknowledged" ? sql`now() - interval '2 hours'` : null},
+          ${alert.status === "resolved" ? (complianceUser?.id ?? null) : null},
+          ${alert.status === "resolved" ? sql`now() - interval '1 day'` : null},
+          ${sql.json(alert.metadata ?? {})})`;
+    };
+
+    if (t102) {
+      await seedAlert({
+        dedupeKey: `truck:${t102.id}:registration_expiry`,
+        alertType: "document_expiry",
+        severity: "critical",
+        status: "open",
+        source: "rules",
+        title: "Registration expired — Truck T-102",
+        description:
+          "Registration for Truck T-102 has expired. Customs will reject a manifest using an unverifiable document.",
+        truckId: t102.id,
+        dueAt: day(-3),
+        metadata: { field: "registration_expiry", entityType: "truck" },
+      });
+    }
+    if (heldMovement) {
+      await seedAlert({
+        dedupeKey: `demo:risk_flag:${heldMovement.id}`,
+        alertType: "risk_flag",
+        severity: "warning",
+        status: "acknowledged",
+        source: "ai",
+        title: `Elevated hold risk on ${heldMovement.movement_number}`,
+        description:
+          "Perishable produce at a crossing with an above-average inspection rate for this commodity. Confirm the PGA data before the truck leaves.",
+        movementId: heldMovement.id,
+        metadata: { holdProbability: 0.41, factors: ["commodity", "crossing_history"] },
+      });
+      await seedAlert({
+        dedupeKey: `demo:hs_code_mismatch:${heldMovement.id}`,
+        alertType: "hs_code_mismatch",
+        severity: "info",
+        status: "resolved",
+        source: "rules",
+        title: `HS code corrected on ${heldMovement.movement_number}`,
+        description:
+          "The declared HS code did not match the commodity description on line 1. The broker confirmed the corrected classification.",
+        movementId: heldMovement.id,
+        metadata: { lineNumber: 1, declared: "0810.10", corrected: "0810.90" },
+      });
+    }
+    console.log("seeded 2 source documents + 3 compliance alerts for the demo org");
 
     // 5. copilot regulation corpus — global, not tenant-scoped. Idempotent:
     //    ingestRegulations upserts by (source, title) and replaces embeddings.

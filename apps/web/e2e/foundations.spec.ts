@@ -3,7 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 /**
  * Phase 0 end-to-end coverage — requires local Supabase + `pnpm db:seed`.
  *  - signup → onboarding → org creation → dashboard
- *  - login as seeded owner; invite a user; the invite link is produced
+ *  - login as seeded owner; invite a user; the invitee signs up and accepts
  *  - role gating: read-only user does not see Users/Billing nav, cannot edit org
  */
 
@@ -44,17 +44,51 @@ test.describe("seeded roles", () => {
     await expect(page).toHaveURL(/\/dashboard/);
   }
 
-  test("owner can invite a member and gets an invite link", async ({ page }) => {
+  test("owner invites a member, the invitee signs up and accepts, the seat goes active", async ({
+    page,
+    browser,
+  }) => {
+    const email = `invitee-${unique()}@corridor.test`;
     await login(page, "owner@pathfinder.demo");
     await page.getByRole("link", { name: "Users" }).click();
     await expect(page).toHaveURL(/\/settings\/users/);
 
-    await page.getByLabel("Invite by email").fill(`invitee-${unique()}@corridor.test`);
+    await page.getByLabel("Invite by email").fill(email);
     await page.getByLabel("Role").selectOption({ label: "Dispatcher" });
     await page.getByRole("button", { name: "Send invite" }).click();
 
-    await expect(page.getByText(/\/invite\//)).toBeVisible();
-    await expect(page.getByText("invited").first()).toBeVisible();
+    const inviteLink = await page.getByText(/\/invite\//).innerText();
+    expect(inviteLink).toMatch(/\/invite\/[\w-]+$/);
+    await expect(page.getByRole("row", { name: new RegExp(email) })).toContainText("invited");
+
+    // The invitee is a different person on a different machine: fresh cookies.
+    const inviteeContext = await browser.newContext();
+    const invitee = await inviteeContext.newPage();
+    const invitePath = new URL(inviteLink).pathname;
+    try {
+      // Signed out, the invite link is gated like any other private route.
+      await invitee.goto(invitePath);
+      await expect(invitee).toHaveURL(`/login?next=${encodeURIComponent(invitePath)}`);
+
+      // The invitee has no account yet, so they sign up and come back to it.
+      await invitee.goto(`/signup?next=${encodeURIComponent(invitePath)}`);
+      await invitee.getByLabel("Your name").fill("Ingrid Invitee");
+      // accept_invitation() matches on the invited address, so it must be this one.
+      await invitee.getByLabel("Work email").fill(email);
+      await invitee.getByLabel("Password").fill("corridor-e2e-pass");
+      await invitee.getByRole("button", { name: "Create account" }).click();
+
+      await expect(invitee).toHaveURL(/\/invite\//);
+      await invitee.getByRole("button", { name: "Accept invitation" }).click();
+      await expect(invitee).toHaveURL(/\/dashboard/);
+      // The accepted membership is the invitee's active org, not a new carrier.
+      await expect(invitee.getByRole("heading", { name: "Pathfinder Trans Inc" })).toBeVisible();
+    } finally {
+      await inviteeContext.close();
+    }
+
+    await page.reload();
+    await expect(page.getByRole("row", { name: new RegExp(email) })).toContainText("active");
   });
 
   test("owner can create, edit, and delete a custom role", async ({ page }) => {

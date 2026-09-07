@@ -11,7 +11,7 @@ import { z } from "zod";
 import { and, desc, eq, ilike, or, schema, sql, type RlsTransaction } from "@corridor/db";
 import { lookupHsCode as lookupHsCodeStatic, searchTariff } from "@corridor/integrations";
 import {
-  MIN_CITATION_SIMILARITY,
+  minCitationSimilarity,
   selectEmbedder,
   type OrgKnowledgeMatch,
   type RegulationMatch,
@@ -98,10 +98,13 @@ export async function retrieveContext(
   const embedder = selectEmbedder();
   const { embedding } = await embedder.embed(query);
   const vectorLiteral = `[${embedding.join(",")}]`;
+  // The corpus was embedded by whichever embedder is configured now, so the
+  // citation gate follows the same one (the mock's cosine scale is lower).
+  const minSimilarity = minCitationSimilarity(embedder.name);
 
   const [regulations, orgKnowledge] = await Promise.all([
-    cachedRegulations ?? matchRegulations(tx, vectorLiteral, jurisdiction),
-    cachedOrgKnowledge ?? matchOrgKnowledge(tx, orgId, vectorLiteral),
+    cachedRegulations ?? matchRegulations(tx, vectorLiteral, jurisdiction, minSimilarity),
+    cachedOrgKnowledge ?? matchOrgKnowledge(tx, orgId, vectorLiteral, minSimilarity),
   ]);
 
   await Promise.all([
@@ -120,6 +123,7 @@ async function matchRegulations(
   tx: RlsTransaction,
   vectorLiteral: string,
   jurisdiction: "US" | "CA" | null,
+  minSimilarity: number,
 ): Promise<RegulationMatch[]> {
   const rows = await tx.execute<{
     regulation_document_id: string;
@@ -135,7 +139,7 @@ async function matchRegulations(
   );
 
   return rows
-    .filter((r) => r.similarity >= MIN_CITATION_SIMILARITY)
+    .filter((r) => r.similarity >= minSimilarity)
     .map((r) => ({
       regulationDocumentId: r.regulation_document_id,
       title: r.title,
@@ -152,6 +156,7 @@ async function matchOrgKnowledge(
   tx: RlsTransaction,
   orgId: string,
   vectorLiteral: string,
+  minSimilarity: number,
 ): Promise<OrgKnowledgeMatch[]> {
   const rows = await tx.execute<{
     id: string;
@@ -163,7 +168,7 @@ async function matchOrgKnowledge(
   }>(sql`select * from public.match_org_knowledge(${orgId}::uuid, ${vectorLiteral}::vector, 5)`);
 
   return rows
-    .filter((r) => r.similarity >= MIN_CITATION_SIMILARITY)
+    .filter((r) => r.similarity >= minSimilarity)
     .map((r) => ({
       id: r.id,
       sourceType: r.source_type,

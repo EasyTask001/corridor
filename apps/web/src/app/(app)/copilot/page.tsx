@@ -1,10 +1,26 @@
 import type { Metadata } from "next";
+import { getSession } from "@/lib/session";
 import { api } from "@/lib/trpc/server";
 import { CopilotChat } from "./copilot-chat";
 
 export const metadata: Metadata = { title: "Copilot" };
 
 export default async function CopilotPage() {
+  // Without `copilot.use` every procedure on this page (and the chat route)
+  // rejects, so say so rather than rendering a chat that can only fail.
+  const session = await getSession();
+  if (!session?.permissions.has("copilot.use")) {
+    return (
+      <div className="max-w-xl">
+        <h1 className="text-2xl font-semibold tracking-tight">Compliance copilot</h1>
+        <p className="mt-2 text-sm text-ink-500">
+          The compliance copilot is not available for your role. Ask an owner or admin to grant
+          &ldquo;Use the compliance copilot&rdquo;.
+        </p>
+      </div>
+    );
+  }
+
   const caller = await api();
   const [capabilities, regulations] = await Promise.all([
     caller.copilot.capabilities(),

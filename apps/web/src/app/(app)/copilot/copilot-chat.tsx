@@ -137,6 +137,7 @@ export function CopilotChat({
               className={m.role === "user" ? "flex justify-end" : "flex justify-start"}
             >
               <div
+                data-message-role={m.role}
                 className={`max-w-[80%] rounded-lg px-4 py-2.5 text-sm ${m.role === "user" ? "bg-ink-950 text-white" : "bg-ink-50 text-ink-950"}`}
               >
                 {m.parts.map((p, i) =>
