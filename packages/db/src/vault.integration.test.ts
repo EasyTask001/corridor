@@ -22,8 +22,10 @@ const conn = createDb(DB_URL, { max: 4 });
 const db = conn.db;
 
 const PROVIDER = "cbp_ace";
-const SECRET_A = JSON.stringify({ apiKey: "ace-key-A", apiSecret: "ace-secret-A" });
-const SECRET_B = JSON.stringify({ apiKey: "aci-key-B" });
+const CREDS_A = { apiKey: "ace-key-A", apiSecret: "ace-secret-A" };
+const CREDS_B = { apiKey: "aci-key-B" };
+const SECRET_A = JSON.stringify(CREDS_A);
+const SECRET_B = JSON.stringify(CREDS_B);
 
 interface Actor {
   userId: string;
@@ -76,6 +78,29 @@ async function ensureConfig(orgId: string) {
   );
 }
 
+/**
+ * Drop any secret this file left behind. Note this cannot go through
+ * delete_integration_secret: that function checks has_permission(), and a
+ * service-role PostgREST call has no auth.uid() to check — which is exactly
+ * why the RPC pair is safe. Cleanup therefore goes straight at the tables.
+ */
+async function purge(orgId: string) {
+  await withServiceRole(db, async (tx) => {
+    await tx
+      .update(integrationConfigs)
+      .set({ credentialsRef: null })
+      .where(
+        and(
+          eq(integrationConfigs.organizationId, orgId),
+          eq(integrationConfigs.provider, PROVIDER),
+        ),
+      );
+    await tx.execute(
+      sql`delete from vault.secrets where name = ${`integration:${orgId}:${PROVIDER}`}`,
+    );
+  });
+}
+
 const credentialsRefFor = (orgId: string) =>
   withServiceRole(db, async (tx) => {
     const [row] = await tx
@@ -91,6 +116,19 @@ const credentialsRefFor = (orgId: string) =>
     return row?.ref ?? null;
   });
 
+/**
+ * The stored document, as the service role sees it. Compared parsed, not as a
+ * string: a merge round-trips through jsonb, which normalises key order.
+ */
+async function readSecret(orgId: string): Promise<Record<string, unknown> | null> {
+  const { data, error } = await admin().rpc("read_integration_secret", {
+    p_org: orgId,
+    p_provider: PROVIDER,
+  });
+  if (error) throw new Error(error.message);
+  return typeof data === "string" ? (JSON.parse(data) as Record<string, unknown>) : null;
+}
+
 const storeAs = (actor: Actor, orgId: string, secret: string) =>
   withRls(db, as(actor), (tx) =>
     tx.execute<{ store_integration_secret: string }>(
@@ -105,13 +143,13 @@ beforeAll(async () => {
     actorFor("owner@northbound.demo"),
   ]);
   await Promise.all([ensureConfig(ownerA.orgId), ensureConfig(ownerB.orgId)]);
+  // Start from a known-empty vault so every assertion below is order-independent.
+  await Promise.all([purge(ownerA.orgId), purge(ownerB.orgId)]);
 });
 
 afterAll(async () => {
   // Leave no plaintext behind, even on failure.
-  const client = admin();
-  await client.rpc("delete_integration_secret", { p_org: ownerA.orgId, p_provider: PROVIDER });
-  await client.rpc("delete_integration_secret", { p_org: ownerB.orgId, p_provider: PROVIDER });
+  if (ownerA && ownerB) await Promise.all([purge(ownerA.orgId), purge(ownerB.orgId)]);
   await conn.sql.end();
 });
 
@@ -132,19 +170,28 @@ describe("integration credentials in Supabase Vault", () => {
     expect(stored!.secret).not.toContain("ace-key-A");
   });
 
-  it("rotating reuses the same vault row rather than accumulating secrets", async () => {
+  it("rotating one field reuses the vault row and keeps the fields not retyped", async () => {
     const before = await credentialsRefFor(ownerA.orgId);
-    const rotated = JSON.stringify({ apiKey: "ace-key-A2" });
-    const rows = await storeAs(ownerA, ownerA.orgId, rotated);
+    // the panel only ever sends the fields the operator filled in
+    const rows = await storeAs(ownerA, ownerA.orgId, JSON.stringify({ apiKey: "ace-key-A2" }));
     expect(rows[0]!.store_integration_secret).toBe(before);
-
-    const { data } = await admin().rpc("read_integration_secret", {
-      p_org: ownerA.orgId,
-      p_provider: PROVIDER,
+    await expect(readSecret(ownerA.orgId)).resolves.toEqual({
+      apiKey: "ace-key-A2",
+      apiSecret: "ace-secret-A",
     });
-    expect(data).toBe(rotated);
+
+    // adding a third field leaves the other two alone
+    await storeAs(ownerA, ownerA.orgId, JSON.stringify({ accountId: "acct-A" }));
+    await expect(readSecret(ownerA.orgId)).resolves.toEqual({
+      apiKey: "ace-key-A2",
+      apiSecret: "ace-secret-A",
+      accountId: "acct-A",
+    });
 
     // restore the value the remaining tests assert on
+    await withRls(db, as(ownerA), (tx) =>
+      tx.execute(sql`select public.delete_integration_secret(${ownerA.orgId}::uuid, ${PROVIDER})`),
+    );
     await storeAs(ownerA, ownerA.orgId, SECRET_A);
   });
 
@@ -261,6 +308,13 @@ describe("integration credentials in Supabase Vault", () => {
     expect(second!.delete_integration_secret).toBe(false);
   });
 
+  it("clear + store replaces wholesale — no field survives the delete", async () => {
+    // picks up where the previous test left off: org A has no secret
+    await expect(readSecret(ownerA.orgId)).resolves.toBeNull();
+    await storeAs(ownerA, ownerA.orgId, JSON.stringify({ accountId: "acct-fresh" }));
+    await expect(readSecret(ownerA.orgId)).resolves.toEqual({ accountId: "acct-fresh" });
+  });
+
   it("storing before the provider is configured fails loudly", async () => {
     const missing = await rejection(
       withRls(db, as(ownerA), (tx) =>
@@ -270,5 +324,19 @@ describe("integration credentials in Supabase Vault", () => {
       ),
     );
     expect(missing).toMatch(/no integration config/i);
+  });
+
+  it("falls back to wholesale replacement when either side is not a JSON object", async () => {
+    // the merge is defensive: a secret that predates the JSON contract (or a
+    // non-object payload) must not make every later rotation raise.
+    await storeAs(ownerA, ownerA.orgId, "legacy-opaque-token");
+    const { data: opaque } = await admin().rpc("read_integration_secret", {
+      p_org: ownerA.orgId,
+      p_provider: PROVIDER,
+    });
+    expect(opaque).toBe("legacy-opaque-token");
+
+    await storeAs(ownerA, ownerA.orgId, JSON.stringify({ apiKey: "post-migration" }));
+    await expect(readSecret(ownerA.orgId)).resolves.toEqual({ apiKey: "post-migration" });
   });
 });

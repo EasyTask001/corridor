@@ -18,6 +18,8 @@
 -- One vault secret per (organization, provider), named
 --   integration:<org uuid>:<provider>
 -- so a rotation updates the existing row rather than accumulating secrets.
+-- A rotation MERGES into the stored JSON document (the UI sends only the fields
+-- the operator retyped); wholesale replacement is delete + store.
 -- =============================================================================
 
 -- Supabase ships `supabase_vault` on every project (local and hosted); creating
@@ -48,8 +50,11 @@ security definer
 set search_path = public
 as $$
 declare
-  v_name text := 'integration:' || p_org::text || ':' || p_provider;
-  v_ref  uuid;
+  v_name  text := 'integration:' || p_org::text || ':' || p_provider;
+  v_ref   uuid;
+  v_write text := p_secret;
+  v_old   text;
+  v_merge jsonb;
 begin
   if not public.has_permission(p_org, 'integrations.manage') then
     raise exception 'not authorized for organization %', p_org using errcode = '42501';
@@ -79,7 +84,30 @@ begin
   if v_ref is null then
     v_ref := vault.create_secret(p_secret, v_name, 'Corridor integration credentials');
   else
-    perform vault.update_secret(v_ref, p_secret, v_name, 'Corridor integration credentials');
+    -- A rotation carries only the fields the operator retyped, so merge rather
+    -- than replace: keys present in the new document win, keys absent from it
+    -- keep their stored value. Only the definer ever sees either plaintext —
+    -- it stays inside this block and is never returned, raised or logged.
+    -- Full replacement is delete_integration_secret followed by store.
+    select s.decrypted_secret into v_old from vault.decrypted_secrets s where s.id = v_ref;
+    if v_old is not null then
+      begin
+        if jsonb_typeof(v_old::jsonb) = 'object' and jsonb_typeof(p_secret::jsonb) = 'object' then
+          -- an explicit null in the new document is "not supplied", not "erase"
+          v_merge := coalesce(
+            (select jsonb_object_agg(e.key, e.value)
+             from jsonb_each(p_secret::jsonb) e
+             where e.value <> 'null'::jsonb),
+            '{}'::jsonb
+          );
+          v_write := (v_old::jsonb || v_merge)::text;
+        end if;
+      exception
+        when invalid_text_representation then
+          v_write := p_secret; -- not JSON on one side: replace wholesale
+      end;
+    end if;
+    perform vault.update_secret(v_ref, v_write, v_name, 'Corridor integration credentials');
   end if;
 
   update public.integration_configs c

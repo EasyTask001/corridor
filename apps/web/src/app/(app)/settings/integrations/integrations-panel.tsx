@@ -239,7 +239,8 @@ export function IntegrationsPanel({
                       </legend>
                       <p className="text-xs text-ink-500">
                         Encrypted into Supabase Vault on save and never sent back to this page.
-                        Leave blank to keep the stored values; fill any field to rotate.
+                        Leave a field blank to keep its stored value; fill one to replace just that
+                        field. Use “Clear credentials” to remove all three.
                       </p>
                       <div className="grid gap-2 sm:grid-cols-3">
                         <div>
