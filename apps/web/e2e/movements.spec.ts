@@ -35,12 +35,11 @@ async function buildReadyMovement(page: Page) {
   await page.getByRole("button", { name: "New ACE movement" }).click();
   await expect(page).toHaveURL(/\/movements\/[0-9a-f-]{36}/);
   await page.getByLabel("Trip number").fill("E2E-TRIP");
-  await page
-    .getByLabel("Port of entry")
-    .selectOption({ label: "3801 · Detroit — Ambassador Bridge, MI" });
+  await page.getByLabel("Port of entry").fill("3801");
+  await page.getByRole("button", { name: /^3801 — Detroit/ }).click();
   await page.getByLabel("Estimated crossing").fill(localDateTime(2));
   await page.getByRole("button", { name: "Save trip" }).click();
-  await expect(page.getByText("Detroit — Ambassador Bridge, MI · ETA")).toBeVisible();
+  await expect(page.getByText(/Detroit — Ambassador Bridge · ETA/)).toBeVisible();
 
   await page.getByRole("button", { name: /^Truck/ }).click();
   await page.getByLabel("Truck", { exact: true }).selectOption({ label: "T-101 · AB12345" });
@@ -111,7 +110,7 @@ test.describe("movement builder", () => {
     await expect(page.getByText(/Reuse the lane from ACE-/)).toBeVisible();
     await page.getByRole("button", { name: "Apply suggestion" }).click();
     await expect(page.getByText("AI suggested · not applied")).toHaveCount(0);
-    await expect(page.getByText(/No crossing selected/)).toHaveCount(0);
+    await expect(page.getByText(/No port selected/)).toHaveCount(0);
 
     await page.getByRole("button", { name: /^Shipment/ }).click();
     await expect(page.getByText("No shipment lines yet.")).toHaveCount(0);

@@ -34,7 +34,7 @@ export const DEMO_ORG = {
   name: "Pathfinder Trans Inc",
   legalName: "PATHFINDER TRANS INC",
   scacCode: "PFTR",
-  canadianCarrierCode: "PFT1",
+  canadianCarrierCode: "7ELU",
   usDotNumber: "1234567",
   mcNumber: "MC-987654",
 } as const;
@@ -156,6 +156,20 @@ export async function seed() {
       on conflict (organization_id, user_id) where user_id is not null
       do update set role_id = excluded.role_id, status = 'active'`;
 
+    // 2b. multi-carrier codes (0018): the demo org files under two ACE codes
+    // (a co-loaded second unit) and one ACI code; Northbound files under one.
+    await sql`
+      insert into public.organization_carrier_codes (organization_id, regime, code, label, is_default)
+      values
+        (${orgId}, 'ACE', 'PFTR', 'Primary US filing code', true),
+        (${orgId}, 'ACE', 'PFTS', 'Secondary US filing code', false),
+        (${orgId}, 'ACI', '7ELU', 'Primary CA filing code', true)
+      on conflict (organization_id, regime, code) do nothing`;
+    await sql`
+      insert into public.organization_carrier_codes (organization_id, regime, code, is_default)
+      values (${otherOrgId}, 'ACE', 'NBFL', true)
+      on conflict (organization_id, regime, code) do nothing`;
+
     // 3. registries for the demo org — dates relative to today so expiry alerts
     //    demo correctly no matter when the seed runs.
     const day = (offset: number) => {
@@ -271,7 +285,7 @@ export async function seed() {
         driver: string;
         truck: string;
         trailer: string | null;
-        crossing: { code: string; name: string };
+        portCode: string;
         etaDays: number;
         cargo: Array<{
           desc: string;
@@ -294,10 +308,14 @@ export async function seed() {
         const number = `${spec.regime}-${new Date().getUTCFullYear().toString().slice(-2)}-${String(seq).padStart(5, "0")}`;
         const eta = new Date();
         eta.setUTCDate(eta.getUTCDate() + spec.etaDays);
+        const carrierCode = spec.regime === "ACE" ? "PFTR" : "7ELU";
+        const [port] = await sql<{ id: string }[]>`
+          select id from public.ports where regime = ${spec.regime} and code = ${spec.portCode} limit 1`;
+        if (!port) throw new Error(`seed: unknown port code ${spec.portCode} for ${spec.regime}`);
         const [m] = await sql<{ id: string }[]>`
-          insert into public.movements (organization_id, regime, movement_number, trip_number, crossing_point,
+          insert into public.movements (organization_id, regime, movement_number, trip_number, port_id, carrier_code,
             scheduled_crossing_at, driver_id, truck_id, trailer_id, created_by)
-          values (${orgId}, ${spec.regime}, ${number}, ${"TRIP-" + String(1000 + seq)}, ${sql.json(spec.crossing)},
+          values (${orgId}, ${spec.regime}, ${number}, ${"TRIP-" + String(1000 + seq)}, ${port.id}, ${carrierCode},
             ${eta.toISOString()}, ${spec.driver}, ${spec.truck}, ${spec.trailer}, ${dispatcherId})
           returning id`;
         const id = m!.id;
@@ -336,10 +354,10 @@ export async function seed() {
         }
       };
 
-      const DET = { code: "3801", name: "Detroit — Ambassador Bridge, MI" };
-      const BUF = { code: "0901", name: "Buffalo — Peace Bridge, NY" };
-      const WIN = { code: "0453", name: "Windsor — Ambassador Bridge, ON" };
-      const FE = { code: "0410", name: "Fort Erie — Peace Bridge, ON" };
+      const DET = "3801"; // Detroit — Ambassador Bridge, MI
+      const BUF = "0901"; // Buffalo — Peace Bridge, NY
+      const WIN = "0453"; // Windsor — Ambassador Bridge, ON
+      const FE = "0410"; // Fort Erie — Peace Bridge, ON
       const steel = {
         desc: "Hot-rolled steel coils",
         hs: "7208.10",
@@ -379,7 +397,7 @@ export async function seed() {
         driver: gurpreet,
         truck: t101,
         trailer: tr501,
-        crossing: DET,
+        portCode: DET,
         etaDays: 2,
         cargo: [steel],
         seals: ["SL-100231"],
@@ -390,7 +408,7 @@ export async function seed() {
         driver: dale,
         truck: t103,
         trailer: tr503,
-        crossing: BUF,
+        portCode: BUF,
         etaDays: 1,
         cargo: [
           steel,
@@ -411,7 +429,7 @@ export async function seed() {
         driver: gurpreet,
         truck: t101,
         trailer: tr501,
-        crossing: DET,
+        portCode: DET,
         etaDays: 0,
         cargo: [steel],
         seals: ["SL-100233"],
@@ -423,7 +441,7 @@ export async function seed() {
         driver: dale,
         truck: t103,
         trailer: tr503,
-        crossing: WIN,
+        portCode: WIN,
         etaDays: 0,
         cargo: [fab],
         seals: ["SL-200101"],
@@ -435,7 +453,7 @@ export async function seed() {
         driver: marcus,
         truck: t101,
         trailer: tr501,
-        crossing: FE,
+        portCode: FE,
         etaDays: 0,
         cargo: [produce],
         seals: ["SL-200102"],
@@ -447,7 +465,7 @@ export async function seed() {
         driver: marcus,
         truck: t103,
         trailer: tr503,
-        crossing: BUF,
+        portCode: BUF,
         etaDays: 3,
         cargo: [produce],
         seals: [],
@@ -459,7 +477,7 @@ export async function seed() {
         driver: gurpreet,
         truck: t101,
         trailer: tr501,
-        crossing: DET,
+        portCode: DET,
         etaDays: -3,
         cargo: [steel],
         seals: ["SL-100229"],
@@ -471,7 +489,7 @@ export async function seed() {
         driver: dale,
         truck: t103,
         trailer: null,
-        crossing: WIN,
+        portCode: WIN,
         etaDays: -1,
         cargo: [fab],
         seals: [],

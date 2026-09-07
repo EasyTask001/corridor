@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { movementStatus, type MovementStatus } from "@corridor/domain";
+import { movementStatus, uuid, type MovementStatus } from "@corridor/domain";
 import { Button, buttonVariants, Card, Input } from "@corridor/ui";
 import { getSession } from "@/lib/session";
 import { api } from "@/lib/trpc/server";
+import { MovementsPortFilter } from "./port-filter";
 import { MovementsTable, type MovementRow } from "./movements-table";
 import { createMovement } from "./actions";
 
@@ -24,7 +25,7 @@ const STATUS_ORDER: MovementStatus[] = [
 export default async function MovementsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; regime?: string; q?: string }>;
+  searchParams: Promise<{ status?: string; regime?: string; q?: string; portId?: string }>;
 }) {
   const session = await getSession();
   if (!session?.permissions.has("movement.read")) redirect("/dashboard");
@@ -36,6 +37,7 @@ export default async function MovementsPage({
     : undefined;
   const regime = sp.regime === "ACE" || sp.regime === "ACI" ? sp.regime : undefined;
   const q = sp.q?.trim() || undefined;
+  const portId = uuid.safeParse(sp.portId).success ? sp.portId : undefined;
 
   const caller = await api();
   const [board, list] = await Promise.all([
@@ -44,6 +46,7 @@ export default async function MovementsPage({
       status: status ? [status] : undefined,
       regime,
       search: q,
+      portId,
       limit: 100,
       offset: 0,
     }),
@@ -67,7 +70,7 @@ export default async function MovementsPage({
     movementNumber: m.movementNumber,
     tripNumber: m.tripNumber,
     status: m.status,
-    crossingLabel: m.crossingPoint?.name ?? m.crossingPoint?.code ?? "—",
+    crossingLabel: m.port?.name ?? m.port?.code ?? "—",
     etaLabel: fmt(m.scheduledCrossingAt),
     driverLabel: m.driverName ?? "—",
     unitsLabel: `${m.truckUnit ?? "—"} / ${m.trailerUnit ?? "—"}`,
@@ -125,9 +128,11 @@ export default async function MovementsPage({
             {r}
           </Link>
         ))}
+        <MovementsPortFilter regime={regime} active={!!portId} />
         <form className="ml-auto" method="get">
           {status && <input type="hidden" name="status" value={status} />}
           {regime && <input type="hidden" name="regime" value={regime} />}
+          {portId && <input type="hidden" name="portId" value={portId} />}
           <Input
             name="q"
             defaultValue={q ?? ""}

@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@corridor/api";
-import { CROSSING_POINTS, isEditable, type MovementStatus } from "@corridor/domain";
+import { isEditable, type MovementStatus } from "@corridor/domain";
+import { PortPicker, type PickablePort } from "@/components/port-picker";
 import { useTRPC } from "@/lib/trpc/client";
 import { RegimeBadge, StatusBadge } from "./status-badge";
 import { Timeline } from "./timeline";
@@ -67,8 +68,8 @@ export function MovementWorkspace({
   });
 
   const borderWait = useQuery({
-    ...trpc.integrations.borderWait.queryOptions({ crossingCode: m.crossingPoint?.code ?? "" }),
-    enabled: !!m.crossingPoint?.code,
+    ...trpc.integrations.borderWait.queryOptions({ crossingCode: m.port?.code ?? "" }),
+    enabled: !!m.port?.code,
     staleTime: 60_000,
   });
   const integrationLog = useQuery({
@@ -168,9 +169,17 @@ export function MovementWorkspace({
   const warnings = validation.issues.filter((i) => i.severity === "warning");
   const issuesFor = (s: StepKey) => validation.issues.filter((i) => i.step === s);
 
-  const crossings = CROSSING_POINTS.filter((c) => c.regime === m.regime);
+  const carrierCodes = options.carrierCodes.filter((c) => c.regime === m.regime);
+  const defaultCarrierCode = carrierCodes.find((c) => c.isDefault)?.code ?? null;
   const shippers = options.partners.filter((p) => p.type === "shipper" || p.type === "both");
   const consignees = options.partners.filter((p) => p.type === "consignee" || p.type === "both");
+
+  const [tripPortId, setTripPortId] = useState<string | null>(m.portId);
+  const [tripPort, setTripPort] = useState<PickablePort | null>(
+    m.port ? { id: m.portId!, code: m.port.code, name: m.port.name, stateProvince: null } : null,
+  );
+  const [amendPortId, setAmendPortId] = useState<string | null>(m.portId);
+  const [amendPort, setAmendPort] = useState<PickablePort | null>(tripPort);
 
   // -------------------------------------------------------------------------
   // step panels
@@ -182,12 +191,14 @@ export function MovementWorkspace({
       onSubmit={(e: FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         const fd = new FormData(e.currentTarget);
-        const code = String(fd.get("crossing") ?? "");
-        const cp = crossings.find((c) => c.code === code);
         update.mutate({
           id,
           tripNumber: String(fd.get("tripNumber") ?? "").trim() || null,
-          crossingPoint: cp ? { code: cp.code, name: cp.name } : null,
+          portId: tripPortId,
+          // "" ("Use regime default") resolves to the actual default code
+          // rather than clearing carrierCode outright — a movement should
+          // always carry a real code once one exists for its regime.
+          carrierCode: String(fd.get("carrierCode") ?? "").trim() || defaultCarrierCode,
           scheduledCrossingAt: fromLocalInput(String(fd.get("eta") ?? "")),
         });
       }}
@@ -209,18 +220,33 @@ export function MovementWorkspace({
           className="input font-mono"
         />
       </Field>
-      <Field label="Port of entry" htmlFor="crossing">
+      <Field label="Port of entry" htmlFor="port">
+        <PortPicker
+          id="port"
+          regime={m.regime}
+          kind={m.regime === "ACE" ? "port_of_entry" : "cbsa_office"}
+          value={tripPort}
+          disabled={!editable}
+          onSelect={(port) => {
+            setTripPortId(port?.id ?? null);
+            setTripPort(port);
+          }}
+        />
+      </Field>
+      <Field label="Carrier code" htmlFor="carrierCode">
         <select
-          id="crossing"
-          name="crossing"
-          defaultValue={m.crossingPoint?.code ?? ""}
+          id="carrierCode"
+          name="carrierCode"
+          defaultValue={m.carrierCode ?? ""}
           disabled={!editable}
           className="input"
         >
-          <option value="">Select…</option>
-          {crossings.map((c) => (
+          <option value="">Use regime default</option>
+          {carrierCodes.map((c) => (
             <option key={c.code} value={c.code}>
-              {c.code} · {c.name}
+              {c.code}
+              {c.label ? ` · ${c.label}` : ""}
+              {c.isDefault ? " (default)" : ""}
             </option>
           ))}
         </select>
@@ -601,7 +627,7 @@ export function MovementWorkspace({
               <StatusBadge status={m.status} />
             </h1>
             <p className="mt-1 text-sm text-ink-500">
-              {m.crossingPoint?.name ?? "No crossing selected"} · ETA {fmt(m.scheduledCrossingAt)}
+              {m.port?.name ?? "No port selected"} · ETA {fmt(m.scheduledCrossingAt)}
               {m.customsReferenceNumber && (
                 <>
                   {" "}
@@ -720,7 +746,7 @@ export function MovementWorkspace({
             <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-4">
               <SuggestionValue
                 label="Crossing"
-                value={suggestion.suggestedPayload.crossingPoint?.name ?? "—"}
+                value={suggestion.suggestedPayload.port?.name ?? "—"}
               />
               <SuggestionValue
                 label="Driver"
@@ -779,14 +805,13 @@ export function MovementWorkspace({
             onSubmit={(e: FormEvent<HTMLFormElement>) => {
               e.preventDefault();
               const fd = new FormData(e.currentTarget);
-              const code = String(fd.get("crossing") ?? "");
-              const cp = crossings.find((c) => c.code === code);
               amend.mutate({
                 movementId: id,
                 reason: String(fd.get("reason") ?? ""),
                 patch: {
                   scheduledCrossingAt: fromLocalInput(String(fd.get("eta") ?? "")),
-                  crossingPoint: cp ? { code: cp.code, name: cp.name } : m.crossingPoint,
+                  portId: amendPortId,
+                  carrierCode: String(fd.get("amendCarrierCode") ?? "").trim() || defaultCarrierCode,
                   driverId: String(fd.get("driverId") ?? "") || null,
                   truckId: String(fd.get("truckId") ?? "") || null,
                   trailerId: String(fd.get("trailerId") ?? "") || null,
@@ -809,16 +834,30 @@ export function MovementWorkspace({
                 className="input"
               />
             </Field>
-            <Field label="Port of entry" htmlFor="amendCrossing">
+            <Field label="Port of entry" htmlFor="amendPort">
+              <PortPicker
+                id="amendPort"
+                regime={m.regime}
+                kind={m.regime === "ACE" ? "port_of_entry" : "cbsa_office"}
+                value={amendPort}
+                onSelect={(port) => {
+                  setAmendPortId(port?.id ?? null);
+                  setAmendPort(port);
+                }}
+              />
+            </Field>
+            <Field label="Carrier code" htmlFor="amendCarrierCode">
               <select
-                id="amendCrossing"
-                name="crossing"
-                defaultValue={m.crossingPoint?.code ?? ""}
+                id="amendCarrierCode"
+                name="amendCarrierCode"
+                defaultValue={m.carrierCode ?? ""}
                 className="input"
               >
-                {crossings.map((c) => (
+                <option value="">Use regime default</option>
+                {carrierCodes.map((c) => (
                   <option key={c.code} value={c.code}>
-                    {c.code} · {c.name}
+                    {c.code}
+                    {c.label ? ` · ${c.label}` : ""}
                   </option>
                 ))}
               </select>

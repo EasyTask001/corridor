@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { api } from "@/lib/trpc/server";
 import { getSession } from "@/lib/session";
+import { CarrierCodesPanel } from "./carrier-codes-panel";
 import { OrganizationForm } from "./organization-form";
 import { SsoForm } from "./sso-form";
 
@@ -17,6 +18,7 @@ export default async function OrganizationSettingsPage() {
   // keeps password sign-in switched off) until someone removes it, so the card
   // has to be able to show and undo that configuration on any plan.
   const sso = canManage ? await caller.organization.sso.get() : null;
+  const carrierCodes = canManage ? await caller.organization.carrierCodes.list() : [];
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -35,10 +37,12 @@ export default async function OrganizationSettingsPage() {
           canadianCarrierCode: org.canadianCarrierCode ?? "",
           usDotNumber: org.usDotNumber ?? "",
           mcNumber: org.mcNumber ?? "",
+          filerCode: org.filerCode ?? "",
           billingEmail: org.billingEmail ?? "",
         }}
         readOnly={!canManage}
       />
+      {canManage && <CarrierCodesPanel initial={carrierCodes} />}
       {canManage && <SsoForm plan={plan} initial={sso} />}
     </div>
   );

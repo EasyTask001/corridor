@@ -11,6 +11,7 @@ type Fields = {
   canadianCarrierCode: string;
   usDotNumber: string;
   mcNumber: string;
+  filerCode: string;
   billingEmail: string;
 };
 
@@ -21,6 +22,7 @@ const FIELDS: { key: keyof Fields; label: string; mono?: boolean }[] = [
   { key: "canadianCarrierCode", label: "CBSA carrier code", mono: true },
   { key: "usDotNumber", label: "USDOT #", mono: true },
   { key: "mcNumber", label: "MC #", mono: true },
+  { key: "filerCode", label: "Filer code", mono: true },
   { key: "billingEmail", label: "Billing email" },
 ];
 

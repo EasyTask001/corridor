@@ -52,7 +52,7 @@ export default function MovementScreen() {
           {movement.tripNumber ? ` · Trip ${movement.tripNumber}` : ""}
         </Text>
         <Text style={styles.body}>
-          Crossing: {movement.crossingPoint?.name ?? movement.crossingPoint?.code ?? "not set"}
+          Crossing: {movement.port?.name ?? movement.port?.code ?? "not set"}
         </Text>
         <Text style={styles.body}>Scheduled: {when(movement.scheduledCrossingAt)}</Text>
         {movement.customsReferenceNumber ? (
