@@ -1,15 +1,15 @@
-import { z } from "zod";
 import { and, desc, eq, isNull, schema, sql } from "@corridor/db";
 import {
   NOTIFICATION_EVENT_TYPES,
   notificationListInput,
+  notificationMarkReadInput,
   notificationRuleInput,
-  uuid,
+  registerDeviceInput,
 } from "@corridor/domain";
 import { authedProcedure, orgProcedure, router } from "../trpc";
 import { writeAudit } from "../services/audit";
 
-const { notifications, notificationRules } = schema;
+const { notifications, notificationRules, userDevices } = schema;
 
 /**
  * Notifications are inherently per-user, not per-permission: RLS already
@@ -58,7 +58,7 @@ export const notificationsRouter = router({
     }),
   ),
 
-  markRead: orgProcedure.input(z.object({ id: uuid })).mutation(({ ctx, input }) =>
+  markRead: orgProcedure.input(notificationMarkReadInput).mutation(({ ctx, input }) =>
     ctx.rls(async (tx) => {
       const [row] = await tx
         .update(notifications)
@@ -83,6 +83,48 @@ export const notificationsRouter = router({
         )
         .returning({ id: notifications.id });
       return { count: rows.length };
+    }),
+  ),
+
+  /**
+   * Register (or refresh) an Expo push token for the signed-in driver's
+   * handset. Upserts on (user_id, expo_push_token) because Expo re-issues the
+   * same token on every app start — a reinstall or a new phone simply adds a
+   * row, and the fan-out sends to every device the user still has.
+   */
+  registerDevice: orgProcedure.input(registerDeviceInput).mutation(({ ctx, input }) =>
+    ctx.rls(async (tx) => {
+      const [row] = await tx
+        .insert(userDevices)
+        .values({
+          userId: ctx.session.user.id,
+          organizationId: ctx.orgId,
+          expoPushToken: input.expoPushToken,
+          platform: input.platform,
+        })
+        .onConflictDoUpdate({
+          target: [userDevices.userId, userDevices.expoPushToken],
+          set: { organizationId: ctx.orgId, platform: input.platform, updatedAt: sql`now()` },
+        })
+        .returning({
+          id: userDevices.id,
+          platform: userDevices.platform,
+          createdAt: userDevices.createdAt,
+        });
+      // The token itself is a delivery address for this user's device; it is
+      // deliberately not written into the audit payload.
+      await writeAudit(
+        tx,
+        ctx.orgId,
+        "notification.device_register",
+        "user_device",
+        row!.id,
+        null,
+        {
+          platform: input.platform,
+        },
+      );
+      return row!;
     }),
   ),
 

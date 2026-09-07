@@ -136,6 +136,7 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
 
   // --- notifications ------------------------------------------------------
   "notifications.rules.upsert": "notification.rule_update",
+  "notifications.registerDevice": "notification.device_register",
 
   // --- reporting ----------------------------------------------------------
   "reporting.run": "report.run",

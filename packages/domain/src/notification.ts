@@ -29,7 +29,12 @@ export const notificationEventType = z.enum(
   Object.keys(NOTIFICATION_EVENT_TYPES) as [NotificationEventType, ...NotificationEventType[]],
 );
 
-export const notificationChannel = z.enum(["in_app", "email"]);
+/**
+ * Delivery channels. `push` reaches the Expo driver app through the devices a
+ * user registered with `notifications.registerDevice` — a member with no
+ * registered device simply receives nothing on that channel.
+ */
+export const notificationChannel = z.enum(["in_app", "email", "push"]);
 export type NotificationChannel = z.infer<typeof notificationChannel>;
 
 export const notificationSchema = z.object({
@@ -65,3 +70,41 @@ export const notificationRuleSchema = notificationRuleInput.extend({
   id: uuid,
 });
 export type NotificationRule = z.infer<typeof notificationRuleSchema>;
+
+// ---------------------------------------------------------------------------
+// Push devices (Expo driver app)
+// ---------------------------------------------------------------------------
+
+export const devicePlatform = z.enum(["ios", "android"]);
+export type DevicePlatform = z.infer<typeof devicePlatform>;
+
+/**
+ * Expo hands out tokens shaped `ExponentPushToken[xxxxxxxx]`. Validating the
+ * shape here keeps junk out of `user_devices` and out of the fan-out's HTTP
+ * body — Expo rejects the whole batch when one recipient is malformed.
+ */
+export const expoPushToken = z
+  .string()
+  .trim()
+  .regex(/^Expo(nent)?PushToken\[[^\]\s]+\]$/, "Expected an Expo push token");
+
+export const registerDeviceInput = z.object({
+  expoPushToken,
+  platform: devicePlatform,
+});
+export type RegisterDeviceInput = z.infer<typeof registerDeviceInput>;
+
+/** `notifications.markRead` — shared so the mobile offline outbox validates the same shape. */
+export const notificationMarkReadInput = z.object({ id: uuid });
+export type NotificationMarkReadInput = z.infer<typeof notificationMarkReadInput>;
+
+export const userDeviceSchema = z.object({
+  id: uuid,
+  userId: uuid,
+  organizationId: uuid,
+  expoPushToken,
+  platform: devicePlatform,
+  createdAt: isoDateTime,
+  updatedAt: isoDateTime,
+});
+export type UserDevice = z.infer<typeof userDeviceSchema>;

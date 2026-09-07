@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "Corridor Driver",
+    "slug": "corridor-driver",
+    "scheme": "corridor",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.corridor.driver"
+    },
+    "android": {
+      "package": "com.corridor.driver",
+      "edgeToEdgeEnabled": true
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Corridor uses the camera to photograph border paperwork.",
+          "photosPermission": "Corridor attaches photos of paperwork to a movement."
+        }
+      ],
+      "expo-notifications"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

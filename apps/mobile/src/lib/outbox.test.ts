@@ -1,0 +1,232 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  Outbox,
+  OUTBOX_STORAGE_KEY,
+  OutboxValidationError,
+  validateOutboxInput,
+  type OutboxEntry,
+  type OutboxStorage,
+} from "./outbox";
+
+/** In-memory stand-in for AsyncStorage. */
+function memoryStorage(initial: Record<string, string> = {}) {
+  const map = new Map(Object.entries(initial));
+  const storage: OutboxStorage & { snapshot: () => OutboxEntry[] } = {
+    getItem: async (key) => map.get(key) ?? null,
+    setItem: async (key, value) => void map.set(key, value),
+    snapshot: () => JSON.parse(map.get(OUTBOX_STORAGE_KEY) ?? "[]") as OutboxEntry[],
+  };
+  return storage;
+}
+
+const DOC = "11111111-1111-4111-8111-111111111111";
+const NOTE = "22222222-2222-4222-8222-222222222222";
+
+let ids = 0;
+function build(
+  overrides: Partial<ConstructorParameters<typeof Outbox>[0]> & {
+    storage?: ReturnType<typeof memoryStorage>;
+  } = {},
+) {
+  const storage = overrides.storage ?? memoryStorage();
+  const send = overrides.send ?? vi.fn(async () => ({ ok: true }));
+  const online = { value: overrides.isOnline ? overrides.isOnline() : true };
+  const outbox = new Outbox({
+    storage,
+    send,
+    isOnline: overrides.isOnline ?? (() => online.value),
+    maxAttempts: overrides.maxAttempts ?? 3,
+    now: () => new Date("2026-09-07T00:00:00.000Z"),
+    newId: () => `id-${(ids += 1)}`,
+    ...(overrides.onChange ? { onChange: overrides.onChange } : {}),
+  });
+  return { outbox, storage, send: send as ReturnType<typeof vi.fn>, online };
+}
+
+beforeEach(() => {
+  ids = 0;
+});
+
+describe("validateOutboxInput", () => {
+  it("accepts an input the tRPC procedure would accept", () => {
+    expect(validateOutboxInput("documents.finalizeUpload", { documentId: DOC })).toEqual({
+      ok: true,
+      value: { documentId: DOC },
+    });
+  });
+
+  it("rejects one the procedure would reject, with the field name", () => {
+    const result = validateOutboxInput("documents.finalizeUpload", { documentId: "not-a-uuid" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain("documentId");
+  });
+
+  it("enforces the Expo token shape from the domain schema", () => {
+    expect(
+      validateOutboxInput("notifications.registerDevice", {
+        expoPushToken: "just-a-string",
+        platform: "ios",
+      }).ok,
+    ).toBe(false);
+    expect(
+      validateOutboxInput("notifications.registerDevice", {
+        expoPushToken: "ExponentPushToken[abc123]",
+        platform: "ios",
+      }).ok,
+    ).toBe(true);
+  });
+});
+
+describe("Outbox.enqueue", () => {
+  it("persists a valid mutation", async () => {
+    const { outbox, storage } = build();
+    const entry = await outbox.enqueue("notifications.markRead", { id: NOTE });
+    expect(entry).toMatchObject({ op: "notifications.markRead", attempts: 0 });
+    expect(storage.snapshot()).toHaveLength(1);
+  });
+
+  it("refuses — and stores nothing — when the input fails the domain schema", async () => {
+    const { outbox, storage } = build();
+    await expect(
+      // A caller can only get here by bypassing the types, which is exactly
+      // the case the guard exists for.
+      outbox.enqueue("notifications.markRead", { id: "nope" } as never),
+    ).rejects.toBeInstanceOf(OutboxValidationError);
+    expect(storage.snapshot()).toEqual([]);
+  });
+});
+
+describe("Outbox.flush", () => {
+  it("sends nothing while offline and keeps the queue intact", async () => {
+    const { outbox, send, online } = build();
+    online.value = false;
+    await outbox.enqueue("notifications.markRead", { id: NOTE });
+    const result = await outbox.flush();
+    expect(send).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ sent: 0, remaining: 1, interrupted: true });
+  });
+
+  it("replays queued mutations in order once back online", async () => {
+    const { outbox, send, online, storage } = build();
+    online.value = false;
+    await outbox.enqueue("documents.finalizeUpload", { documentId: DOC });
+    await outbox.enqueue("notifications.markRead", { id: NOTE });
+
+    online.value = true;
+    const result = await outbox.flush();
+
+    expect(send.mock.calls.map((c) => c[0])).toEqual([
+      "documents.finalizeUpload",
+      "notifications.markRead",
+    ]);
+    expect(result).toMatchObject({ sent: 2, discarded: 0, remaining: 0, interrupted: false });
+    expect(storage.snapshot()).toEqual([]);
+  });
+
+  it("stops at the first transport failure so ordering is preserved", async () => {
+    const send = vi.fn(async (op: string) => {
+      if (op === "documents.finalizeUpload") throw new Error("offline");
+      return {};
+    });
+    const { outbox, storage } = build({ send });
+    await outbox.enqueue("documents.finalizeUpload", { documentId: DOC });
+    await outbox.enqueue("notifications.markRead", { id: NOTE });
+
+    const result = await outbox.flush();
+    expect(result).toMatchObject({ sent: 0, remaining: 2, interrupted: true });
+    const queued = storage.snapshot();
+    expect(queued.map((e) => e.op)).toEqual(["documents.finalizeUpload", "notifications.markRead"]);
+    expect(queued[0]).toMatchObject({ attempts: 1, lastError: "offline" });
+  });
+
+  it("discards a poison entry after maxAttempts instead of wedging the queue", async () => {
+    const send = vi.fn(async () => {
+      throw new Error("500");
+    });
+    const { outbox, storage } = build({ send, maxAttempts: 3 });
+    await outbox.enqueue("notifications.markRead", { id: NOTE });
+
+    await outbox.flush();
+    await outbox.flush();
+    expect(storage.snapshot()[0]).toMatchObject({ attempts: 2 });
+
+    const last = await outbox.flush();
+    expect(last).toMatchObject({ discarded: 1, remaining: 0 });
+    expect(storage.snapshot()).toEqual([]);
+    expect(send).toHaveBeenCalledTimes(3);
+  });
+
+  it("drops a persisted payload that no longer validates and never sends it", async () => {
+    // Written by an older build: `documentId` was a plain string back then.
+    const storage = memoryStorage({
+      [OUTBOX_STORAGE_KEY]: JSON.stringify([
+        {
+          id: "stale",
+          op: "documents.finalizeUpload",
+          input: { documentId: "legacy-id" },
+          enqueuedAt: "2026-01-01T00:00:00.000Z",
+          attempts: 0,
+        },
+        {
+          id: "fresh",
+          op: "notifications.markRead",
+          input: { id: NOTE },
+          enqueuedAt: "2026-01-01T00:00:00.000Z",
+          attempts: 0,
+        },
+      ]),
+    });
+    const { outbox, send } = build({ storage });
+
+    const result = await outbox.flush();
+    expect(result).toMatchObject({ sent: 1, discarded: 1, remaining: 0 });
+    expect(send.mock.calls.map((c) => c[0])).toEqual(["notifications.markRead"]);
+  });
+
+  it("survives corrupt storage", async () => {
+    const storage = memoryStorage({ [OUTBOX_STORAGE_KEY]: "{not json" });
+    const { outbox } = build({ storage });
+    expect(await outbox.pending()).toEqual([]);
+  });
+
+  it("serialises overlapping flushes so nothing is sent twice", async () => {
+    let resolveSend: (() => void) | undefined;
+    const send = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSend = resolve;
+        }),
+    );
+    const { outbox } = build({ send });
+    await outbox.enqueue("notifications.markRead", { id: NOTE });
+
+    const first = outbox.flush();
+    const second = outbox.flush();
+    // The second flush must find an empty queue, not a second copy of the entry.
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    resolveSend?.();
+    const [a, b] = await Promise.all([first, second]);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(a.sent + b.sent).toBe(1);
+  });
+});
+
+describe("Outbox.submit", () => {
+  it("sends straight through when online", async () => {
+    const { outbox, send, storage } = build();
+    const result = await outbox.submit("notifications.markRead", { id: NOTE });
+    expect(result).toMatchObject({ sent: 1, remaining: 0 });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(storage.snapshot()).toEqual([]);
+  });
+
+  it("just queues when offline", async () => {
+    const { outbox, send, online, storage } = build();
+    online.value = false;
+    const result = await outbox.submit("notifications.markRead", { id: NOTE });
+    expect(send).not.toHaveBeenCalled();
+    expect(result.remaining).toBe(1);
+    expect(storage.snapshot()).toHaveLength(1);
+  });
+});

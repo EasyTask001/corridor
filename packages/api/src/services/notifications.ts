@@ -7,7 +7,7 @@
  * directly.
  */
 import { NOTIFICATION_EVENT_TYPES, type NotificationEventType } from "@corridor/domain";
-import { sendEmail } from "@corridor/integrations";
+import { sendEmail, sendExpoPush, type ExpoPushMessage } from "@corridor/integrations";
 import { sql, type RlsTransaction } from "@corridor/db";
 import { logIntegrationEvent } from "./customs";
 
@@ -26,9 +26,15 @@ type NotifiedRow = Record<string, unknown> & {
   channel: string[];
 };
 
+type PushTokenRow = Record<string, unknown> & {
+  user_id: string;
+  expo_push_token: string;
+  platform: string;
+};
+
 /**
  * Creates the notification rows and, for recipients whose channel includes
- * 'email', sends (or mock-sends) the email — logged as an integration_event
+ * 'email' or 'push', sends (or mock-sends) it — logged as an integration_event
  * the same way customs/Stripe calls are, for one consistent audit trail.
  */
 export async function notifyOrganization(tx: RlsTransaction, input: NotifyInput) {
@@ -60,5 +66,51 @@ export async function notifyOrganization(tx: RlsTransaction, input: NotifyInput)
     });
   }
 
-  return { notified: rows.length, emailed: emailTargets.length };
+  const pushed = await sendPush(tx, input, rows);
+
+  return { notified: rows.length, emailed: emailTargets.length, pushed };
+}
+
+/**
+ * Push counterpart of the email loop. `push_tokens_for` (migration 0015) is
+ * SECURITY DEFINER for the same reason `notify_organization` is: the fan-out
+ * runs inside the acting user's RLS transaction and `user_devices` is
+ * user-scoped, so the recipients' tokens are unreachable by a direct select.
+ * One handset can be registered per row, so a recipient with three devices
+ * gets three messages.
+ */
+async function sendPush(tx: RlsTransaction, input: NotifyInput, rows: NotifiedRow[]) {
+  const recipients = rows.filter((r) => r.channel?.includes("push")).map((r) => r.user_id);
+  if (recipients.length === 0) return 0;
+
+  const idList = sql.join(
+    recipients.map((id) => sql`${id}::uuid`),
+    sql`, `,
+  );
+  const devices = await tx.execute<PushTokenRow>(sql`
+    select * from public.push_tokens_for(${input.orgId}::uuid, array[${idList}])
+  `);
+  if (devices.length === 0) return 0;
+
+  const messages: ExpoPushMessage[] = devices.map((d) => ({
+    to: d.expo_push_token,
+    title: input.title,
+    body: input.body ?? "",
+    data: { eventType: input.eventType, linkPath: input.linkPath ?? null },
+  }));
+
+  const started = Date.now();
+  const result = await sendExpoPush(messages);
+  await logIntegrationEvent(tx, {
+    orgId: input.orgId,
+    provider: "expo_push",
+    direction: "outbound",
+    operation: `notify:${input.eventType}`,
+    request: { recipients: recipients.length, devices: devices.length, title: input.title },
+    response: { mode: result.mode, sent: result.sent },
+    success: !result.error,
+    error: result.error,
+    durationMs: Date.now() - started,
+  });
+  return devices.length;
 }

@@ -66,6 +66,16 @@ export function NotificationRulesPanel({ initial }: { initial: Rules }) {
               />
               Email
             </label>
+            {/* Delivered to the handsets registered from the Expo driver app. */}
+            <label className={`flex items-center gap-1.5 ${rule.enabled ? "" : "opacity-40"}`}>
+              <input
+                type="checkbox"
+                disabled={!rule.enabled}
+                checked={rule.channel.includes("push")}
+                onChange={() => toggleChannel(rule, "push")}
+              />
+              Push
+            </label>
           </div>
         </div>
       ))}
