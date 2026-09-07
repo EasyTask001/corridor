@@ -201,6 +201,14 @@ export async function seed() {
       values (${otherOrgId}, 'Nora', 'Bergstrom', 'B9999-00000-11111', 'BC', ${day(365)})
       on conflict do nothing`;
 
+    // 3b. integration configs — sandbox mock gateways with a short decision delay
+    await sql`
+      insert into public.integration_configs (organization_id, provider, environment, settings)
+      values
+        (${orgId}, 'cbp_ace',  'sandbox', ${sql.json({ mockDelayMs: 3000, mockFailureRate: 0 })}),
+        (${orgId}, 'cbsa_aci', 'sandbox', ${sql.json({ mockDelayMs: 3000, mockFailureRate: 0 })})
+      on conflict (organization_id, provider) do nothing`;
+
     // 4. movements spanning every status. Children are inserted while draft
     //    (edit-lock trigger), then the status is walked through VALID transitions
     //    so the DB state machine + timeline are exercised exactly like production.

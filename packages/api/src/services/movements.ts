@@ -1,0 +1,283 @@
+/**
+ * Movement lifecycle primitives shared by the tRPC router (user session) and
+ * background workers (service role, no session). Every status change goes
+ * through `applyTransition` so the domain state machine, actor gating and the
+ * append-only timeline can never be bypassed.
+ */
+import { TRPCError } from "@trpc/server";
+import { and, asc, desc, eq, schema, sql, type RlsTransaction } from "@corridor/db";
+import {
+  actorMayTransition,
+  transition,
+  validateForTransmit,
+  type ActorType,
+  type MovementStatus,
+} from "@corridor/domain";
+
+const {
+  movements,
+  movementEvents,
+  movementAmendments,
+  cargo,
+  seals,
+  drivers,
+  trucks,
+  trailers,
+  userProfiles,
+  organizations,
+} = schema;
+
+export type Tx = RlsTransaction;
+
+/** Who is acting. `userId` is null for system / customs / AI actors. */
+export interface Actor {
+  orgId: string;
+  userId: string | null;
+}
+
+export async function requireMovement(tx: Tx, orgId: string, id: string) {
+  const [m] = await tx
+    .select()
+    .from(movements)
+    .where(and(eq(movements.id, id), eq(movements.organizationId, orgId)))
+    .limit(1);
+  if (!m) throw new TRPCError({ code: "NOT_FOUND", message: "Movement not found" });
+  return m;
+}
+
+export async function addEvent(
+  tx: Tx,
+  actor: Actor,
+  movementId: string,
+  e: {
+    eventType: "status_change" | "amendment" | "note" | "customs_response" | "ai_flag";
+    fromStatus?: MovementStatus | null;
+    toStatus?: MovementStatus | null;
+    payload?: Record<string, unknown>;
+    actorType: ActorType;
+  },
+) {
+  await tx.insert(movementEvents).values({
+    movementId,
+    organizationId: actor.orgId,
+    eventType: e.eventType,
+    fromStatus: e.fromStatus ?? null,
+    toStatus: e.toStatus ?? null,
+    payload: e.payload ?? null,
+    actorType: e.actorType,
+    actorId: e.actorType === "user" ? actor.userId : null,
+  });
+}
+
+export async function applyTransition(
+  tx: Tx,
+  actor: Actor,
+  m: typeof movements.$inferSelect,
+  to: MovementStatus,
+  actorType: ActorType,
+  extra: Partial<typeof movements.$inferInsert> = {},
+  payload: Record<string, unknown> = {},
+) {
+  const from = m.status;
+  try {
+    transition(from, to);
+  } catch (e) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: (e as Error).message });
+  }
+  if (!actorMayTransition(actorType, from, to)) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: `${from} → ${to} can only be driven by customs`,
+    });
+  }
+  const [row] = await tx
+    .update(movements)
+    .set({ status: to, ...extra })
+    .where(eq(movements.id, m.id))
+    .returning();
+  await addEvent(tx, actor, m.id, {
+    eventType: "status_change",
+    fromStatus: from,
+    toStatus: to,
+    payload,
+    actorType,
+  });
+  return row!;
+}
+
+/**
+ * Record a customs decision (from the mock/real gateway, or the dev
+ * simulation) and transition accordingly. Resolves submitted amendments.
+ */
+export async function applyCustomsDecision(
+  tx: Tx,
+  actor: Actor,
+  m: typeof movements.$inferSelect,
+  input: {
+    decision: "accepted" | "rejected" | "released" | "held";
+    referenceNumber?: string | null;
+    message?: string | null;
+    simulated?: boolean;
+    raw?: Record<string, unknown>;
+  },
+) {
+  const ref = input.referenceNumber ?? m.customsReferenceNumber ?? null;
+  await addEvent(tx, actor, m.id, {
+    eventType: "customs_response",
+    actorType: "customs_api",
+    payload: {
+      decision: input.decision,
+      referenceNumber: ref,
+      message: input.message ?? null,
+      simulated: input.simulated ?? false,
+      ...(input.raw && { raw: input.raw }),
+    },
+  });
+  const updated = await applyTransition(
+    tx,
+    actor,
+    m,
+    input.decision,
+    "customs_api",
+    ref ? { customsReferenceNumber: ref } : {},
+    { referenceNumber: ref, message: input.message ?? null },
+  );
+  if (input.decision === "accepted" || input.decision === "rejected") {
+    await tx
+      .update(movementAmendments)
+      .set({ status: input.decision })
+      .where(
+        and(eq(movementAmendments.movementId, m.id), eq(movementAmendments.status, "submitted")),
+      );
+  }
+  return updated;
+}
+
+export async function loadFull(tx: Tx, orgId: string, id: string) {
+  const m = await requireMovement(tx, orgId, id);
+  const [driver, truck, trailer, cargoRows, sealRows, events, amendments] = await Promise.all([
+    m.driverId
+      ? tx
+          .select()
+          .from(drivers)
+          .where(eq(drivers.id, m.driverId))
+          .then((r) => r[0] ?? null)
+      : null,
+    m.truckId
+      ? tx
+          .select()
+          .from(trucks)
+          .where(eq(trucks.id, m.truckId))
+          .then((r) => r[0] ?? null)
+      : null,
+    m.trailerId
+      ? tx
+          .select()
+          .from(trailers)
+          .where(eq(trailers.id, m.trailerId))
+          .then((r) => r[0] ?? null)
+      : null,
+    tx
+      .select({
+        cargo: cargo,
+        shipperName: sql<
+          string | null
+        >`(select name from public.partners p where p.id = ${cargo.shipperId})`,
+        consigneeName: sql<
+          string | null
+        >`(select name from public.partners p where p.id = ${cargo.consigneeId})`,
+      })
+      .from(cargo)
+      .where(eq(cargo.movementId, id))
+      .orderBy(asc(cargo.lineNumber), asc(cargo.createdAt)),
+    tx.select().from(seals).where(eq(seals.movementId, id)).orderBy(asc(seals.createdAt)),
+    tx
+      .select({
+        id: movementEvents.id,
+        eventType: movementEvents.eventType,
+        fromStatus: movementEvents.fromStatus,
+        toStatus: movementEvents.toStatus,
+        payload: movementEvents.payload,
+        actorType: movementEvents.actorType,
+        actorId: movementEvents.actorId,
+        actorName: userProfiles.displayName,
+        occurredAt: movementEvents.occurredAt,
+      })
+      .from(movementEvents)
+      .leftJoin(userProfiles, eq(userProfiles.userId, movementEvents.actorId))
+      .where(eq(movementEvents.movementId, id))
+      .orderBy(desc(movementEvents.occurredAt)),
+    tx
+      .select()
+      .from(movementAmendments)
+      .where(eq(movementAmendments.movementId, id))
+      .orderBy(desc(movementAmendments.amendmentNumber)),
+  ]);
+
+  return {
+    ...m,
+    driver,
+    truck,
+    trailer,
+    cargo: cargoRows.map((r) => ({
+      ...r.cargo,
+      shipperName: r.shipperName,
+      consigneeName: r.consigneeName,
+    })),
+    seals: sealRows,
+    events,
+    amendments,
+  };
+}
+
+export type FullMovement = Awaited<ReturnType<typeof loadFull>>;
+
+export function validationFor(full: FullMovement) {
+  return validateForTransmit({
+    regime: full.regime,
+    crossingPoint: full.crossingPoint ?? null,
+    scheduledCrossingAt: full.scheduledCrossingAt?.toISOString() ?? null,
+    driver: full.driver
+      ? {
+          licenseExpiry: full.driver.licenseExpiry,
+          fastCardNumber: full.driver.fastCardNumber,
+          fastCardExpiry: full.driver.fastCardExpiry,
+          citizenship: full.driver.citizenship,
+          status: full.driver.status,
+        }
+      : null,
+    truck: full.truck
+      ? {
+          registrationExpiry: full.truck.registrationExpiry,
+          insuranceExpiry: full.truck.insuranceExpiry,
+          plateNumber: full.truck.plateNumber,
+          status: full.truck.status,
+        }
+      : null,
+    trailer: full.trailer
+      ? {
+          registrationExpiry: full.trailer.registrationExpiry,
+          plateNumber: full.trailer.plateNumber,
+          status: full.trailer.status,
+        }
+      : null,
+    cargo: full.cargo.map((c) => ({
+      commodityDescription: c.commodityDescription,
+      hsCode: c.hsCode,
+      weightKg: c.weightKg,
+      pieceCount: c.pieceCount,
+      shipperId: c.shipperId,
+      consigneeId: c.consigneeId,
+      valueAmount: c.valueAmount,
+      valueCurrency: c.valueCurrency,
+      countryOfOrigin: c.countryOfOrigin,
+    })),
+    seals: full.seals.map((s) => ({ sealNumber: s.sealNumber })),
+  });
+}
+
+export async function loadOrganization(tx: Tx, orgId: string) {
+  const [org] = await tx.select().from(organizations).where(eq(organizations.id, orgId)).limit(1);
+  if (!org) throw new TRPCError({ code: "NOT_FOUND", message: "Organization not found" });
+  return org;
+}

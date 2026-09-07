@@ -1,0 +1,189 @@
+import { expect, test, type Locator, type Page } from "@playwright/test";
+
+/**
+ * Phase 3 — integration stubs: mock customs gateway with asynchronous
+ * decisions delivered by the background job queue (and pushed to the page
+ * over Realtime), failure injection via trip-number hooks, the integrations
+ * settings page, and mock-mode billing checkout.
+ * Requires local Supabase + `pnpm db:seed` (seeded mockDelayMs = 3000).
+ */
+
+async function login(page: Page, email: string) {
+  await page.goto("/login");
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill("corridor-demo");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page).toHaveURL(/\/dashboard/);
+}
+
+async function selectByText(select: Locator, text: string) {
+  const value = await select.locator("option", { hasText: text }).first().getAttribute("value");
+  if (!value) throw new Error(`option containing "${text}" not found`);
+  await select.selectOption(value);
+}
+
+const localDateTime = (days: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+};
+
+const heading = (page: Page) => page.getByRole("heading", { name: /ACE-\d{2}-\d{5}/ });
+const timeline = (page: Page) => page.getByRole("list", { name: "Movement timeline" });
+
+/** Build a transmit-ready ACE movement with the given trip number. */
+async function buildReady(page: Page, tripNumber: string) {
+  await page.goto("/movements");
+  await page.getByRole("button", { name: "New ACE movement" }).click();
+  await expect(page).toHaveURL(/\/movements\/[0-9a-f-]{36}/);
+  await page.getByLabel("Trip number").fill(tripNumber);
+  await page
+    .getByLabel("Port of entry")
+    .selectOption({ label: "3801 · Detroit — Ambassador Bridge, MI" });
+  await page.getByLabel("Estimated crossing").fill(localDateTime(2));
+  await page.getByRole("button", { name: "Save trip" }).click();
+  await expect(page.getByText("Detroit — Ambassador Bridge, MI · ETA")).toBeVisible();
+  await page.getByRole("button", { name: /^Truck/ }).click();
+  await page.getByLabel("Truck", { exact: true }).selectOption({ label: "T-101 · AB12345" });
+  await page.getByRole("button", { name: /^Crew/ }).click();
+  await selectByText(page.getByLabel("Driver", { exact: true }), "Singh, Gurpreet");
+  await page.getByRole("button", { name: /^Trailer/ }).click();
+  await page.getByLabel("Trailer", { exact: true }).selectOption({ label: "TR-501 · dry van" });
+  await page.getByRole("button", { name: /^Shipment/ }).click();
+  await page.getByRole("button", { name: "Add shipment line" }).click();
+  const form = page.getByRole("form", { name: "New shipment line" });
+  await form.getByLabel("Commodity description").fill("Steel coils");
+  await form.getByLabel("Shipper").selectOption({ label: "Maple Ridge Steel Ltd" });
+  await form.getByLabel("Consignee").selectOption({ label: "Great Lakes Fabrication Inc" });
+  await form.getByLabel("Weight (kg)").fill("1000");
+  await form.getByLabel("Pieces").fill("1");
+  await form.getByRole("button", { name: "Save line" }).click();
+  await expect(page.getByRole("cell", { name: "Steel coils" })).toBeVisible();
+  await page.getByRole("button", { name: /^Seals/ }).click();
+  await page.getByLabel("Seal number").fill("SL-INT-1");
+  await page.getByRole("button", { name: "Add seal" }).click();
+  await page.getByRole("button", { name: /^Review/ }).click();
+  await expect(page.getByRole("button", { name: "Transmit to CBP" })).toBeEnabled();
+}
+
+test.describe("customs gateway integration", () => {
+  test("transmit → mock CBP acknowledges, then accepts and releases asynchronously", async ({
+    page,
+  }) => {
+    await login(page, "dispatch@pathfinder.demo");
+    await buildReady(page, "TRIP-OK-1");
+    await page.getByRole("button", { name: "Transmit to CBP" }).click();
+
+    await expect(heading(page).getByText("sent")).toBeVisible();
+    await expect(page.getByText("Awaiting CBP decision")).toBeVisible();
+    await expect(page.getByText(/ref ACE-[0-9A-Z]{7}/)).toBeVisible(); // gateway reference
+    await expect(
+      page.getByRole("list", { name: "Transmission log" }).getByText("→ transmit"),
+    ).toBeVisible();
+
+    // Decision arrives via the job queue + Realtime (seeded delay 3s, then release 3s later)
+    await expect(heading(page).getByText("accepted")).toBeVisible({ timeout: 20_000 });
+    await expect(timeline(page).getByText(/Manifest accepted by ACE/)).toBeVisible();
+    await expect(heading(page).getByText("released")).toBeVisible({ timeout: 20_000 });
+    await expect(timeline(page).getByText(/Released at primary/)).toBeVisible();
+    await expect(
+      page.getByRole("list", { name: "Transmission log" }).getByText("← decision").first(),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Mark arrived" })).toBeVisible();
+  });
+
+  test("REJECT hook → manifest rejected asynchronously and becomes editable", async ({ page }) => {
+    await login(page, "dispatch@pathfinder.demo");
+    await buildReady(page, "TRIP-REJECT-1");
+    await page.getByRole("button", { name: "Transmit to CBP" }).click();
+    await expect(heading(page).getByText("sent")).toBeVisible();
+    await expect(heading(page).getByText("rejected")).toBeVisible({ timeout: 20_000 });
+    await expect(timeline(page).getByText(/Manifest rejected/)).toBeVisible();
+    await page.getByRole("button", { name: /^Trip/ }).click();
+    await expect(page.getByLabel("Trip number")).toBeEnabled();
+  });
+
+  test("FAIL hook → transport error, manifest stays draft, failure logged", async ({ page }) => {
+    await login(page, "dispatch@pathfinder.demo");
+    await buildReady(page, "TRIP-FAIL-1");
+    await page.getByRole("button", { name: "Transmit to CBP" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: /gateway/ })).toContainText(
+      /gateway unavailable.*not transmitted/i,
+    );
+    await expect(heading(page).getByText("draft")).toBeVisible();
+    await expect(
+      page
+        .getByRole("list", { name: "Transmission log" })
+        .getByText(/503 · Customs gateway unavailable/),
+    ).toBeVisible();
+    // still editable — user can retry
+    await expect(page.getByRole("button", { name: "Transmit to CBP" })).toBeEnabled();
+  });
+});
+
+test.describe("integrations settings", () => {
+  test("owner sees provider cards, the live log, and can run due jobs", async ({ page }) => {
+    await login(page, "owner@pathfinder.demo");
+    await page.goto("/settings/integrations");
+    await expect(page.getByRole("heading", { name: "Integrations" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "CBP ACE (US)" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "CBSA ACI (Canada)" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Integration log" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Background jobs" })).toBeVisible();
+    await page.getByRole("button", { name: "Run due now" }).click();
+    await expect(page.getByRole("button", { name: "Run due now" })).toBeEnabled();
+
+    // Save a config change and see it persist
+    const card = page.locator("form", { hasText: "CBP ACE (US)" });
+    await card.getByLabel("Decision delay (ms)").fill("2500");
+    await card.getByRole("button", { name: "Save" }).click();
+    await expect(card.getByText("Saved.")).toBeVisible();
+    await page.reload();
+    await expect(
+      page.locator("form", { hasText: "CBP ACE (US)" }).getByLabel("Decision delay (ms)"),
+    ).toHaveValue("2500");
+    // restore
+    await page
+      .locator("form", { hasText: "CBP ACE (US)" })
+      .getByLabel("Decision delay (ms)")
+      .fill("3000");
+    await page
+      .locator("form", { hasText: "CBP ACE (US)" })
+      .getByRole("button", { name: "Save" })
+      .click();
+  });
+
+  test("read-only cannot reach integrations", async ({ page }) => {
+    await login(page, "readonly@pathfinder.demo");
+    await page.goto("/settings/integrations");
+    await expect(page).toHaveURL(/\/dashboard/);
+  });
+});
+
+test.describe("billing (mock mode)", () => {
+  test("owner upgrades via mock checkout and the plan syncs to the organization", async ({
+    page,
+  }) => {
+    await login(page, "owner@pathfinder.demo");
+    await page.goto("/settings/billing");
+    await expect(page.getByRole("heading", { name: "Billing" })).toBeVisible();
+    await expect(page.getByText("mock mode")).toBeVisible();
+    // Idempotent across runs: pick whichever plan is not current.
+    const choose = page.getByRole("button", { name: /^Choose / }).first();
+    const plan = (await choose.textContent())!.replace("Choose ", "").trim().toLowerCase();
+    await Promise.all([page.waitForURL(/checkout=success/), choose.click()]);
+    await expect(page.getByText("Subscription updated.")).toBeVisible();
+    await expect(page.getByText(new RegExp(`${plan} · active`, "i"))).toBeVisible();
+    await expect(page.getByRole("button", { name: "Current plan" })).toBeVisible();
+    await page.goto("/dashboard");
+    await expect(page.getByText(`${plan} · active`)).toBeVisible();
+  });
+
+  test("read-only can view billing but not change plans", async ({ page }) => {
+    await login(page, "readonly@pathfinder.demo");
+    await page.goto("/settings/billing");
+    await expect(page.getByRole("heading", { name: "Billing" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Choose/ })).toHaveCount(0);
+  });
+});

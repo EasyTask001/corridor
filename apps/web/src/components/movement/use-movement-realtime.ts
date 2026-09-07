@@ -28,7 +28,11 @@ export function useMovementRealtime(movementId: string, onChange: () => void) {
         { event: "UPDATE", schema: "public", table: "movements", filter: `id=eq.${movementId}` },
         onChange,
       )
-      .subscribe();
+      .subscribe((status: string, err?: Error) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.warn(`[realtime] movement:${movementId} ${status}`, err?.message);
+        }
+      });
     return () => {
       void supabase.removeChannel(channel);
     };

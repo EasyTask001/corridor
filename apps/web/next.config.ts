@@ -2,7 +2,13 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  transpilePackages: ["@corridor/api", "@corridor/auth", "@corridor/db", "@corridor/domain"],
+  transpilePackages: [
+    "@corridor/api",
+    "@corridor/auth",
+    "@corridor/db",
+    "@corridor/domain",
+    "@corridor/integrations",
+  ],
   serverExternalPackages: ["postgres"],
   headers: async () => [
     {

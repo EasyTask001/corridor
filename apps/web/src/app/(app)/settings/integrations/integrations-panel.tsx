@@ -1,0 +1,325 @@
+"use client";
+
+import { useState, type FormEvent } from "react";
+import Link from "next/link";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { inferRouterOutputs } from "@trpc/server";
+import type { AppRouter } from "@corridor/api";
+import { useTRPC } from "@/lib/trpc/client";
+
+type O = inferRouterOutputs<AppRouter>["integrations"];
+type Configs = O["configs"]["list"];
+type Events = O["events"]["list"];
+type Jobs = O["jobs"]["list"];
+
+const PROVIDERS = [
+  {
+    key: "cbp_ace",
+    name: "CBP ACE (US)",
+    desc: "Automated Commercial Environment — southbound e-manifests",
+    mock: true,
+  },
+  {
+    key: "cbsa_aci",
+    name: "CBSA ACI (Canada)",
+    desc: "Advance Commercial Information — northbound e-manifests",
+    mock: true,
+  },
+  {
+    key: "border_wait_time",
+    name: "Border wait times",
+    desc: "CBP BWT / CBSA border times feed (stub)",
+    mock: false,
+  },
+  {
+    key: "hts_tariff",
+    name: "HS / HTS tariff",
+    desc: "Tariff classification lookup (stub)",
+    mock: false,
+  },
+  {
+    key: "stripe",
+    name: "Stripe",
+    desc: "Subscription billing — managed on the Billing page",
+    mock: false,
+  },
+] as const;
+
+export function IntegrationsPanel({
+  initialConfigs,
+  initialEvents,
+  initialJobs,
+  initialStats,
+}: {
+  initialConfigs: Configs;
+  initialEvents: Events;
+  initialJobs: Jobs;
+  initialStats: Record<string, number>;
+}) {
+  const trpc = useTRPC();
+  const qc = useQueryClient();
+  const configsQ = useQuery({
+    ...trpc.integrations.configs.list.queryOptions(),
+    initialData: initialConfigs,
+  });
+  const eventsQ = useQuery({
+    ...trpc.integrations.events.list.queryOptions({ limit: 50 }),
+    initialData: initialEvents,
+    refetchInterval: 5000,
+  });
+  const jobsQ = useQuery({
+    ...trpc.integrations.jobs.list.queryOptions({ limit: 30 }),
+    initialData: initialJobs,
+    refetchInterval: 5000,
+  });
+  const statsQ = useQuery({
+    ...trpc.integrations.jobs.stats.queryOptions(),
+    initialData: initialStats,
+    refetchInterval: 5000,
+  });
+  const invalidate = () => qc.invalidateQueries({ queryKey: trpc.integrations.pathKey() });
+  const upsert = useMutation(
+    trpc.integrations.configs.upsert.mutationOptions({ onSuccess: invalidate }),
+  );
+  const runNow = useMutation(
+    trpc.integrations.jobs.runNow.mutationOptions({ onSuccess: invalidate }),
+  );
+  const [saved, setSaved] = useState<string | null>(null);
+
+  const cfgFor = (p: string) => configsQ.data.find((c) => c.provider === p);
+
+  return (
+    <div className="space-y-6">
+      <section className="grid gap-4 lg:grid-cols-2">
+        {PROVIDERS.map((p) => {
+          const cfg = cfgFor(p.key);
+          const settings = (cfg?.settings ?? {}) as {
+            mockDelayMs?: number;
+            mockFailureRate?: number;
+          };
+          return (
+            <form
+              key={p.key}
+              className="panel space-y-3 p-5"
+              onSubmit={(e: FormEvent<HTMLFormElement>) => {
+                e.preventDefault();
+                const fd = new FormData(e.currentTarget);
+                upsert.mutate(
+                  {
+                    provider: p.key,
+                    environment: (fd.get("environment") as "sandbox" | "production") ?? "sandbox",
+                    status: fd.get("enabled") ? "active" : "disabled",
+                    settings: p.mock
+                      ? {
+                          mockDelayMs: Number(fd.get("mockDelayMs") ?? 4000),
+                          mockFailureRate: Number(fd.get("mockFailureRate") ?? 0) / 100,
+                        }
+                      : {},
+                  },
+                  { onSuccess: () => setSaved(p.key) },
+                );
+              }}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="font-medium">{p.name}</h2>
+                  <p className="text-xs text-ink-500">{p.desc}</p>
+                </div>
+                <span
+                  className={`rounded px-2 py-0.5 text-xs font-semibold uppercase ${
+                    cfg?.status === "disabled"
+                      ? "bg-ink-100 text-ink-500"
+                      : "bg-ok-500/10 text-ok-500"
+                  }`}
+                >
+                  {cfg?.status ?? "default"}
+                </span>
+              </div>
+              {p.key === "stripe" ? (
+                <p className="text-sm">
+                  <Link href="/settings/billing" className="underline">
+                    Manage on the Billing page →
+                  </Link>
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="label" htmlFor={`${p.key}-env`}>
+                      Environment
+                    </label>
+                    <select
+                      id={`${p.key}-env`}
+                      name="environment"
+                      defaultValue={cfg?.environment ?? "sandbox"}
+                      className="input"
+                    >
+                      <option value="sandbox">Sandbox (mock gateway)</option>
+                      <option value="production">Production</option>
+                    </select>
+                  </div>
+                  <label className="flex items-end gap-2 pb-2 text-sm">
+                    <input
+                      type="checkbox"
+                      name="enabled"
+                      defaultChecked={cfg?.status !== "disabled"}
+                    />{" "}
+                    Enabled
+                  </label>
+                  {p.mock && (
+                    <>
+                      <div>
+                        <label className="label" htmlFor={`${p.key}-delay`}>
+                          Decision delay (ms)
+                        </label>
+                        <input
+                          id={`${p.key}-delay`}
+                          name="mockDelayMs"
+                          type="number"
+                          min={0}
+                          step={500}
+                          defaultValue={settings.mockDelayMs ?? 4000}
+                          className="input"
+                        />
+                      </div>
+                      <div>
+                        <label className="label" htmlFor={`${p.key}-fail`}>
+                          Failure injection (%)
+                        </label>
+                        <input
+                          id={`${p.key}-fail`}
+                          name="mockFailureRate"
+                          type="number"
+                          min={0}
+                          max={100}
+                          defaultValue={Math.round((settings.mockFailureRate ?? 0) * 100)}
+                          className="input"
+                        />
+                      </div>
+                    </>
+                  )}
+                  <div className="col-span-2 flex items-center gap-3">
+                    <button className="btn-primary" disabled={upsert.isPending}>
+                      Save
+                    </button>
+                    {saved === p.key && <span className="text-sm text-ok-500">Saved.</span>}
+                  </div>
+                </div>
+              )}
+            </form>
+          );
+        })}
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-[1fr_20rem]">
+        <div className="panel overflow-x-auto">
+          <div className="flex items-center justify-between px-4 py-3">
+            <h2 className="font-medium">Integration log</h2>
+            <span className="text-xs text-ink-500">live · last 50</span>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">
+              <tr>
+                <th className="px-4 py-2 font-medium">When</th>
+                <th className="px-4 py-2 font-medium">Provider</th>
+                <th className="px-4 py-2 font-medium">Operation</th>
+                <th className="px-4 py-2 font-medium">Movement</th>
+                <th className="px-4 py-2 font-medium">Result</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-ink-100">
+              {eventsQ.data.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-4 py-5 text-ink-500">
+                    No integration calls yet.
+                  </td>
+                </tr>
+              )}
+              {eventsQ.data.map((e) => (
+                <tr key={e.id}>
+                  <td className="whitespace-nowrap px-4 py-2 text-xs text-ink-500">
+                    {new Date(e.createdAt).toLocaleTimeString("en-CA")}
+                  </td>
+                  <td className="px-4 py-2 font-mono text-xs">{e.provider}</td>
+                  <td className="px-4 py-2 text-xs">
+                    <span className="text-ink-500">{e.direction === "outbound" ? "→" : "←"}</span>{" "}
+                    {e.operation}
+                    {e.durationMs != null && (
+                      <span className="ml-1 text-ink-300">{e.durationMs}ms</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 font-mono text-xs">
+                    {e.movementId ? (
+                      <Link href={`/movements/${e.movementId}`} className="hover:underline">
+                        {e.movementNumber}
+                      </Link>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-xs">
+                    {e.success ? (
+                      <span className="text-ok-500">
+                        ok{e.statusCode ? ` ${e.statusCode}` : ""}
+                      </span>
+                    ) : (
+                      <span className="text-danger-500" title={e.errorMessage ?? ""}>
+                        {e.statusCode ?? "error"} · {e.errorMessage}
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="panel p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-medium">Background jobs</h2>
+            <button
+              className="btn-secondary px-2.5 py-1 text-xs"
+              disabled={runNow.isPending}
+              onClick={() => runNow.mutate()}
+            >
+              {runNow.isPending ? "Running…" : "Run due now"}
+            </button>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs">
+            {Object.entries(statsQ.data).map(([k, v]) => (
+              <span key={k} className="rounded bg-ink-100 px-2 py-0.5 font-mono">
+                {k} {v}
+              </span>
+            ))}
+          </div>
+          <ul className="mt-3 max-h-96 space-y-2 overflow-y-auto text-xs">
+            {jobsQ.data.map((j) => (
+              <li key={j.id} className="rounded border border-ink-100 p-2">
+                <div className="flex justify-between font-mono">
+                  <span>
+                    #{j.id} {j.jobType}
+                  </span>
+                  <span
+                    className={
+                      j.status === "failed"
+                        ? "text-danger-500"
+                        : j.status === "succeeded"
+                          ? "text-ok-500"
+                          : "text-ink-500"
+                    }
+                  >
+                    {j.status}
+                  </span>
+                </div>
+                <div className="text-ink-500">
+                  run {new Date(j.runAt).toLocaleTimeString("en-CA")} · attempt {j.attempts}/
+                  {j.maxAttempts}
+                </div>
+                {j.lastError && <div className="text-danger-500">{j.lastError}</div>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+    </div>
+  );
+}

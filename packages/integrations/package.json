@@ -1,5 +1,5 @@
 {
-  "name": "@corridor/api",
+  "name": "@corridor/integrations",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -14,14 +14,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@corridor/auth": "workspace:*",
-    "@corridor/db": "workspace:*",
     "@corridor/domain": "workspace:*",
-    "@corridor/integrations": "workspace:*",
-    "@supabase/supabase-js": "^2.57.4",
-    "@trpc/server": "^11.18.0",
-    "drizzle-orm": "^0.45.2",
-    "superjson": "^2.2.6",
+    "stripe": "^22.6.1",
     "zod": "^4.1.5"
   },
   "devDependencies": {

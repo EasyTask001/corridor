@@ -1,22 +1,11 @@
 /**
  * Movement Builder core — headers, cargo, seals, transitions, amendments and
- * the append-only event timeline. Every status change goes through the domain
- * state machine (`transition` / `actorMayTransition`) AND the DB trigger.
+ * the append-only event timeline. Lifecycle primitives live in
+ * services/movements.ts so background workers share them.
  */
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  ilike,
-  inArray,
-  or,
-  schema,
-  sql,
-  type RlsTransaction,
-} from "@corridor/db";
+import { and, asc, desc, eq, ilike, inArray, or, schema, sql } from "@corridor/db";
 import {
   amendmentInput,
   cargoRemoveInput,
@@ -30,43 +19,21 @@ import {
   regime as regimeSchema,
   sealAddInput,
   sealRemoveInput,
-  transition,
-  actorMayTransition,
   uuid,
-  validateForTransmit,
-  type ActorType,
   type MovementStatus,
 } from "@corridor/domain";
 import { permissionProcedure, router, type OrgContext } from "../trpc";
+import { transmitMovement } from "../services/customs";
+import {
+  addEvent,
+  applyCustomsDecision,
+  applyTransition,
+  loadFull,
+  requireMovement,
+  validationFor,
+} from "../services/movements";
 
-const {
-  movements,
-  movementEvents,
-  movementAmendments,
-  cargo,
-  seals,
-  drivers,
-  trucks,
-  trailers,
-  partners,
-  userProfiles,
-} = schema;
-
-type Tx = RlsTransaction;
-
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
-async function requireMovement(tx: Tx, orgId: string, id: string) {
-  const [m] = await tx
-    .select()
-    .from(movements)
-    .where(and(eq(movements.id, id), eq(movements.organizationId, orgId)))
-    .limit(1);
-  if (!m) throw new TRPCError({ code: "NOT_FOUND", message: "Movement not found" });
-  return m;
-}
+const { movements, movementAmendments, cargo, seals, drivers, trucks, trailers, partners } = schema;
 
 function requireEditable(status: MovementStatus) {
   if (!isEditable(status)) {
@@ -77,196 +44,10 @@ function requireEditable(status: MovementStatus) {
   }
 }
 
-async function addEvent(
-  tx: Tx,
-  ctx: OrgContext,
-  movementId: string,
-  e: {
-    eventType: "status_change" | "amendment" | "note" | "customs_response" | "ai_flag";
-    fromStatus?: MovementStatus | null;
-    toStatus?: MovementStatus | null;
-    payload?: Record<string, unknown>;
-    actorType: ActorType;
-  },
-) {
-  await tx.insert(movementEvents).values({
-    movementId,
-    organizationId: ctx.orgId,
-    eventType: e.eventType,
-    fromStatus: e.fromStatus ?? null,
-    toStatus: e.toStatus ?? null,
-    payload: e.payload ?? null,
-    actorType: e.actorType,
-    actorId: e.actorType === "user" ? ctx.session.user.id : null,
-  });
-}
-
-/** Apply a status transition with full domain + DB checks, recording the event. */
-async function applyTransition(
-  tx: Tx,
-  ctx: OrgContext,
-  m: typeof movements.$inferSelect,
-  to: MovementStatus,
-  actorType: ActorType,
-  extra: Partial<typeof movements.$inferInsert> = {},
-  payload: Record<string, unknown> = {},
-) {
-  const from = m.status;
-  try {
-    transition(from, to);
-  } catch (e) {
-    throw new TRPCError({ code: "PRECONDITION_FAILED", message: (e as Error).message });
-  }
-  if (!actorMayTransition(actorType, from, to)) {
-    throw new TRPCError({
-      code: "FORBIDDEN",
-      message: `${from} → ${to} can only be driven by customs`,
-    });
-  }
-  const [row] = await tx
-    .update(movements)
-    .set({ status: to, ...extra })
-    .where(eq(movements.id, m.id))
-    .returning();
-  await addEvent(tx, ctx, m.id, {
-    eventType: "status_change",
-    fromStatus: from,
-    toStatus: to,
-    payload,
-    actorType,
-  });
-  return row!;
-}
-
-async function loadFull(tx: Tx, orgId: string, id: string) {
-  const m = await requireMovement(tx, orgId, id);
-  const [driver, truck, trailer, cargoRows, sealRows, events, amendments] = await Promise.all([
-    m.driverId
-      ? tx
-          .select()
-          .from(drivers)
-          .where(eq(drivers.id, m.driverId))
-          .then((r) => r[0] ?? null)
-      : null,
-    m.truckId
-      ? tx
-          .select()
-          .from(trucks)
-          .where(eq(trucks.id, m.truckId))
-          .then((r) => r[0] ?? null)
-      : null,
-    m.trailerId
-      ? tx
-          .select()
-          .from(trailers)
-          .where(eq(trailers.id, m.trailerId))
-          .then((r) => r[0] ?? null)
-      : null,
-    tx
-      .select({
-        cargo: cargo,
-        shipperName: sql<
-          string | null
-        >`(select name from public.partners p where p.id = ${cargo.shipperId})`,
-        consigneeName: sql<
-          string | null
-        >`(select name from public.partners p where p.id = ${cargo.consigneeId})`,
-      })
-      .from(cargo)
-      .where(eq(cargo.movementId, id))
-      .orderBy(asc(cargo.lineNumber), asc(cargo.createdAt)),
-    tx.select().from(seals).where(eq(seals.movementId, id)).orderBy(asc(seals.createdAt)),
-    tx
-      .select({
-        id: movementEvents.id,
-        eventType: movementEvents.eventType,
-        fromStatus: movementEvents.fromStatus,
-        toStatus: movementEvents.toStatus,
-        payload: movementEvents.payload,
-        actorType: movementEvents.actorType,
-        actorId: movementEvents.actorId,
-        actorName: userProfiles.displayName,
-        occurredAt: movementEvents.occurredAt,
-      })
-      .from(movementEvents)
-      .leftJoin(userProfiles, eq(userProfiles.userId, movementEvents.actorId))
-      .where(eq(movementEvents.movementId, id))
-      .orderBy(desc(movementEvents.occurredAt)),
-    tx
-      .select()
-      .from(movementAmendments)
-      .where(eq(movementAmendments.movementId, id))
-      .orderBy(desc(movementAmendments.amendmentNumber)),
-  ]);
-
-  return {
-    ...m,
-    driver,
-    truck,
-    trailer,
-    cargo: cargoRows.map((r) => ({
-      ...r.cargo,
-      shipperName: r.shipperName,
-      consigneeName: r.consigneeName,
-    })),
-    seals: sealRows,
-    events,
-    amendments,
-  };
-}
-
-type Full = Awaited<ReturnType<typeof loadFull>>;
-
-function toValidation(full: Full) {
-  return validateForTransmit({
-    regime: full.regime,
-    crossingPoint: full.crossingPoint ?? null,
-    scheduledCrossingAt: full.scheduledCrossingAt?.toISOString() ?? null,
-    driver: full.driver
-      ? {
-          licenseExpiry: full.driver.licenseExpiry,
-          fastCardNumber: full.driver.fastCardNumber,
-          fastCardExpiry: full.driver.fastCardExpiry,
-          citizenship: full.driver.citizenship,
-          status: full.driver.status,
-        }
-      : null,
-    truck: full.truck
-      ? {
-          registrationExpiry: full.truck.registrationExpiry,
-          insuranceExpiry: full.truck.insuranceExpiry,
-          plateNumber: full.truck.plateNumber,
-          status: full.truck.status,
-        }
-      : null,
-    trailer: full.trailer
-      ? {
-          registrationExpiry: full.trailer.registrationExpiry,
-          plateNumber: full.trailer.plateNumber,
-          status: full.trailer.status,
-        }
-      : null,
-    cargo: full.cargo.map((c) => ({
-      commodityDescription: c.commodityDescription,
-      hsCode: c.hsCode,
-      weightKg: c.weightKg,
-      pieceCount: c.pieceCount,
-      shipperId: c.shipperId,
-      consigneeId: c.consigneeId,
-      valueAmount: c.valueAmount,
-      valueCurrency: c.valueCurrency,
-      countryOfOrigin: c.countryOfOrigin,
-    })),
-    seals: full.seals.map((s) => ({ sealNumber: s.sealNumber })),
-  });
-}
+const actorOf = (ctx: OrgContext) => ({ orgId: ctx.orgId, userId: ctx.session.user.id });
 
 const customsSimulationEnabled = () =>
   process.env.CORRIDOR_ALLOW_CUSTOMS_SIMULATION === "true" || process.env.NODE_ENV !== "production";
-
-// ---------------------------------------------------------------------------
-// router
-// ---------------------------------------------------------------------------
 
 export const movementRouter = router({
   list: permissionProcedure("movement.read")
@@ -346,7 +127,7 @@ export const movementRouter = router({
     .query(({ ctx, input }) =>
       ctx.rls(async (tx) => {
         const full = await loadFull(tx, ctx.orgId, input.id);
-        const issues = toValidation(full);
+        const issues = validationFor(full);
         return { issues, canTransmit: !hasBlockingIssues(issues) };
       }),
     ),
@@ -369,7 +150,7 @@ export const movementRouter = router({
             createdBy: ctx.session.user.id,
           })
           .returning();
-        await addEvent(tx, ctx, m!.id, {
+        await addEvent(tx, actorOf(ctx), m!.id, {
           eventType: "status_change",
           fromStatus: null,
           toStatus: "draft",
@@ -502,7 +283,7 @@ export const movementRouter = router({
     .mutation(({ ctx, input }) =>
       ctx.rls(async (tx) => {
         await requireMovement(tx, ctx.orgId, input.movementId);
-        await addEvent(tx, ctx, input.movementId, {
+        await addEvent(tx, actorOf(ctx), input.movementId, {
           eventType: "note",
           actorType: "user",
           payload: { body: input.body },
@@ -511,37 +292,27 @@ export const movementRouter = router({
       }),
     ),
 
-  /** draft | rejected → sent. Blocked when pre-transmit validation has blocking issues. */
+  /**
+   * draft | rejected → sent. Validates, builds the e-manifest, calls the
+   * (mock or real) customs gateway, logs the integration event and enqueues
+   * the asynchronous decision. Transport failures leave the movement editable
+   * and are surfaced as BAD_GATEWAY *after* the failure row is committed.
+   */
   submit: permissionProcedure("movement.transmit_to_customs")
     .input(z.object({ id: uuid }))
-    .mutation(({ ctx, input }) =>
-      ctx.rls(async (tx) => {
-        const full = await loadFull(tx, ctx.orgId, input.id);
-        const issues = toValidation(full);
-        if (hasBlockingIssues(issues)) {
-          throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message: `Cannot transmit: ${issues
-              .filter((i) => i.severity === "blocking")
-              .map((i) => i.message)
-              .join(" ")}`,
-          });
-        }
-        // Phase 3 wires the real/mocked ACE/ACI client here; Phase 2 records the send.
-        return applyTransition(
-          tx,
-          ctx,
-          full,
-          "sent",
-          "user",
-          {},
-          {
-            regime: full.regime,
-            warnings: issues.map((i) => i.code),
-          },
-        );
-      }),
-    ),
+    .mutation(async ({ ctx, input }) => {
+      const result = await ctx.rls((tx) => transmitMovement(tx, actorOf(ctx), input.id));
+      if ("transportError" in result && result.transportError) {
+        const e = result.transportError;
+        throw new TRPCError({
+          code: "BAD_GATEWAY",
+          message: e.retryable
+            ? `${e.message}. The manifest was not transmitted — try again shortly.`
+            : `${e.message}. Check the integration settings.`,
+        });
+      }
+      return result;
+    }),
 
   cancel: permissionProcedure("movement.cancel")
     .input(z.object({ id: uuid, reason: z.string().trim().max(500).optional() }))
@@ -550,7 +321,7 @@ export const movementRouter = router({
         const m = await requireMovement(tx, ctx.orgId, input.id);
         return applyTransition(
           tx,
-          ctx,
+          actorOf(ctx),
           m,
           "cancelled",
           "user",
@@ -566,7 +337,7 @@ export const movementRouter = router({
     .mutation(({ ctx, input }) =>
       ctx.rls(async (tx) => {
         const m = await requireMovement(tx, ctx.orgId, input.id);
-        return applyTransition(tx, ctx, m, "arrived", "user");
+        return applyTransition(tx, actorOf(ctx), m, "arrived", "user");
       }),
     ),
 
@@ -629,13 +400,13 @@ export const movementRouter = router({
             createdBy: ctx.session.user.id,
           })
           .returning();
-        await addEvent(tx, ctx, m.id, {
+        await addEvent(tx, actorOf(ctx), m.id, {
           eventType: "amendment",
           actorType: "user",
           payload: { amendmentNumber: next, reason: input.reason, diff },
         });
         // One UPDATE: status change + patched fields (the guard permits edits alongside a transition).
-        const updated = await applyTransition(tx, ctx, m, "sent", "user", set, {
+        const updated = await applyTransition(tx, actorOf(ctx), m, "sent", "user", set, {
           amendmentNumber: next,
         });
         return { movement: updated, amendment: amendment! };
@@ -643,9 +414,9 @@ export const movementRouter = router({
     ),
 
   /**
-   * Customs decision. In Phase 3 this is invoked by the ACE/ACI client
-   * callback; in Phase 2 it is a dev-only simulation (disabled in production
-   * unless CORRIDOR_ALLOW_CUSTOMS_SIMULATION=true).
+   * Dev-only customs simulation. Real decisions arrive through the
+   * customs.decide background job (services/jobs.ts). Disabled in production
+   * unless CORRIDOR_ALLOW_CUSTOMS_SIMULATION=true.
    */
   customsResponse: permissionProcedure("movement.transmit_to_customs")
     .input(customsResponseInput)
@@ -655,42 +426,15 @@ export const movementRouter = router({
           throw new TRPCError({ code: "FORBIDDEN", message: "Customs simulation is disabled" });
         }
         const m = await requireMovement(tx, ctx.orgId, input.movementId);
-        const ref =
-          input.referenceNumber ??
-          m.customsReferenceNumber ??
-          `${m.regime}-${Date.now().toString(36).toUpperCase()}`;
-        await addEvent(tx, ctx, m.id, {
-          eventType: "customs_response",
-          actorType: "customs_api",
-          payload: {
-            decision: input.decision,
-            referenceNumber: ref,
-            message: input.message ?? null,
-            simulated: true,
-          },
+        return applyCustomsDecision(tx, actorOf(ctx), m, {
+          decision: input.decision,
+          referenceNumber:
+            input.referenceNumber ??
+            m.customsReferenceNumber ??
+            `${m.regime}-SIM-${Date.now().toString(36).toUpperCase()}`,
+          message: input.message ?? null,
+          simulated: true,
         });
-        const updated = await applyTransition(
-          tx,
-          ctx,
-          m,
-          input.decision,
-          "customs_api",
-          { customsReferenceNumber: ref },
-          { referenceNumber: ref, message: input.message ?? null },
-        );
-        // Resolve any submitted amendment with the same decision.
-        if (input.decision === "accepted" || input.decision === "rejected") {
-          await tx
-            .update(movementAmendments)
-            .set({ status: input.decision })
-            .where(
-              and(
-                eq(movementAmendments.movementId, m.id),
-                eq(movementAmendments.status, "submitted"),
-              ),
-            );
-        }
-        return updated;
       }),
     ),
 

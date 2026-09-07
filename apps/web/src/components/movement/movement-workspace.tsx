@@ -56,10 +56,31 @@ export function MovementWorkspace({
 
   const getOpts = trpc.movement.get.queryOptions({ id });
   const validateOpts = trpc.movement.validate.queryOptions({ id });
-  const { data: m = initial } = useQuery({ ...getOpts, initialData: initial });
+  // Realtime pushes deltas; polling while a manifest is in flight reconciles
+  // anything missed (dropped socket, tab throttling) — the plan's "seeded from
+  // server state, reconciled with realtime" model.
+  const { data: m = initial } = useQuery({
+    ...getOpts,
+    initialData: initial,
+    refetchInterval: (q) => {
+      const s = q.state.data?.status ?? initial.status;
+      return s === "sent" || s === "accepted" || s === "held" ? 4000 : false;
+    },
+  });
   const { data: validation = initialValidation } = useQuery({
     ...validateOpts,
     initialData: initialValidation,
+  });
+
+  const borderWait = useQuery({
+    ...trpc.integrations.borderWait.queryOptions({ crossingCode: m.crossingPoint?.code ?? "" }),
+    enabled: !!m.crossingPoint?.code,
+    staleTime: 60_000,
+  });
+  const integrationLog = useQuery({
+    ...trpc.integrations.events.forMovement.queryOptions({ movementId: id }),
+    refetchInterval:
+      m.status === "sent" || m.status === "accepted" || m.status === "held" ? 4000 : false,
   });
 
   const refresh = useCallback(() => {
@@ -67,13 +88,27 @@ export function MovementWorkspace({
     qc.invalidateQueries({ queryKey: validateOpts.queryKey });
     qc.invalidateQueries({ queryKey: trpc.movement.list.queryKey() });
     qc.invalidateQueries({ queryKey: trpc.movement.board.queryKey() });
-  }, [qc, getOpts.queryKey, validateOpts.queryKey, trpc.movement.list, trpc.movement.board]);
+    qc.invalidateQueries({
+      queryKey: trpc.integrations.events.forMovement.queryKey({ movementId: id }),
+    });
+  }, [
+    qc,
+    getOpts.queryKey,
+    validateOpts.queryKey,
+    trpc.movement.list,
+    trpc.movement.board,
+    trpc.integrations.events.forMovement,
+    id,
+  ]);
   useMovementRealtime(id, refresh);
 
   const editable = permissions.write && isEditable(m.status);
   const [step, setStep] = useState<StepKey>(editable ? "trip" : "review");
   const [error, setError] = useState<string | null>(null);
-  const onError = (e: { message: string }) => setError(e.message);
+  const onError = (e: { message: string }) => {
+    setError(e.message);
+    refresh(); // a failed transmit still writes an integration_events row
+  };
   const ok = () => {
     setError(null);
     refresh();
@@ -407,6 +442,36 @@ export function MovementWorkspace({
         )}
       </div>
       <Summary m={m} />
+      {integrationLog.data && integrationLog.data.length > 0 && (
+        <div className="panel p-5">
+          <h3 className="font-medium">Customs transmission log</h3>
+          <ul className="mt-2 space-y-1.5 text-sm" aria-label="Transmission log">
+            {integrationLog.data.map((e) => (
+              <li key={e.id} className="flex flex-wrap items-baseline gap-x-3">
+                <span className="font-mono text-xs text-ink-500">
+                  {new Date(e.createdAt).toLocaleTimeString("en-CA")}
+                </span>
+                <span className="font-mono text-xs">{e.provider}</span>
+                <span>
+                  {e.direction === "outbound" ? "→" : "←"} {e.operation}
+                </span>
+                {e.success ? (
+                  <span className="text-xs text-ok-500">
+                    ok
+                    {typeof e.responsePayload?.decision === "string"
+                      ? ` · ${e.responsePayload.decision}`
+                      : ""}
+                  </span>
+                ) : (
+                  <span className="text-xs text-danger-500">
+                    {e.statusCode} · {e.errorMessage}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {m.amendments.length > 0 && (
         <div className="panel p-5">
           <h3 className="font-medium">Amendments</h3>
@@ -524,7 +589,30 @@ export function MovementWorkspace({
                   · ref <span className="font-mono">{m.customsReferenceNumber}</span>
                 </>
               )}
+              {borderWait.data && (
+                <>
+                  {" "}
+                  · wait{" "}
+                  <span className="font-mono" title="Border wait (stub feed)">
+                    {borderWait.data.lanes.commercial} min
+                  </span>
+                  {borderWait.data.lanes.fast < borderWait.data.lanes.commercial && (
+                    <span className="text-ink-300"> · FAST {borderWait.data.lanes.fast} min</span>
+                  )}
+                </>
+              )}
             </p>
+            {(m.status === "sent" || m.status === "held") && (
+              <p className="mt-1 inline-flex items-center gap-2 rounded bg-signal-500/10 px-2 py-0.5 text-xs text-signal-600">
+                <span
+                  className="h-1.5 w-1.5 animate-pulse rounded-full bg-signal-500"
+                  aria-hidden
+                />
+                {m.status === "sent"
+                  ? `Awaiting ${m.regime === "ACE" ? "CBP" : "CBSA"} decision — the timeline updates live`
+                  : "Held for secondary inspection — awaiting release"}
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
             {isEditable(m.status) && permissions.transmit && (
