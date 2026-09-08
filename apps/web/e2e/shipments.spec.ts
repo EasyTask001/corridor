@@ -101,4 +101,39 @@ test.describe("shipments", () => {
     await expect(page.getByRole("button", { name: "Save shipment" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Add commodity line" })).toHaveCount(0);
   });
+
+  test("CSV import: validate the template, commit the ok rows, then delete the batch", async ({ page }) => {
+    await login(page, "dispatch@pathfinder.demo");
+    // Unique references so the file can be imported on every run.
+    const suffix = Date.now().toString(36).toUpperCase();
+    const csv = [
+      "regime,carrier_code,control_reference,shipment_type,cargo_type,shipper_name,consignee_name,entry_port,is_pars",
+      `ACE,PFTR,PAPS${suffix}A,regular_bill,,Maple Ridge Steel Ltd,Great Lakes Fabrication Inc,3801,false`,
+      `ACE,,PAPS${suffix}B,section_321,,Erie Produce Co,Great Lakes Fabrication Inc,3801,false`,
+      `ACE,PFTR,PAPS${suffix}C,bogus,,Nobody Inc,,3801,false`,
+    ].join("\n");
+    await page.goto("/shipments/import");
+    await page.getByLabel("CSV / TXT / DAT file").setInputFiles({
+      name: "ace-shipments.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from(csv),
+    });
+    await page.getByRole("button", { name: "Validate" }).click();
+    const result = page.getByLabel("Validation result");
+    await expect(result.getByText("2 ok, 1 with errors")).toBeVisible();
+    await expect(result.getByText("shipment_type", { exact: true })).toBeVisible();
+
+    await result.getByRole("button", { name: "Commit 2 rows" }).click();
+    await expect(page.getByRole("status")).toHaveText(/Committed 2 rows/);
+    await page.goto("/shipments?unassigned=1");
+    await expect(page.getByRole("link", { name: `PFTRPAPS${suffix}A` })).toBeVisible();
+
+    await page.goto("/shipments/import");
+    const batch = page.getByLabel("Import batches").getByRole("row", { name: /ace-shipments\.csv/ }).first();
+    await batch.getByRole("button", { name: "Delete rows" }).click();
+    await expect(page.getByRole("status")).toHaveText(/Deleted 2 rows/);
+    await expect(batch.getByText("deleted")).toBeVisible();
+    await page.goto("/shipments?unassigned=1");
+    await expect(page.getByRole("link", { name: `PFTRPAPS${suffix}A` })).toHaveCount(0);
+  });
 });

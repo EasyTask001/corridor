@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { shipmentStatus, type ShipmentStatus } from "@corridor/domain";
-import { Card, Input } from "@corridor/ui";
+import { buttonVariants, Card, Input } from "@corridor/ui";
 import { getSession } from "@/lib/session";
 import { api } from "@/lib/trpc/server";
 
@@ -67,12 +67,17 @@ export default async function ShipmentsPage({
 
   return (
     <div className="space-y-4">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Shipments</h1>
-        <p className="text-sm text-ink-500">
-          Every customs filing, whether or not it is on a truck yet. Add one from a movement&apos;s
-          Shipments step.
-        </p>
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Shipments</h1>
+          <p className="text-sm text-ink-500">
+            Every customs filing, whether or not it is on a truck yet. Add one from a movement&apos;s
+            Shipments step, or import a file.
+          </p>
+        </div>
+        <Link href="/shipments/import" className={buttonVariants({ variant: "secondary" })}>
+          Import CSV
+        </Link>
       </header>
 
       <div className="flex flex-wrap items-center gap-2">

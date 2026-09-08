@@ -1,0 +1,4 @@
+regime,carrier_code,control_reference,shipment_type,cargo_type,shipper_name,consignee_name,entry_port,in_bond_entry_type,in_bond_destination,is_pars,destination_port,sublocation,loading_country,loading_province,loading_city,consignee_business_number
+ACE,PFTR,PAPS90101,regular_bill,,Maple Ridge Steel Ltd,Great Lakes Fabrication Inc,3801,,,false,,,,,,
+ACE,,PAPS90102,section_321,,Erie Produce Co,Great Lakes Fabrication Inc,3801,,,false,,,,,,
+ACE,PFTR,PAPS90103,in_bond,,Maple Ridge Steel Ltd,Great Lakes Fabrication Inc,3801,IT,3901,false,,,,,,

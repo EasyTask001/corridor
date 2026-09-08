@@ -1,0 +1,3 @@
+regime,carrier_code,control_reference,shipment_type,cargo_type,shipper_name,consignee_name,entry_port,in_bond_entry_type,in_bond_destination,is_pars,destination_port,sublocation,loading_country,loading_province,loading_city,consignee_business_number
+ACI,7ELU,PARS70101,,regular,Great Lakes Fabrication Inc,Maple Ridge Steel Ltd,,,,true,0453,,US,MI,Detroit,123456789RT0001
+ACI,,PARS70102,,consolidated,Erie Produce Co,Maple Ridge Steel Ltd,,,,true,0440,,US,PA,Erie,
