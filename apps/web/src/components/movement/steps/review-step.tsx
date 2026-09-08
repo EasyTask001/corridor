@@ -122,12 +122,18 @@ function Summary({ m }: { m: Movement }) {
           m.crew.map((c) => `${c.firstName} ${c.lastName}`).join(", ") || "—",
         ],
         ["Truck", m.truck?.unitNumber ?? "—"],
-        ["Trailer", m.trailer?.unitNumber ?? "—"],
-        ["Shipments", String(m.shipments.length)],
+        ["Trailers", m.trailers.map((t) => t.unitNumber).join(" + ") || "—"],
+        ["Shipments", m.isEmpty ? "Empty trip" : String(m.shipments.length)],
         ["Lines", String(lines.length)],
         ["Total weight", `${totalKg.toLocaleString()} kg`],
         ["Pieces", String(pieces)],
-        ["Seals", m.seals.map((s) => s.sealNumber).join(", ") || "—"],
+        [
+          "Seals",
+          [
+            ...m.seals.filter((s) => !s.movementTrailerId).map((s) => `${s.sealNumber} (truck)`),
+            ...m.trailers.flatMap((t) => t.seals.map((s) => `${s.sealNumber} (${t.unitNumber})`)),
+          ].join(", ") || "—",
+        ],
         ["Submitted", fmt(m.submittedAt)],
         ["Released", fmt(m.releasedAt)],
       ].map(([k, v]) => (

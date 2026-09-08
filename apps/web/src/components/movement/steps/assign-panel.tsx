@@ -12,7 +12,7 @@ export function AssignPanel({
   detail,
 }: {
   label: string;
-  field: "truckId" | "trailerId";
+  field: "truckId";
   list: { id: string; label: string; hint?: string | null }[];
   current: { id: string } | null;
   detail: React.ReactNode;

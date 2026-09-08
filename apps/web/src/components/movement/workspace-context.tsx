@@ -25,7 +25,7 @@ export const STEPS = [
   { key: "truck", label: "Truck" },
   { key: "crew", label: "Crew" },
   { key: "shipment", label: "Shipments" },
-  { key: "trailer", label: "Trailer" },
+  { key: "trailer", label: "Trailers" },
   { key: "seals", label: "Seals" },
   { key: "review", label: "Review" },
 ] as const;
@@ -84,6 +84,9 @@ export function useMovementMutations() {
     addCrew: useMutation(trpc.movement.crew.add.mutationOptions(opts)),
     removeCrew: useMutation(trpc.movement.crew.remove.mutationOptions(opts)),
     setCrewRole: useMutation(trpc.movement.crew.setRole.mutationOptions(opts)),
+    addTrailer: useMutation(trpc.movement.trailers.add.mutationOptions(opts)),
+    removeTrailer: useMutation(trpc.movement.trailers.remove.mutationOptions(opts)),
+    reorderTrailers: useMutation(trpc.movement.trailers.reorder.mutationOptions(opts)),
     addSeal: useMutation(trpc.movement.seals.add.mutationOptions(opts)),
     removeSeal: useMutation(trpc.movement.seals.remove.mutationOptions(opts)),
     createShipment: useMutation(trpc.shipment.create.mutationOptions(opts)),

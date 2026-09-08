@@ -2,7 +2,12 @@
 
 import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { daysBetween, todayIso } from "@corridor/domain";
+import {
+  EQUIPMENT_TYPE_LABELS,
+  daysBetween,
+  todayIso,
+  type EquipmentType,
+} from "@corridor/domain";
 import {
   Badge,
   Button,
@@ -40,17 +45,32 @@ function setPath(obj: Record<string, unknown>, path: string, value: unknown) {
   cur[keys[keys.length - 1]!] = value;
 }
 
+function scalarValue(fd: FormData, name: string, f: FieldDef): unknown {
+  const raw = String(fd.get(name) ?? "").trim();
+  if (raw === "") return f.required ? "" : null;
+  if (f.type === "number") return Number(raw);
+  if (f.type === "boolean") return raw === "true";
+  return f.uppercase ? raw.toUpperCase() : raw;
+}
+
 function formToPayload(form: HTMLFormElement, fields: FieldDef[]) {
   const fd = new FormData(form);
   const out: Record<string, unknown> = {};
   for (const f of fields) {
-    const raw = String(fd.get(f.name) ?? "").trim();
-    let v: unknown;
-    if (raw === "") v = f.required ? "" : null;
-    else if (f.type === "number") v = Number(raw);
-    else if (f.type === "boolean") v = raw === "true";
-    else v = f.uppercase ? raw.toUpperCase() : raw;
-    setPath(out, f.name, v);
+    if (f.type === "repeater") {
+      // Rows are named `<field>.<n>.<sub>`; a row with every sub-field blank
+      // is an unused slot, not a validation error.
+      const rows: Record<string, unknown>[] = [];
+      for (let i = 0; i < (f.max ?? 10); i++) {
+        if (!fd.has(`${f.name}.${i}.${f.fields?.[0]?.name}`)) continue;
+        const row: Record<string, unknown> = {};
+        for (const sub of f.fields ?? []) row[sub.name] = scalarValue(fd, `${f.name}.${i}.${sub.name}`, sub);
+        if (Object.values(row).some((v) => v !== null && v !== "")) rows.push(row);
+      }
+      out[f.name] = rows;
+      continue;
+    }
+    setPath(out, f.name, scalarValue(fd, f.name, f));
   }
   // Nested addresses (partners.address, drivers.usAddress): drop null leaves so
   // the Zod object doesn't see nulls.
@@ -108,6 +128,15 @@ function renderCell(cfg: RegistryConfig, r: Row, key: string): ReactNode {
       const v = getPath(r, key);
       if (col?.kind === "expiry") return <ExpiryChip value={v} />;
       if (col?.kind === "status") return <StatusChip value={v} />;
+      if (col?.kind === "equipmentType")
+        return (
+          <span>
+            <span className="font-mono text-xs">{String(v ?? "")}</span>
+            <span className="ml-1.5 text-xs text-ink-500">
+              {EQUIPMENT_TYPE_LABELS[v as EquipmentType] ?? ""}
+            </span>
+          </span>
+        );
       if (col?.kind === "mono")
         return <span className="font-mono text-xs">{String(v ?? "—")}</span>;
       return String(v ?? "—").replace(/_/g, " ");
@@ -142,6 +171,18 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
   const listOpts = procs.list.queryOptions(listInput);
   const { data, isLoading } = useQuery(listOpts);
   const rows = (data?.rows ?? []) as Row[];
+  // Runtime option lists (the CBP equipment codes) — fetched once per registry
+  // that declares a field needing them.
+  const needsEquipmentTypes = cfg.fields.some((f) => f.optionsFrom === "equipmentTypes");
+  const equipmentTypes = useQuery({
+    ...trpc.reference.equipmentTypes.list.queryOptions(),
+    enabled: needsEquipmentTypes,
+    staleTime: 5 * 60_000,
+  });
+  const optionsFor = (f: FieldDef) =>
+    f.optionsFrom === "equipmentTypes"
+      ? (equipmentTypes.data ?? []).map((t) => ({ value: t.code, label: `${t.code} · ${t.label}` }))
+      : (f.options ?? []);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: procs.list.queryKey() });
@@ -328,9 +369,22 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
               {cfg.fields.map((f) => {
                 const id = `${kind}-${f.name}`;
                 const initial = editing === "new" ? "" : (getPath(editing, f.name) ?? "");
+                if (f.type === "repeater") {
+                  return (
+                    <Repeater
+                      key={f.name}
+                      idPrefix={id}
+                      field={f}
+                      initial={
+                        Array.isArray(initial) ? (initial as Record<string, unknown>[]) : []
+                      }
+                    />
+                  );
+                }
                 const value =
                   f.type === "date" && initial ? String(initial).slice(0, 10) : String(initial);
                 const cls = cn(f.mono && "font-mono", f.uppercase && "uppercase");
+                const options = optionsFor(f);
                 return (
                   <div key={f.name} className={f.span === 2 ? "col-span-2" : ""}>
                     <Label htmlFor={id}>
@@ -341,10 +395,10 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
                       <NativeSelect
                         id={id}
                         name={f.name}
-                        defaultValue={value || f.options?.[0]?.value}
+                        defaultValue={value || options[0]?.value}
                         className={cls}
                       >
-                        {f.options?.map((o) => (
+                        {options.map((o) => (
                           <option key={o.value} value={o.value}>
                             {o.label}
                           </option>
@@ -391,5 +445,79 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * An ordered list of small sub-rows inside the registry form (extra plates).
+ * Rows are uncontrolled inputs named `<field>.<n>.<sub>` so `formToPayload`
+ * can gather them from the surrounding <form>; only the row count is state.
+ */
+function Repeater({
+  idPrefix,
+  field: f,
+  initial,
+}: {
+  idPrefix: string;
+  field: FieldDef;
+  initial: Record<string, unknown>[];
+}) {
+  const max = f.max ?? 10;
+  const [count, setCount] = useState(initial.length);
+  const rows = Array.from({ length: count }, (_, i) => initial[i] ?? {});
+  return (
+    <fieldset className={f.span === 2 ? "col-span-2" : ""}>
+      <legend className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500">
+        {f.label}
+        <span className="ml-1.5 font-normal normal-case tracking-normal text-ink-300">
+          {count}/{max}
+        </span>
+      </legend>
+      <div className="space-y-2">
+        {rows.map((row, i) => (
+          <div key={i} className="flex items-end gap-2">
+            {(f.fields ?? []).map((sub) => {
+              const name = `${f.name}.${i}.${sub.name}`;
+              const id = `${idPrefix}-${i}-${sub.name}`;
+              return (
+                <div key={sub.name} className="flex-1">
+                  <Label htmlFor={id} className="text-[10px]">
+                    {sub.label}
+                  </Label>
+                  <Input
+                    id={id}
+                    name={name}
+                    defaultValue={String(row[sub.name] ?? "")}
+                    placeholder={sub.placeholder}
+                    required={sub.required}
+                    className={cn(sub.mono && "font-mono", sub.uppercase && "uppercase")}
+                  />
+                </div>
+              );
+            })}
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              aria-label={`Remove ${f.label.toLowerCase()} ${i + 1}`}
+              className="mb-1.5 px-1 text-danger-500 hover:text-danger-500"
+              onClick={() => setCount((c) => c - 1)}
+            >
+              Remove
+            </Button>
+          </div>
+        ))}
+        {count < max && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="xs"
+            onClick={() => setCount((c) => c + 1)}
+          >
+            {f.addLabel ?? "Add row"}
+          </Button>
+        )}
+      </div>
+    </fieldset>
   );
 }

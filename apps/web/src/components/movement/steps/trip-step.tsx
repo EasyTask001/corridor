@@ -55,6 +55,7 @@ export function TripStep() {
           // always carry a real code once one exists for its regime.
           carrierCode: String(fd.get("carrierCode") ?? "").trim() || defaultCarrierCode,
           scheduledCrossingAt: fromLocalInput(String(fd.get("eta") ?? "")),
+          isEmpty: fd.get("isEmpty") === "on",
         });
       }}
     >
@@ -116,6 +117,18 @@ export function TripStep() {
           disabled={!editable}
           className="input"
         />
+      </Field>
+      <Field label="Load">
+        <label className="flex items-center gap-2 pt-1.5 text-sm">
+          <input
+            type="checkbox"
+            name="isEmpty"
+            defaultChecked={m.isEmpty}
+            disabled={!editable}
+          />
+          {m.regime === "ACE" ? "Empty trailer" : "Empty trip"}
+          <span className="text-xs text-ink-500">(filed with no shipments)</span>
+        </label>
       </Field>
       {editable && (
         <div className="col-span-2">

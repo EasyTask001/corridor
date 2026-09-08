@@ -31,7 +31,7 @@ export default function MovementScreen() {
     );
   }
 
-  const { crew, truck, trailer, events, shipments } = data;
+  const { crew, truck, trailers, events, shipments } = data;
   const movement = data;
 
   return (
@@ -63,7 +63,9 @@ export default function MovementScreen() {
             ? crew.map((c) => `${c.firstName} ${c.lastName}`).join(", ")
             : "No crew"}
           {truck ? ` · Truck ${truck.unitNumber}` : ""}
-          {trailer ? ` · Trailer ${trailer.unitNumber}` : ""}
+          {trailers.length > 0
+            ? ` · Trailer ${trailers.map((t) => t.unitNumber).join(" + ")}`
+            : ""}
         </Text>
       </View>
 

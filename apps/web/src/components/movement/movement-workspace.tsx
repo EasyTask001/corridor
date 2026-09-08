@@ -415,7 +415,7 @@ export function MovementWorkspace({
                     carrierCode:
                       String(fd.get("amendCarrierCode") ?? "").trim() || defaultCarrierCode,
                     truckId: String(fd.get("truckId") ?? "") || null,
-                    trailerId: String(fd.get("trailerId") ?? "") || null,
+                    isEmpty: fd.get("isEmpty") === "on",
                   },
                 });
               }}
@@ -479,20 +479,11 @@ export function MovementWorkspace({
                   ))}
                 </select>
               </Field>
-              <Field label="Trailer" htmlFor="amendTrailer">
-                <select
-                  id="amendTrailer"
-                  name="trailerId"
-                  defaultValue={m.trailerId ?? ""}
-                  className="input"
-                >
-                  <option value="">— none —</option>
-                  {options.trailers.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
+              <Field label="Load">
+                <label className="flex items-center gap-2 pt-1.5 text-sm">
+                  <input type="checkbox" name="isEmpty" defaultChecked={m.isEmpty} />
+                  {m.regime === "ACE" ? "Empty trailer" : "Empty trip"}
+                </label>
               </Field>
               <div className="col-span-2 flex gap-2">
                 <button className="btn-signal" disabled={amend.isPending}>
