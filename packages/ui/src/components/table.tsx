@@ -8,18 +8,21 @@ export function Table({ className, ...props }: ComponentProps<"table">) {
 export function TableHeader({ className, ...props }: ComponentProps<"thead">) {
   return (
     <thead
-      className={cn("bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500", className)}
+      className={cn(
+        "bg-surface-sunken text-left text-xs uppercase tracking-wide text-fg-secondary",
+        className,
+      )}
       {...props}
     />
   );
 }
 
 export function TableBody({ className, ...props }: ComponentProps<"tbody">) {
-  return <tbody className={cn("divide-y divide-ink-100", className)} {...props} />;
+  return <tbody className={cn("divide-y divide-border-default", className)} {...props} />;
 }
 
 export function TableFooter({ className, ...props }: ComponentProps<"tfoot">) {
-  return <tfoot className={cn("border-t border-ink-100", className)} {...props} />;
+  return <tfoot className={cn("border-t border-border-default", className)} {...props} />;
 }
 
 export function TableRow({ className, ...props }: ComponentProps<"tr">) {
@@ -35,5 +38,5 @@ export function TableCell({ className, ...props }: ComponentProps<"td">) {
 }
 
 export function TableCaption({ className, ...props }: ComponentProps<"caption">) {
-  return <caption className={cn("px-4 py-2 text-xs text-ink-500", className)} {...props} />;
+  return <caption className={cn("px-4 py-2 text-xs text-fg-secondary", className)} {...props} />;
 }

@@ -17,7 +17,8 @@
 - No file under `apps/web/src` is modified in this plan **except** `apps/web/src/app/layout.tsx`, `apps/web/src/app/globals.css`, and `apps/web/src/components/app-shell.tsx` — those three are explicitly in scope (theme bootstrap + nav consolidation). Every other page/component that consumes `@corridor/ui` is left untouched and must keep working unmodified.
 - Dark mode is attribute-driven: `data-theme="dark"` on `<html>`, with a `prefers-color-scheme` fallback when no explicit choice has been stored. No `next-themes` or other new runtime dependency for theming.
 - New Radix dependencies are added to `packages/ui/package.json` via `pnpm --filter @corridor/ui add <pkg>`, not hand-edited, so the lockfile resolves correctly.
-- Verification for every `packages/ui`-only task: `pnpm --filter @corridor/ui typecheck && pnpm --filter @corridor/ui lint && pnpm --filter @corridor/ui test`. Tasks that also touch `apps/web` additionally run `pnpm --filter web typecheck && pnpm --filter web lint`. The final task additionally runs `pnpm --filter @corridor/ui build`.
+- Verification for every `packages/ui`-only task: `pnpm --filter @corridor/ui typecheck && pnpm --filter @corridor/ui lint && pnpm --filter @corridor/ui test`. Tasks that also touch `apps/web` additionally run `pnpm --filter web typecheck && pnpm --filter web lint`. The final task additionally runs `pnpm --filter web build` (`packages/ui` has no `build` script — it's consumed as TS source directly, `main: ./src/index.ts` — so `web build` is the real end-to-end compile check, bundling `packages/ui`'s source through Next's own build).
+- Palette, typography, and the reduced-motion requirement are sourced from the `ui-ux-pro-max` skill's `--design-system` search for this product category, not invented — see the spec's Palette/Typography/Motion & accessibility sections for the reasoning behind each value before changing one.
 
 ---
 
@@ -32,10 +33,16 @@
 
 - [ ] **Step 1: Create the working branch**
 
-Run: `git checkout main && git pull --ff-only && git checkout -b design/foundation-v2`
-Expected: new branch created off an up-to-date `main`.
+Already done — this task runs inside a git worktree already on branch `design/foundation-v2`, off `main`. Skip this step and proceed to Step 2.
 
 - [ ] **Step 2: Replace `packages/ui/src/tokens.css`**
+
+Palette sourced from the `ui-ux-pro-max` skill's `--design-system` search for "B2B logistics
+customs compliance dashboard SaaS" (density 8, variance 3, motion 4) — see
+`docs/superpowers/specs/2026-09-08-ui-design-system-foundation-design.md`'s Palette section for
+the reasoning behind each family. `--font-sans` wraps a `--font-sans-loaded` custom property that
+Task 2 sets via `next/font/google` (Plus Jakarta Sans), falling back to the system stack when
+unset so `packages/ui` itself carries no `next/font` dependency.
 
 ```css
 /**
@@ -49,69 +56,75 @@ Expected: new branch created off an up-to-date `main`.
  * `danger-*`) — dozens of pages reference these Tailwind utilities directly
  * (e.g. `text-ink-500`). Only their VALUES change here. Do not rename them;
  * add new primitive families instead (see `brand-*`).
+ *
+ * Palette verified via ui-ux-pro-max's --design-system search for this
+ * product category (enterprise SaaS dashboard, Minimalism & Swiss style):
+ * neutral = Tailwind's slate ramp, brand = the tool's verified Primary/
+ * Secondary blue pair, signal = its verified Accent/CTA orange (reused for
+ * Corridor's existing border/customs domain accent), danger = its verified
+ * Destructive red. warn/ok are standard, well-tested Tailwind hues chosen to
+ * stay visually distinct from signal (not just "verified" but "not another
+ * near-identical gold").
  */
 @theme {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-sans: var(--font-sans-loaded, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif);
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 
-  /* Neutral scale (historically "ink") — cool slate, refined for both themes. */
-  --color-ink-950: #0a0e1a;
-  --color-ink-900: #12172a;
-  --color-ink-800: #1c2338;
-  --color-ink-700: #2b3350;
-  --color-ink-600: #3d4870;
-  --color-ink-500: #5b6785;
-  --color-ink-400: #7c87a3;
-  --color-ink-300: #a3acc4;
-  --color-ink-200: #c3cadb;
-  --color-ink-100: #e2e6f0;
-  --color-ink-50: #f6f7fb;
+  /* Neutral scale (historically "ink") — Tailwind's slate ramp. */
+  --color-ink-950: #020617;
+  --color-ink-900: #0f172a;
+  --color-ink-800: #1e293b;
+  --color-ink-700: #334155;
+  --color-ink-600: #475569;
+  --color-ink-500: #64748b;
+  --color-ink-400: #94a3b8;
+  --color-ink-300: #cbd5e1;
+  --color-ink-200: #e2e8f0;
+  --color-ink-100: #f1f5f9;
+  --color-ink-50: #f8fafc;
 
   /* Brand accent — new. Carries interactive/brand weight: buttons, links, focus. */
-  --color-brand-800: #2b2a8f;
-  --color-brand-700: #3733b8;
-  --color-brand-600: #4548dd;
-  --color-brand-500: #5b62f0;
-  --color-brand-300: #aab3fb;
-  --color-brand-100: #e0e4ff;
-  --color-brand-50: #eef1ff;
+  --color-brand-700: #1d4ed8;
+  --color-brand-600: #2563eb;
+  --color-brand-500: #3b82f6;
+  --color-brand-300: #93c5fd;
 
   /* Signal — the existing border/customs domain accent. Kept distinct from
      both `brand` (generic interactive) and `warn` (generic status). */
-  --color-signal-600: #db8f24;
-  --color-signal-500: #f2a93d;
+  --color-signal-600: #c2410c;
+  --color-signal-500: #ea580c;
 
   /* Status */
-  --color-ok-600: #178055;
-  --color-ok-500: #1fa06a;
-  --color-warn-600: #b9820c;
-  --color-warn-500: #dc9c12;
-  --color-danger-600: #c23f3b;
-  --color-danger-500: #e0524d;
+  --color-ok-600: #059669;
+  --color-ok-500: #10b981;
+  --color-warn-600: #d97706;
+  --color-warn-500: #f59e0b;
+  --color-danger-600: #b91c1c;
+  --color-danger-500: #dc2626;
 
   /* Radius — softened from Tailwind's defaults for a calmer, modern feel. */
   --radius-md: 0.5rem;
   --radius-xl: 1rem;
 
   /* Elevation */
-  --shadow-sm: 0 1px 2px rgb(10 14 26 / 0.06);
-  --shadow-md: 0 4px 12px rgb(10 14 26 / 0.08), 0 1px 2px rgb(10 14 26 / 0.04);
-  --shadow-lg: 0 12px 32px rgb(10 14 26 / 0.16), 0 2px 6px rgb(10 14 26 / 0.06);
+  --shadow-sm: 0 1px 2px rgb(2 6 23 / 0.06);
+  --shadow-md: 0 4px 12px rgb(2 6 23 / 0.08), 0 1px 2px rgb(2 6 23 / 0.04);
+  --shadow-lg: 0 12px 32px rgb(2 6 23 / 0.16), 0 2px 6px rgb(2 6 23 / 0.06);
 
   /* Semantic — light theme (default). Redefined for dark theme below. */
   --color-surface-canvas: var(--color-ink-50);
   --color-surface-raised: #ffffff;
   --color-surface-sunken: var(--color-ink-100);
   --color-surface-overlay: #ffffff;
-  --color-fg-primary: var(--color-ink-950);
-  --color-fg-secondary: var(--color-ink-500);
+  --color-fg-primary: var(--color-ink-800);
+  --color-fg-secondary: var(--color-ink-600);
   --color-fg-inverted: #ffffff;
-  --color-border-default: var(--color-ink-100);
+  --color-border-default: var(--color-ink-200);
   --color-border-strong: var(--color-ink-300);
   --color-accent: var(--color-brand-600);
   --color-accent-hover: var(--color-brand-700);
   --color-accent-fg: #ffffff;
-  --color-focus-ring: var(--color-brand-500);
+  --color-focus-ring: var(--color-brand-600);
 }
 
 :root {
@@ -134,7 +147,7 @@ Expected: new branch created off an up-to-date `main`.
     --color-border-strong: var(--color-ink-700);
     --color-accent: var(--color-brand-500);
     --color-accent-hover: var(--color-brand-300);
-    --color-accent-fg: var(--color-ink-950);
+    --color-accent-fg: #ffffff;
     --color-focus-ring: var(--color-brand-300);
   }
 }
@@ -152,7 +165,7 @@ Expected: new branch created off an up-to-date `main`.
   --color-border-strong: var(--color-ink-700);
   --color-accent: var(--color-brand-500);
   --color-accent-hover: var(--color-brand-300);
-  --color-accent-fg: var(--color-ink-950);
+  --color-accent-fg: #ffffff;
   --color-focus-ring: var(--color-brand-300);
 }
 ```
@@ -180,8 +193,8 @@ git commit -m "feat(ui): rebuild design tokens as primitive/semantic layers with
 - Modify: `apps/web/src/app/layout.tsx:1-15` (full rewrite)
 
 **Interfaces:**
-- Consumes: `--color-fg-secondary`/`--color-fg-primary`/`--color-surface-sunken` semantic tokens (Task 1).
-- Produces: `ThemeToggle` component (no props besides `className`); the `data-theme` attribute + `corridor-theme` `localStorage` key contract that any future theming code relies on.
+- Consumes: `--color-fg-secondary`/`--color-fg-primary`/`--color-surface-sunken` semantic tokens (Task 1), which itself consumes the `--font-sans-loaded` custom property this task's layout change sets.
+- Produces: `ThemeToggle` component (no props besides `className`); the `data-theme` attribute + `corridor-theme` `localStorage` key contract that any future theming code relies on; the `--font-sans-loaded` CSS custom property (via `next/font/google`'s Plus Jakarta Sans, per the spec's Typography section) that `packages/ui/src/tokens.css`'s `--font-sans` wraps.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -293,14 +306,28 @@ export { ThemeToggle } from "./components/theme-toggle";
 Run: `pnpm --filter @corridor/ui test -- theme-toggle`
 Expected: PASS
 
-- [ ] **Step 6: Wire the FOUC-safe theme init into the root layout**
+- [ ] **Step 6: Wire the FOUC-safe theme init and Plus Jakarta Sans into the root layout**
 
 Replace `apps/web/src/app/layout.tsx` in full:
 
 ```tsx
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
+
+/**
+ * Self-hosted by Next (no render-blocking Google Fonts request, no layout
+ * shift). Exposes `--font-sans-loaded`, which `@corridor/ui`'s
+ * `tokens.css` wraps with a system-font fallback — see the spec's
+ * Typography section for why Plus Jakarta Sans.
+ */
+const plusJakartaSans = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-sans-loaded",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: { default: "Corridor", template: "%s · Corridor" },
@@ -316,7 +343,7 @@ const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem('corridor-
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={plusJakartaSans.variable}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
@@ -1266,13 +1293,21 @@ export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./comp
 
 - [ ] **Step 6: Wrap the app in `TooltipProvider`**
 
-In `apps/web/src/app/layout.tsx`, import `TooltipProvider` from `@corridor/ui` and wrap `children`:
+In `apps/web/src/app/layout.tsx`, import `TooltipProvider` from `@corridor/ui` and wrap `children` — keep the `Plus_Jakarta_Sans` font setup from Task 2 exactly as is:
 
 ```tsx
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { Plus_Jakarta_Sans } from "next/font/google";
 import { TooltipProvider } from "@corridor/ui";
 import "./globals.css";
+
+const plusJakartaSans = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-sans-loaded",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: { default: "Corridor", template: "%s · Corridor" },
@@ -1283,7 +1318,7 @@ const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem('corridor-
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={plusJakartaSans.variable}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
@@ -1341,8 +1376,11 @@ import { NavGroup, navItemVariants } from "./nav";
 
 describe("navItemVariants", () => {
   it("marks the active state distinctly from inactive", () => {
-    expect(navItemVariants({ active: true })).toContain("bg-surface-sunken");
-    expect(navItemVariants({ active: false })).not.toContain("bg-surface-sunken");
+    // Both states legitimately reference `bg-surface-sunken` (inactive gets it
+    // only on hover, at reduced opacity), so distinguish on `font-medium`
+    // instead of the shared color name.
+    expect(navItemVariants({ active: true })).toContain("font-medium");
+    expect(navItemVariants({ active: false })).not.toContain("font-medium");
   });
 });
 
@@ -1689,7 +1727,7 @@ git commit -m "feat(web): consolidate app-shell nav into grouped, icon-led secti
 
 **Interfaces:**
 - Consumes: semantic tokens from Task 1.
-- Produces: the `.panel`, `label`, `input`, `btn`, `btn-primary`, `btn-secondary`, `btn-signal` utility classes that ~44 files across `apps/web` already reference directly — updating their definitions here makes every one of those call sites theme-correct without editing the call sites themselves.
+- Produces: the `.panel`, `label`, `input`, `btn`, `btn-primary`, `btn-secondary`, `btn-signal` utility classes that ~44 files across `apps/web` already reference directly — updating their definitions here makes every one of those call sites theme-correct without editing the call sites themselves. Also produces the app-wide `prefers-reduced-motion` rule the `ui-ux-pro-max` pre-delivery checklist requires (see the spec's Motion & accessibility section).
 
 - [ ] **Step 1: Replace `apps/web/src/app/globals.css`**
 
@@ -1737,6 +1775,18 @@ body {
 @utility btn-signal {
   @apply btn bg-signal-500 text-ink-950 hover:bg-signal-600;
 }
+
+/* ui-ux-pro-max pre-delivery checklist: respect reduced-motion system-wide. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 ```
 
 (The old hardcoded `:root { --bg / --fg / --muted / --panel / --border }` block is removed — `html, body` and `.panel` now reference the semantic tokens from `packages/ui` directly, which is the single source of truth `color-scheme`/dark-mode already flips via Task 1's `[data-theme="dark"]` rule.)
@@ -1763,8 +1813,8 @@ git commit -m "feat(web): point legacy globals.css utilities at the new semantic
 
 - [ ] **Step 1: Full automated verification**
 
-Run: `pnpm --filter @corridor/ui typecheck && pnpm --filter @corridor/ui lint && pnpm --filter @corridor/ui test && pnpm --filter @corridor/ui build && pnpm --filter web typecheck && pnpm --filter web lint && pnpm --filter web build`
-Expected: PASS end to end.
+Run: `pnpm --filter @corridor/ui typecheck && pnpm --filter @corridor/ui lint && pnpm --filter @corridor/ui test && pnpm --filter web typecheck && pnpm --filter web lint && pnpm --filter web build`
+Expected: PASS end to end. (`packages/ui` has no `build` script — it's consumed as TS source directly; `pnpm --filter web build` is the real end-to-end compile check.)
 
 - [ ] **Step 2: Manual browser verification**
 

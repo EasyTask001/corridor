@@ -1,24 +1,125 @@
 /**
- * Corridor design tokens. Imported by the web app's `globals.css` (after
- * `@import "tailwindcss"`) so every `ink-*` / `signal-*` / `ok|warn|danger`
- * utility referenced by `@corridor/ui` resolves the same way everywhere.
+ * Corridor design tokens: three layers.
+ *  1. Primitive  — raw color/radius/shadow scales, theme-independent.
+ *  2. Semantic   — role-based aliases (`surface-*`, `fg-*`, `accent`, …) that
+ *     components and pages reference; redefined per theme below.
+ *  3. Component  — left to individual components; nothing global needed yet.
+ *
+ * Primitive key NAMES are permanent (`ink-*`, `signal-*`, `ok-*`, `warn-*`,
+ * `danger-*`) — dozens of pages reference these Tailwind utilities directly
+ * (e.g. `text-ink-500`). Only their VALUES change here. Do not rename them;
+ * add new primitive families instead (see `brand-*`).
+ *
+ * Palette verified via ui-ux-pro-max's --design-system search for this
+ * product category (enterprise SaaS dashboard, Minimalism & Swiss style):
+ * neutral = Tailwind's slate ramp, brand = the tool's verified Primary/
+ * Secondary blue pair, signal = its verified Accent/CTA orange (reused for
+ * Corridor's existing border/customs domain accent), danger = its verified
+ * Destructive red. warn/ok are standard, well-tested Tailwind hues chosen to
+ * stay visually distinct from signal (not just "verified" but "not another
+ * near-identical gold").
  */
 @theme {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-sans: var(--font-sans-loaded, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif);
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 
-  /* Corridor palette: deep navy ground, signal amber accent (border / customs) */
-  --color-ink-950: #0b1220;
-  --color-ink-900: #111a2e;
-  --color-ink-800: #1a2540;
-  --color-ink-700: #2a3856;
-  --color-ink-500: #5b6b8c;
-  --color-ink-300: #aab5cc;
-  --color-ink-100: #e6eaf2;
-  --color-ink-50: #f5f7fb;
-  --color-signal-500: #f0a93a;
-  --color-signal-600: #d9932a;
-  --color-ok-500: #22a06b;
-  --color-warn-500: #e0a20c;
-  --color-danger-500: #d9534f;
+  /* Neutral scale (historically "ink") — Tailwind's slate ramp. */
+  --color-ink-950: #020617;
+  --color-ink-900: #0f172a;
+  --color-ink-800: #1e293b;
+  --color-ink-700: #334155;
+  --color-ink-600: #475569;
+  --color-ink-500: #64748b;
+  --color-ink-400: #94a3b8;
+  --color-ink-300: #cbd5e1;
+  --color-ink-200: #e2e8f0;
+  --color-ink-100: #f1f5f9;
+  --color-ink-50: #f8fafc;
+
+  /* Brand accent — new. Carries interactive/brand weight: buttons, links, focus. */
+  --color-brand-700: #1d4ed8;
+  --color-brand-600: #2563eb;
+  --color-brand-500: #3b82f6;
+  --color-brand-300: #93c5fd;
+
+  /* Signal — the existing border/customs domain accent. Kept distinct from
+     both `brand` (generic interactive) and `warn` (generic status). */
+  --color-signal-600: #c2410c;
+  --color-signal-500: #ea580c;
+
+  /* Status */
+  --color-ok-700: #047857;
+  --color-ok-600: #059669;
+  --color-ok-500: #10b981;
+  --color-warn-700: #b45309;
+  --color-warn-600: #d97706;
+  --color-warn-500: #f59e0b;
+  --color-danger-600: #b91c1c;
+  --color-danger-500: #dc2626;
+
+  /* Radius — softened from Tailwind's defaults for a calmer, modern feel. */
+  --radius-md: 0.5rem;
+  --radius-xl: 1rem;
+
+  /* Elevation */
+  --shadow-sm: 0 1px 2px rgb(2 6 23 / 0.06);
+  --shadow-md: 0 4px 12px rgb(2 6 23 / 0.08), 0 1px 2px rgb(2 6 23 / 0.04);
+  --shadow-lg: 0 12px 32px rgb(2 6 23 / 0.16), 0 2px 6px rgb(2 6 23 / 0.06);
+
+  /* Semantic — light theme (default). Redefined for dark theme below. */
+  --color-surface-canvas: var(--color-ink-50);
+  --color-surface-raised: #ffffff;
+  --color-surface-sunken: var(--color-ink-100);
+  --color-surface-overlay: #ffffff;
+  --color-fg-primary: var(--color-ink-800);
+  --color-fg-secondary: var(--color-ink-600);
+  --color-fg-inverted: #ffffff;
+  --color-border-default: var(--color-ink-200);
+  --color-border-strong: var(--color-ink-300);
+  --color-accent: var(--color-brand-600);
+  --color-accent-hover: var(--color-brand-700);
+  --color-accent-fg: #ffffff;
+  --color-focus-ring: var(--color-brand-600);
+}
+
+:root {
+  color-scheme: light;
+}
+
+/* Dark theme: explicit opt-in via `data-theme="dark"`, or the OS preference
+   when the visitor hasn't chosen (no `data-theme="light"` override present). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --color-surface-canvas: var(--color-ink-950);
+    --color-surface-raised: var(--color-ink-900);
+    --color-surface-sunken: var(--color-ink-800);
+    --color-surface-overlay: var(--color-ink-900);
+    --color-fg-primary: var(--color-ink-50);
+    --color-fg-secondary: var(--color-ink-300);
+    --color-fg-inverted: var(--color-ink-950);
+    --color-border-default: var(--color-ink-800);
+    --color-border-strong: var(--color-ink-700);
+    --color-accent: var(--color-brand-500);
+    --color-accent-hover: var(--color-brand-300);
+    --color-accent-fg: var(--color-ink-950);
+    --color-focus-ring: var(--color-brand-300);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-surface-canvas: var(--color-ink-950);
+  --color-surface-raised: var(--color-ink-900);
+  --color-surface-sunken: var(--color-ink-800);
+  --color-surface-overlay: var(--color-ink-900);
+  --color-fg-primary: var(--color-ink-50);
+  --color-fg-secondary: var(--color-ink-300);
+  --color-fg-inverted: var(--color-ink-950);
+  --color-border-default: var(--color-ink-800);
+  --color-border-strong: var(--color-ink-700);
+  --color-accent: var(--color-brand-500);
+  --color-accent-hover: var(--color-brand-300);
+  --color-accent-fg: var(--color-ink-950);
+  --color-focus-ring: var(--color-brand-300);
 }

@@ -7,14 +7,14 @@ export const badgeVariants = cva(
   {
     variants: {
       variant: {
-        neutral: "bg-ink-100 text-ink-500",
-        muted: "bg-ink-100 text-ink-300",
-        ok: "bg-ok-500/10 text-ok-500",
-        warn: "bg-warn-500/10 text-warn-500",
+        neutral: "bg-surface-sunken text-fg-secondary",
+        muted: "bg-surface-sunken text-fg-secondary/70",
+        ok: "bg-ok-500/10 text-ok-700",
+        warn: "bg-warn-500/10 text-warn-700",
         danger: "bg-danger-500/10 text-danger-500",
         signal: "bg-signal-500/15 text-signal-600",
-        solid: "bg-ink-950 text-white",
-        outline: "border border-ink-100 text-ink-700",
+        solid: "bg-fg-primary text-fg-inverted",
+        outline: "border border-border-default text-fg-primary",
       },
       /** Small-caps treatment used by status/severity chips. */
       caps: { true: "font-semibold uppercase tracking-wide", false: "" },
