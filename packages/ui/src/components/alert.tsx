@@ -5,7 +5,7 @@ import { cn } from "../lib/cn";
 export const alertVariants = cva("rounded-md border px-4 py-3 text-sm", {
   variants: {
     variant: {
-      info: "border-ink-100 bg-ink-50 text-ink-700",
+      info: "border-border-default bg-surface-sunken text-fg-primary",
       ok: "border-ok-500/30 bg-ok-500/10 text-ok-500",
       warn: "border-warn-500/30 bg-warn-500/10 text-warn-500",
       danger: "border-danger-500/30 bg-danger-500/10 text-danger-500",

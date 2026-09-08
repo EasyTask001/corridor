@@ -10,7 +10,7 @@ export function Label({ className, ...props }: LabelProps) {
   return (
     <LabelRoot
       className={cn(
-        "mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500",
+        "mb-1 block text-xs font-medium uppercase tracking-wide text-fg-secondary",
         className,
       )}
       {...props}
