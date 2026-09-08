@@ -37,6 +37,7 @@ const SETTINGS: NavItem[] = [
   { href: "/settings/billing", label: "Billing", permission: "billing.read" },
   { href: "/settings/integrations", label: "Integrations", permission: "integrations.manage" },
   { href: "/settings/notifications", label: "Notifications" },
+  { href: "/settings/profile", label: "My profile" },
 ];
 
 export function AppShell({

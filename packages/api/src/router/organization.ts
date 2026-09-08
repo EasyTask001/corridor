@@ -15,6 +15,7 @@ import {
   updateCustomRoleInput,
   uuid,
   type PermissionKey,
+  profileUpdateInput,
 } from "@corridor/domain";
 import {
   createSsoProvider,
@@ -235,6 +236,34 @@ export const organizationRouter = router({
     activeOrganizationId: ctx.session.activeOrganizationId,
     permissions: [...ctx.session.permissions],
   })),
+
+  /** My profile (Task 13): the fields under Settings → My profile. */
+  profile: authedProcedure.query(({ ctx }) =>
+    ctx.rls(async (tx) => {
+      const [row] = await tx
+        .select({ displayName: userProfiles.displayName, phone: userProfiles.phone })
+        .from(userProfiles)
+        .where(eq(userProfiles.userId, ctx.session.user.id))
+        .limit(1);
+      return { email: ctx.session.user.email, displayName: row?.displayName ?? null, phone: row?.phone ?? null };
+    }),
+  ),
+  updateMe: orgProcedure.input(profileUpdateInput).mutation(({ ctx, input }) =>
+    ctx.rls(async (tx) => {
+      const [before] = await tx
+        .select({ displayName: userProfiles.displayName, phone: userProfiles.phone })
+        .from(userProfiles)
+        .where(eq(userProfiles.userId, ctx.session.user.id))
+        .limit(1);
+      const [row] = await tx
+        .update(userProfiles)
+        .set({ displayName: input.displayName, phone: input.phone ?? null })
+        .where(eq(userProfiles.userId, ctx.session.user.id))
+        .returning({ displayName: userProfiles.displayName, phone: userProfiles.phone });
+      await writeAudit(tx, ctx.orgId, "user.profile_update", "user_profile", ctx.session.user.id, before ?? null, row ?? null);
+      return row ?? null;
+    }),
+  ),
 
   /** Onboarding: create org + Owner membership atomically (SECURITY DEFINER RPC). */
   create: authedProcedure.input(createOrganizationInput).mutation(async ({ ctx, input }) => {

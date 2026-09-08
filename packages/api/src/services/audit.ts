@@ -140,6 +140,8 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
   "shipment.assign": "shipment.assign",
   "shipment.unassign": "shipment.unassign",
 
+  "organization.updateMe": "user.profile_update",
+
   // --- bulk import (0028) ---------------------------------------------------
   "imports.validate": "import.validate",
   "imports.commit": "import.commit",

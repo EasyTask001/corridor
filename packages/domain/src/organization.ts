@@ -127,3 +127,10 @@ export const USAGE_METRICS = [
 ] as const;
 export const usageMetric = z.enum(USAGE_METRICS);
 export type UsageMetric = (typeof USAGE_METRICS)[number];
+
+/** Settings → My profile (Task 13). */
+export const profileUpdateInput = z.object({
+  displayName: z.string().trim().min(1, "Name is required").max(80),
+  phone: z.string().trim().max(40).nullable().optional(),
+});
+export type ProfileUpdateInput = z.infer<typeof profileUpdateInput>;

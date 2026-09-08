@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { authCookieOptions, persistSessionFrom } from "@corridor/auth";
 
 const PUBLIC_PATHS = [
   "/login",
@@ -9,6 +10,9 @@ const PUBLIC_PATHS = [
   "/api/health",
   // Public PAPS/PARS lookup (0027): gated by carrier code + control number, rate limited.
   "/track",
+  // Password recovery (Task 13): the reset page needs the recovery session from the e-mail link.
+  "/forgot-password",
+  "/reset-password",
 ];
 
 function isPublic(pathname: string) {
@@ -22,6 +26,7 @@ function isPublic(pathname: string) {
  */
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
+  const persist = persistSessionFrom(request.cookies);
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -34,7 +39,7 @@ export async function proxy(request: NextRequest) {
           response = NextResponse.next({ request });
           for (const { name, value, options } of cookiesToSet) {
             response.cookies.set(name, value, {
-              ...options,
+              ...authCookieOptions(options, persist),
               httpOnly: true,
               secure: process.env.NODE_ENV === "production",
               sameSite: "lax",
