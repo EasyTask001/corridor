@@ -4,6 +4,7 @@ import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   EQUIPMENT_TYPE_LABELS,
+  REGISTRY_SEARCH_COLUMNS,
   daysBetween,
   todayIso,
   type EquipmentType,
@@ -23,6 +24,10 @@ import {
 } from "@corridor/ui";
 import { useTRPC } from "@/lib/trpc/client";
 import { RecordHistoryDialog } from "@/components/record-history";
+import { ColumnChooser } from "@/components/list/column-chooser";
+import { ListToolbar } from "@/components/list/list-toolbar";
+import { useAutoRefresh } from "@/components/list/use-auto-refresh";
+import { useListPrefs } from "@/components/list/use-list-prefs";
 import { DriverDocumentsPanel } from "./driver-documents-panel";
 import { REGISTRIES, type FieldDef, type RegistryConfig, type RegistryKind } from "./fields";
 
@@ -166,19 +171,33 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
   const procs = (trpc.party as any)[kind] as (typeof trpc.party)["drivers"];
 
   const [search, setSearch] = useState("");
+  const [searchColumn, setSearchColumn] = useState("");
   const [includeArchived, setIncludeArchived] = useState(false);
+  const [page, setPage] = useState(0);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const columnKeys = useMemo(() => cfg.columns.map((c) => c.key), [cfg]);
+  const prefDefaults = useMemo(() => ({ columns: columnKeys, pageSize: 25, autoRefreshSec: 0 }), [columnKeys]);
+  const [prefs, setPrefs] = useListPrefs(kind, prefDefaults, columnKeys);
   const [editing, setEditing] = useState<Row | "new" | null>(null);
   /** Drivers get a second tab; every other registry only has its fields. */
   const [tab, setTab] = useState<"details" | "documents">("details");
   const [error, setError] = useState<string | null>(null);
 
   const listInput = useMemo(
-    () => ({ search: search || undefined, includeArchived, limit: 100, offset: 0 }),
-    [search, includeArchived],
+    () => ({
+      search: search || undefined,
+      searchColumn: search && searchColumn ? searchColumn : undefined,
+      includeArchived,
+      pageSize: prefs.pageSize,
+      limit: prefs.pageSize,
+      offset: page * prefs.pageSize,
+    }),
+    [search, searchColumn, includeArchived, prefs.pageSize, page],
   );
   const listOpts = procs.list.queryOptions(listInput);
-  const { data, isLoading } = useQuery(listOpts);
-  const rows = (data?.rows ?? []) as Row[];
+  const { data, isLoading, refetch } = useQuery(listOpts);
+  const { secondsLeft } = useAutoRefresh(prefs.autoRefreshSec, () => refetch());
+  const rows = useMemo(() => (data?.rows ?? []) as Row[], [data]);
   // Runtime option lists (the CBP equipment codes) — fetched once per registry
   // that declares a field needing them.
   const needsEquipmentTypes = cfg.fields.some((f) => f.optionsFrom === "equipmentTypes");
@@ -223,6 +242,15 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
     }),
   );
   const archive = useMutation(procs.archive.mutationOptions({ onSuccess: invalidate }));
+  const bulkStatus = useMutation(
+    procs.bulkSetStatus.mutationOptions({
+      onSuccess: () => {
+        setSelected(new Set());
+        invalidate();
+      },
+      onError,
+    }),
+  );
   const [exportUrl, setExportUrl] = useState<{ url: string; format: string } | null>(null);
   const exportList = useMutation(
     procs.export.mutationOptions({
@@ -242,14 +270,56 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
 
   const columns = useMemo<DataTableColumnDef<Row>[]>(() => {
     const helper = createDataTableColumns<Row>();
-    const cols: DataTableColumnDef<Row>[] = cfg.columns.map((c) =>
-      helper.display({
-        id: c.key,
-        header: c.label,
-        cell: ({ row }) => renderCell(cfg, row.original, c.key),
-        meta: { className: "whitespace-nowrap", headerClassName: "whitespace-nowrap" },
-      }),
-    );
+    const cols: DataTableColumnDef<Row>[] = cfg.columns
+      .filter((c) => prefs.columns.includes(c.key))
+      .map((c) =>
+        helper.display({
+          id: c.key,
+          header: c.label,
+          cell: ({ row }) => renderCell(cfg, row.original, c.key),
+          meta: { className: "whitespace-nowrap", headerClassName: "whitespace-nowrap" },
+        }),
+      );
+    if (canWrite) {
+      const pageIds = rows.map((r) => r.id);
+      const allOnPage = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+      cols.unshift(
+        helper.display({
+          id: "__select",
+          header: () => (
+            <input
+              type="checkbox"
+              aria-label="Select all on this page"
+              checked={allOnPage}
+              onChange={() =>
+                setSelected((prev) => {
+                  const next = new Set(prev);
+                  if (allOnPage) pageIds.forEach((id) => next.delete(id));
+                  else pageIds.forEach((id) => next.add(id));
+                  return next;
+                })
+              }
+            />
+          ),
+          meta: { className: "w-8" },
+          cell: ({ row }) => (
+            <input
+              type="checkbox"
+              aria-label={`Select ${cfg.displayName(row.original)}`}
+              checked={selected.has(row.original.id)}
+              onChange={() =>
+                setSelected((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(row.original.id)) next.delete(row.original.id);
+                  else next.add(row.original.id);
+                  return next;
+                })
+              }
+            />
+          ),
+        }),
+      );
+    }
     cols.push(
       helper.display({
         id: "__actions",
@@ -293,7 +363,7 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
       }),
     );
     return cols;
-  }, [cfg, canWrite, archive]);
+  }, [cfg, canWrite, archive, prefs.columns, rows, selected]);
 
   return (
     <div className="space-y-4">
@@ -305,21 +375,6 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <Input
-            aria-label="Search"
-            placeholder={cfg.searchPlaceholder}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-72"
-          />
-          <label className="flex items-center gap-1.5 text-xs text-ink-500">
-            <input
-              type="checkbox"
-              checked={includeArchived}
-              onChange={(e) => setIncludeArchived(e.target.checked)}
-            />
-            Show archived
-          </label>
           <span className="flex items-center gap-1 text-xs">
             {(["csv", "pdf"] as const).map((format) => (
               <Button
@@ -357,6 +412,53 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
         </div>
       </header>
 
+      <ListToolbar
+        search={search}
+        onSearch={(v) => {
+          setSearch(v);
+          setPage(0);
+        }}
+        searchPlaceholder={cfg.searchPlaceholder}
+        searchColumns={REGISTRY_SEARCH_COLUMNS[kind]}
+        searchColumn={searchColumn}
+        onSearchColumn={(v) => {
+          setSearchColumn(v);
+          setPage(0);
+        }}
+        pageSize={prefs.pageSize}
+        onPageSize={(n) => {
+          setPrefs({ pageSize: n });
+          setPage(0);
+        }}
+        autoRefreshSec={prefs.autoRefreshSec}
+        onAutoRefresh={(n) => setPrefs({ autoRefreshSec: n })}
+        secondsLeft={secondsLeft}
+        selectedCount={selected.size}
+        onClearSelection={() => setSelected(new Set())}
+        bulkActions={
+          canWrite
+            ? [
+                { label: "Activate selected", onClick: () => bulkStatus.mutate({ ids: [...selected], status: "active" }), disabled: bulkStatus.isPending },
+                { label: "Deactivate selected", onClick: () => bulkStatus.mutate({ ids: [...selected], status: "inactive" }), disabled: bulkStatus.isPending },
+                { label: "Archive selected", tone: "danger", onClick: () => bulkStatus.mutate({ ids: [...selected], status: "archived" }), disabled: bulkStatus.isPending },
+              ]
+            : []
+        }
+      >
+        <label className="flex items-center gap-1.5 text-xs text-ink-500">
+          <input
+            type="checkbox"
+            checked={includeArchived}
+            onChange={(e) => {
+              setIncludeArchived(e.target.checked);
+              setPage(0);
+            }}
+          />
+          Show archived
+        </label>
+        <ColumnChooser columns={cfg.columns} selected={prefs.columns} defaults={columnKeys} onChange={(cols) => setPrefs({ columns: cols })} />
+      </ListToolbar>
+
       <Card className="overflow-x-auto">
         <DataTable
           data={rows}
@@ -365,6 +467,10 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
           isLoading={isLoading}
           emptyMessage={`No ${cfg.title.toLowerCase()} yet.`}
           rowClassName={(r) => (r.status === "archived" ? "opacity-50" : undefined)}
+          pageIndex={page}
+          pageSize={prefs.pageSize}
+          total={data?.total}
+          onPageChange={setPage}
         />
       </Card>
 

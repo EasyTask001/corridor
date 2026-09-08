@@ -26,10 +26,40 @@ export interface MovementRow {
   customsReferenceLabel: string;
 }
 
-export function MovementsTable({ rows }: { rows: MovementRow[] }) {
+/** Every column the table can show, for the column chooser (Task 14). */
+export const MOVEMENT_COLUMNS = [
+  { key: "movement", label: "Movement" },
+  { key: "status", label: "Status" },
+  { key: "crossing", label: "Crossing" },
+  { key: "eta", label: "ETA" },
+  { key: "driver", label: "Driver" },
+  { key: "units", label: "Truck / Trailer" },
+  { key: "shipments", label: "Shipments" },
+  { key: "customsRef", label: "Customs ref" },
+] as const;
+export type MovementColumnKey = (typeof MOVEMENT_COLUMNS)[number]["key"];
+
+export function MovementsTable({
+  rows,
+  visible,
+  isLoading,
+  pageIndex,
+  pageSize,
+  total,
+  onPageChange,
+}: {
+  rows: MovementRow[];
+  /** Column keys to show, in table order; omitted = all. */
+  visible?: readonly string[];
+  isLoading?: boolean;
+  pageIndex?: number;
+  pageSize?: number;
+  total?: number;
+  onPageChange?: (pageIndex: number) => void;
+}) {
   const router = useRouter();
 
-  const columns = useMemo<DataTableColumnDef<MovementRow>[]>(() => {
+  const allColumns = useMemo<DataTableColumnDef<MovementRow>[]>(() => {
     const helper = createDataTableColumns<MovementRow>();
     return helper.columns([
       helper.display({
@@ -78,15 +108,24 @@ export function MovementsTable({ rows }: { rows: MovementRow[] }) {
       }),
     ]);
   }, []);
+  const columns = useMemo(
+    () => (visible ? allColumns.filter((c) => visible.includes(c.id as string)) : allColumns),
+    [allColumns, visible],
+  );
 
   return (
     <DataTable
       data={rows}
       columns={columns}
       getRowId={(row) => row.id}
+      isLoading={isLoading}
       emptyMessage="No movements match."
       rowClassName={() => "hover:bg-ink-50"}
       onRowClick={(row) => router.push(`/movements/${row.id}`)}
+      pageIndex={pageIndex}
+      pageSize={pageSize}
+      total={total}
+      onPageChange={onPageChange}
     />
   );
 }

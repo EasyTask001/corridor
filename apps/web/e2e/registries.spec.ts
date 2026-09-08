@@ -153,4 +153,30 @@ test.describe("registries", () => {
     await expect(row.getByText("acknowledged", { exact: true })).toBeVisible();
     await expect(row.getByRole("button", { name: "Acknowledge" })).toHaveCount(0);
   });
+
+  test("bulk-deactivates two drivers from the list toolbar", async ({ page }) => {
+    await login(page, "dispatch@pathfinder.demo");
+    const suffix = Date.now().toString(36).toUpperCase();
+    const last = `Bulk${suffix}`;
+    await page.goto("/parties/drivers");
+    for (const first of ["One", "Two"]) {
+      await page.getByRole("button", { name: "New driver" }).click();
+      const dialog = page.getByRole("dialog");
+      await dialog.getByLabel("First name").fill(first);
+      await dialog.getByLabel("Last name").fill(last);
+      await dialog.getByLabel("License number").fill(`LIC-${suffix}-${first}`);
+      await dialog.getByLabel("License province/state").fill("ON");
+      await dialog.getByLabel("License expiry").fill(isoDaysFromNow(400));
+      await dialog.getByRole("button", { name: "Save" }).click();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+    }
+    await page.getByLabel("Search").fill(last);
+    await expect(page.getByText(`One ${last}`)).toBeVisible();
+    await expect(page.getByText(`Two ${last}`)).toBeVisible();
+    await page.getByLabel("Select all on this page").check();
+    await expect(page.getByRole("group", { name: "Selected rows" })).toContainText("2 selected");
+    await page.getByRole("button", { name: "Deactivate selected" }).click();
+    await expect(page.getByRole("group", { name: "Selected rows" })).toHaveCount(0);
+    await expect(page.getByText("inactive")).toHaveCount(2);
+  });
 });

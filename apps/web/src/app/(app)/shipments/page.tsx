@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { shipmentStatus, type ShipmentStatus } from "@corridor/domain";
-import { buttonVariants, Card, Input } from "@corridor/ui";
+import { buttonVariants } from "@corridor/ui";
 import { getSession } from "@/lib/session";
-import { api } from "@/lib/trpc/server";
+import { ShipmentsList } from "./shipments-list";
 
 export const metadata: Metadata = { title: "Shipments" };
 
@@ -19,9 +19,6 @@ const STATUS_ORDER: ShipmentStatus[] = [
   "arrived",
   "cancelled",
 ];
-
-const kindOf = (s: { shipmentType: string | null; cargoType: string | null }) =>
-  (s.shipmentType ?? s.cargoType ?? "—").replace(/_/g, " ");
 
 export default async function ShipmentsPage({
   searchParams,
@@ -39,15 +36,7 @@ export default async function ShipmentsPage({
   const q = sp.q?.trim() || undefined;
   const unassignedOnly = sp.unassigned === "1";
 
-  const caller = await api();
-  const list = await caller.shipment.list({
-    status: status ? [status] : undefined,
-    regime,
-    q,
-    unassignedOnly: unassignedOnly || undefined,
-    limit: 100,
-    offset: 0,
-  });
+  const canWrite = session.permissions.has("shipment.write");
 
   const href = (patch: Partial<Record<"status" | "regime" | "q" | "unassigned", string>>) => {
     const p = new URLSearchParams();
@@ -105,70 +94,15 @@ export default async function ShipmentsPage({
         >
           Unassigned only
         </Link>
-        <form className="ml-auto" method="get">
-          {status && <input type="hidden" name="status" value={status} />}
-          {regime && <input type="hidden" name="regime" value={regime} />}
-          {unassignedOnly && <input type="hidden" name="unassigned" value="1" />}
-          <Input
-            name="q"
-            defaultValue={q ?? ""}
-            placeholder="Search control, entry or in-bond number…"
-            aria-label="Search shipments"
-            className="w-72"
-          />
-        </form>
       </div>
 
-      <Card className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">
-            <tr>
-              <th className="px-3 py-2 font-medium">Control number</th>
-              <th className="px-3 py-2 font-medium">Regime</th>
-              <th className="px-3 py-2 font-medium">Type</th>
-              <th className="px-3 py-2 font-medium">Shipper</th>
-              <th className="px-3 py-2 text-right font-medium">Lines</th>
-              <th className="px-3 py-2 font-medium">Movement</th>
-              <th className="px-3 py-2 font-medium">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-ink-100">
-            {list.rows.length === 0 && (
-              <tr>
-                <td colSpan={7} className="px-3 py-6 text-ink-500">
-                  No shipments match these filters.
-                </td>
-              </tr>
-            )}
-            {list.rows.map((s) => (
-              <tr key={s.id}>
-                <td className="px-3 py-2 font-mono text-xs">
-                  <Link href={`/shipments/${s.id}`} className="hover:underline">
-                    {s.controlNumber}
-                  </Link>
-                  {s.isPars && (
-                    <span className="ml-2 text-[10px] uppercase text-ink-500">PARS</span>
-                  )}
-                </td>
-                <td className="px-3 py-2 font-mono text-xs">{s.regime}</td>
-                <td className="px-3 py-2 capitalize">{kindOf(s)}</td>
-                <td className="px-3 py-2">{s.shipperName ?? "—"}</td>
-                <td className="px-3 py-2 text-right font-mono">{s.commodityCount}</td>
-                <td className="px-3 py-2 font-mono text-xs">
-                  {s.movementId ? (
-                    <Link href={`/movements/${s.movementId}`} className="hover:underline">
-                      {s.movementNumber}
-                    </Link>
-                  ) : (
-                    <span className="text-ink-500">unassigned</span>
-                  )}
-                </td>
-                <td className="px-3 py-2 capitalize">{s.status.replace(/_/g, " ")}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
+      <ShipmentsList
+        status={status}
+        regime={regime}
+        unassignedOnly={unassignedOnly}
+        initialSearch={q}
+        canWrite={canWrite}
+      />
     </div>
   );
 }
