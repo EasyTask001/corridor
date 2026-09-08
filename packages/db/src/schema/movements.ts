@@ -16,7 +16,13 @@ import {
   uuid,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
-import { ACE_SHIPMENT_TYPES, ACI_CARGO_TYPES, CREW_ROLES } from "@corridor/domain";
+import {
+  ACE_SHIPMENT_TYPES,
+  ACI_CARGO_TYPES,
+  CBSA_AMENDMENT_REASON_CODE_VALUES,
+  CREW_ROLES,
+  IIT_INDICATORS,
+} from "@corridor/domain";
 import type { MovementSuggestionPayload } from "@corridor/domain";
 import { authUsers, organizations } from "./core";
 import { sourceDocuments } from "./documents";
@@ -73,6 +79,13 @@ export const movements = pgTable(
     truckId: uuid("truck_id").references(() => trucks.id, { onDelete: "restrict" }),
     /** 0021 — "Empty Trailer" (ACE) / "Empty Trip" (ACI): no goods on board. */
     isEmpty: boolean("is_empty").notNull().default(false),
+    // 0022 — manifest flags
+    iitIndicator: text("iit_indicator", { enum: IIT_INDICATORS }).notNull().default("none"),
+    aciLvs: boolean("aci_lvs").notNull().default(false),
+    aciPostal: boolean("aci_postal").notNull().default(false),
+    aciFlyingTruck: boolean("aci_flying_truck").notNull().default(false),
+    aciInTransit: boolean("aci_in_transit").notNull().default(false),
+    aciIit: boolean("aci_iit").notNull().default(false),
     customsReferenceNumber: text("customs_reference_number"),
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }),
@@ -222,7 +235,7 @@ export const movementEvents = pgTable(
       onDelete: "set null",
     }),
     eventType: text("event_type", {
-      enum: ["status_change", "amendment", "note", "customs_response", "ai_flag"],
+      enum: ["status_change", "amendment", "note", "customs_response", "ai_flag", "customs_event"],
     }).notNull(),
     fromStatus: text("from_status"),
     toStatus: text("to_status"),
@@ -252,6 +265,12 @@ export const movementAmendments = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     amendmentNumber: integer("amendment_number").notNull(),
     reason: text("reason").notNull(),
+    /** 0022 — the shipment the amendment is about; null = the trip header. */
+    shipmentId: uuid("shipment_id").references((): AnyPgColumn => shipments.id, {
+      onDelete: "set null",
+    }),
+    /** 0022 — CBSA ECCRD reason code, required on an ACI amendment (trigger). */
+    reasonCode: text("reason_code", { enum: CBSA_AMENDMENT_REASON_CODE_VALUES }),
     diff: jsonb("diff")
       .$type<Record<string, { before: unknown; after: unknown }>>()
       .notNull()
@@ -270,6 +289,10 @@ export const movementAmendments = pgTable(
     ),
     // 0011
     index("movement_amendments_organization_id_idx").on(t.organizationId),
+    // 0022
+    index("movement_amendments_shipment_idx")
+      .on(t.shipmentId)
+      .where(sql`${t.shipmentId} is not null`),
   ],
 );
 
