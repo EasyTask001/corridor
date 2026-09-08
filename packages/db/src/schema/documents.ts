@@ -54,3 +54,39 @@ export const sourceDocuments = pgTable(
       .where(sql`${t.movementId} is not null`),
   ],
 );
+
+export const GENERATED_DOCUMENT_KINDS = [
+  "driver_sheet",
+  "blank_driver_sheet",
+  "manifest_summary",
+  "report",
+  "registry_export",
+] as const;
+
+/** 0024 — every PDF Corridor renders, stored under <org>/generated/… in `documents`. */
+export const generatedDocuments = pgTable(
+  "generated_documents",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    movementId: uuid("movement_id").references(() => movements.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: GENERATED_DOCUMENT_KINDS }).notNull(),
+    storagePath: text("storage_path").notNull().unique(),
+    contentType: text("content_type").notNull().default("application/pdf"),
+    byteSize: bigint("byte_size", { mode: "number" }),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+    createdBy: uuid("created_by").references(() => authUsers.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("generated_documents_organization_id_idx").on(t.organizationId),
+    index("generated_documents_org_created_idx").on(t.organizationId, t.createdAt.desc()),
+    index("generated_documents_movement_idx")
+      .on(t.movementId, t.createdAt.desc())
+      .where(sql`${t.movementId} is not null`),
+  ],
+);

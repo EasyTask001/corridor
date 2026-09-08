@@ -60,6 +60,8 @@ export const organizations = pgTable("organizations", {
   })
     .notNull()
     .default("trialing"),
+  /** 0024 — Avaal's "simple" driver sheet: no commodity lines. */
+  simpleDriverSheet: boolean("simple_driver_sheet").notNull().default(false),
   ...timestamps,
 });
 
