@@ -1376,8 +1376,11 @@ import { NavGroup, navItemVariants } from "./nav";
 
 describe("navItemVariants", () => {
   it("marks the active state distinctly from inactive", () => {
-    expect(navItemVariants({ active: true })).toContain("bg-surface-sunken");
-    expect(navItemVariants({ active: false })).not.toContain("bg-surface-sunken");
+    // Both states legitimately reference `bg-surface-sunken` (inactive gets it
+    // only on hover, at reduced opacity), so distinguish on `font-medium`
+    // instead of the shared color name.
+    expect(navItemVariants({ active: true })).toContain("font-medium");
+    expect(navItemVariants({ active: false })).not.toContain("font-medium");
   });
 });
 
