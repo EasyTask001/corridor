@@ -9,6 +9,7 @@ import { movementRouter } from "./movement";
 import { notificationsRouter } from "./notifications";
 import { organizationRouter } from "./organization";
 import { partyRouter } from "./party";
+import { pdfRouter } from "./pdf";
 import { referenceRouter } from "./reference";
 import { reportingRouter } from "./reporting";
 import { shipmentRouter } from "./shipment";
@@ -28,6 +29,7 @@ export const appRouter = router({
   notifications: notificationsRouter,
   reporting: reportingRouter,
   reference: referenceRouter,
+  pdf: pdfRouter,
 });
 
 export type AppRouter = typeof appRouter;

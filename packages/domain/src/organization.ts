@@ -68,6 +68,8 @@ export type CreateOrganizationInput = z.infer<typeof createOrganizationInput>;
 export const updateOrganizationInput = createOrganizationInput.partial().extend({
   billingEmail: email.optional(),
   filerCode: filerCode.optional(),
+  /** Print driver sheets without commodity lines (0024). */
+  simpleDriverSheet: z.boolean().optional(),
 });
 export type UpdateOrganizationInput = z.infer<typeof updateOrganizationInput>;
 

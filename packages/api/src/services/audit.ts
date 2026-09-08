@@ -160,6 +160,10 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
 
   // --- reporting ----------------------------------------------------------
   "reporting.run": "report.run",
+
+  // --- printable documents (0024) -----------------------------------------
+  "pdf.generate": "pdf.generate",
+  "pdf.blankDriverSheets": "pdf.blank_driver_sheets",
 };
 
 /**

@@ -281,6 +281,9 @@ export const organizationRouter = router({
             ...(input.mcNumber !== undefined && { mcNumber: input.mcNumber }),
             ...(input.filerCode !== undefined && { filerCode: input.filerCode }),
             ...(input.billingEmail !== undefined && { billingEmail: input.billingEmail }),
+            ...(input.simpleDriverSheet !== undefined && {
+              simpleDriverSheet: input.simpleDriverSheet,
+            }),
           })
           .where(eq(organizations.id, ctx.orgId))
           .returning();
