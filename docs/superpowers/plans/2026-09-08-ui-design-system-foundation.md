@@ -17,7 +17,7 @@
 - No file under `apps/web/src` is modified in this plan **except** `apps/web/src/app/layout.tsx`, `apps/web/src/app/globals.css`, and `apps/web/src/components/app-shell.tsx` — those three are explicitly in scope (theme bootstrap + nav consolidation). Every other page/component that consumes `@corridor/ui` is left untouched and must keep working unmodified.
 - Dark mode is attribute-driven: `data-theme="dark"` on `<html>`, with a `prefers-color-scheme` fallback when no explicit choice has been stored. No `next-themes` or other new runtime dependency for theming.
 - New Radix dependencies are added to `packages/ui/package.json` via `pnpm --filter @corridor/ui add <pkg>`, not hand-edited, so the lockfile resolves correctly.
-- Verification for every `packages/ui`-only task: `pnpm --filter @corridor/ui typecheck && pnpm --filter @corridor/ui lint && pnpm --filter @corridor/ui test`. Tasks that also touch `apps/web` additionally run `pnpm --filter web typecheck && pnpm --filter web lint`. The final task additionally runs `pnpm --filter @corridor/ui build`.
+- Verification for every `packages/ui`-only task: `pnpm --filter @corridor/ui typecheck && pnpm --filter @corridor/ui lint && pnpm --filter @corridor/ui test`. Tasks that also touch `apps/web` additionally run `pnpm --filter web typecheck && pnpm --filter web lint`. The final task additionally runs `pnpm --filter web build` (`packages/ui` has no `build` script — it's consumed as TS source directly, `main: ./src/index.ts` — so `web build` is the real end-to-end compile check, bundling `packages/ui`'s source through Next's own build).
 - Palette, typography, and the reduced-motion requirement are sourced from the `ui-ux-pro-max` skill's `--design-system` search for this product category, not invented — see the spec's Palette/Typography/Motion & accessibility sections for the reasoning behind each value before changing one.
 
 ---
@@ -1813,8 +1813,8 @@ git commit -m "feat(web): point legacy globals.css utilities at the new semantic
 
 - [ ] **Step 1: Full automated verification**
 
-Run: `pnpm --filter @corridor/ui typecheck && pnpm --filter @corridor/ui lint && pnpm --filter @corridor/ui test && pnpm --filter @corridor/ui build && pnpm --filter web typecheck && pnpm --filter web lint && pnpm --filter web build`
-Expected: PASS end to end.
+Run: `pnpm --filter @corridor/ui typecheck && pnpm --filter @corridor/ui lint && pnpm --filter @corridor/ui test && pnpm --filter web typecheck && pnpm --filter web lint && pnpm --filter web build`
+Expected: PASS end to end. (`packages/ui` has no `build` script — it's consumed as TS source directly; `pnpm --filter web build` is the real end-to-end compile check.)
 
 - [ ] **Step 2: Manual browser verification**
 

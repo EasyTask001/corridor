@@ -17,9 +17,18 @@ page in the app inherits a crisper look without per-page rewrites. This is sub-p
 larger redesign; later sub-projects (dashboard, movements, documents, settings, auth/onboarding)
 each get their own design pass once this foundation lands.
 
-Out of scope for this pass: rewriting the ~22 files that consume `@corridor/ui` today (they
-keep working unchanged against the reskinned components), and any change to page-level layout
-or IA beyond the sidebar itself.
+Out of scope for this pass: rewriting the ~44 files across `apps/web` that reference `@corridor/ui`
+components or raw primitive token classes today (they keep working unchanged against the
+reskinned components and revalued tokens), and any change to page-level layout or IA beyond the
+sidebar itself.
+
+**Known limitation, accepted for this pass:** `ThemeToggle` (Task 2) ships live in the sidebar,
+so any user can switch the whole app to dark mode today — but the ~44 out-of-scope files above
+still use hardcoded light-only classes in places (e.g. `hover:text-ink-950`, `bg-white` islands),
+so some of those pages will look wrong in dark mode until their own redesign sub-project lands.
+This is the accepted tradeoff of an incremental, foundation-first redesign: the toggle and the
+foundation/nav it actually controls are correct and tested now; full-app dark-mode correctness is
+a follow-on, not a blocker for this sub-project.
 
 ## Approach
 
