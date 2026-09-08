@@ -10,6 +10,7 @@ export * from "./alert";
 export * from "./compliance";
 export * from "./movement-inputs";
 export * from "./movement-validation";
+export * from "./customs-events";
 export * from "./document";
 export * from "./notification";
 export * from "./predictive";

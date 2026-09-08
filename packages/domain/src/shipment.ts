@@ -65,6 +65,19 @@ export function canTransitionShipment(from: ShipmentStatus, to: ShipmentStatus):
   return SHIPMENT_TRANSITIONS[from].includes(to);
 }
 
+/**
+ * A customs decision on the movement cascades to the shipments riding it
+ * (0022): the shipment moves to the same status when its own state machine
+ * allows it, otherwise it stays put (e.g. `entry_on_file` is not undone by a
+ * second `accepted`).
+ */
+export function cascadedShipmentStatus(
+  current: ShipmentStatus,
+  target: ShipmentStatus,
+): ShipmentStatus | null {
+  return canTransitionShipment(current, target) ? target : null;
+}
+
 /** Statuses in which a shipment may still be re-assigned to another movement. */
 export const REASSIGNABLE_SHIPMENT_STATUSES: readonly ShipmentStatus[] = ["draft", "rejected"];
 

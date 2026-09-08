@@ -47,6 +47,8 @@ export interface ShipmentForValidation {
   entryNumber: string | null;
   inBondEntryType: InBondEntryType | null;
   inBondDestinationPortId: string | null;
+  /** ACI destination office; every shipment on an in-transit trip needs one. */
+  destinationPortId: string | null;
   commodities: CommodityForValidation[];
 }
 
@@ -79,6 +81,8 @@ export interface MovementForValidation {
   } | null;
   /** "Empty Trailer" (ACE) / "Empty Trip" (ACI): the crossing carries no goods. */
   isEmpty: boolean;
+  /** ACI "in transit" flag (0022): goods cross Canada without entering it. */
+  aciInTransit: boolean;
   /** In tow order, each with the seals recorded on it. */
   trailers: TrailerForValidation[];
   shipments: ShipmentForValidation[];
@@ -226,6 +230,13 @@ export function validateForTransmit(
       block(
         at("in_bond"),
         `${label}: an in-bond shipment needs an entry type (IT/TE/IE) and a destination port.`,
+        "shipment",
+      );
+
+    if (m.regime === "ACI" && m.aciInTransit && !s.destinationPortId)
+      block(
+        at("in_transit_destination"),
+        `${label}: an in-transit trip needs a destination office on every shipment.`,
         "shipment",
       );
 

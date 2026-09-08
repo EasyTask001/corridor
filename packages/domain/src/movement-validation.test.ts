@@ -18,6 +18,7 @@ const shipment: ShipmentForValidation = {
   entryNumber: null,
   inBondEntryType: null,
   inBondDestinationPortId: null,
+  destinationPortId: null,
   commodities: [
     {
       commodityDescription: "Steel coils",
@@ -56,6 +57,7 @@ const ready: MovementForValidation = {
     status: "active",
   },
   isEmpty: false,
+  aciInTransit: false,
   trailers: [
     {
       unitNumber: "TR-501",
@@ -335,6 +337,17 @@ describe("validateForTransmit", () => {
     const bare = codes({ ...ready, trailers: [], shipments: [], seals: [] });
     expect(bare).toContain("empty_or_missing");
     expect(bare).not.toContain("shipments_missing");
+  });
+
+  it("an ACI in-transit trip needs a destination office on every shipment", () => {
+    const aci: MovementForValidation = { ...ready, regime: "ACI", aciInTransit: true };
+    expect(codes(aci)).toContain("shipment_0_in_transit_destination");
+    expect(
+      codes({ ...aci, shipments: [{ ...shipment, destinationPortId: "port-1" }] }),
+    ).not.toContain("shipment_0_in_transit_destination");
+    expect(codes({ ...ready, aciInTransit: true })).not.toContain(
+      "shipment_0_in_transit_destination",
+    );
   });
 
   it("an empty trip that still carries shipments is blocked", () => {

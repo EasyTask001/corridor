@@ -99,6 +99,33 @@ export const carrierCode = z
   .toUpperCase()
   .regex(/^[A-Z0-9]{2,4}$/, "Carrier code must be 2-4 alphanumeric characters");
 
+/** Instruments of International Traffic — Avaal's three options (0022). */
+export const IIT_INDICATORS = ["none", "iit_carrier_bond", "iit_importer_bond"] as const;
+export const iitIndicator = z.enum(IIT_INDICATORS);
+export type IitIndicator = z.infer<typeof iitIndicator>;
+export const IIT_INDICATOR_LABELS: Record<IitIndicator, string> = {
+  none: "None",
+  iit_carrier_bond: "IIT under carrier bond",
+  iit_importer_bond: "IIT under importer bond",
+};
+
+/** CBSA ACI trip flags; always false on an ACE manifest (DB check). */
+export const ACI_FLAG_KEYS = [
+  "aciLvs",
+  "aciPostal",
+  "aciFlyingTruck",
+  "aciInTransit",
+  "aciIit",
+] as const;
+export type AciFlagKey = (typeof ACI_FLAG_KEYS)[number];
+export const ACI_FLAG_LABELS: Record<AciFlagKey, string> = {
+  aciLvs: "Low value shipment (LVS)",
+  aciPostal: "Postal",
+  aciFlyingTruck: "Flying truck",
+  aciInTransit: "In transit",
+  aciIit: "IIT (instruments of international traffic)",
+};
+
 export const movementSchema = z.object({
   id: uuid,
   organizationId: uuid,
@@ -112,6 +139,12 @@ export const movementSchema = z.object({
   truckId: uuid.nullable(),
   /** "Empty Trailer" (ACE) / "Empty Trip" (ACI) — migration 0021. */
   isEmpty: z.boolean(),
+  iitIndicator,
+  aciLvs: z.boolean(),
+  aciPostal: z.boolean(),
+  aciFlyingTruck: z.boolean(),
+  aciInTransit: z.boolean(),
+  aciIit: z.boolean(),
   customsReferenceNumber: z.string().nullable(),
   submittedAt: isoDateTime.nullable(),
   acceptedAt: isoDateTime.nullable(),
@@ -145,6 +178,8 @@ export const movementEventType = z.enum([
   "note",
   "customs_response",
   "ai_flag",
+  /** 0022 — one gateway message (sending, accepted, entry on file, …). */
+  "customs_event",
 ]);
 export type MovementEventType = z.infer<typeof movementEventType>;
 
