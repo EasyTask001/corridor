@@ -14,7 +14,13 @@ import {
   type RlsTransaction,
 } from "@corridor/db";
 import type { ManifestPayload } from "@corridor/integrations";
-import { customsClientFor, logIntegrationEvent, manifestFor } from "./customs";
+import {
+  POLL_INTERVAL_MS,
+  customsClientFor,
+  logIntegrationEvent,
+  manifestFor,
+  pollCustomsStatus,
+} from "./customs";
 import { applyCustomsDecision, loadFull, loadOrganization, requireMovement } from "./movements";
 import { recordUsage, reportPendingUsage } from "./usage";
 
@@ -22,6 +28,8 @@ const { backgroundJobs, movements } = schema;
 
 export type JobType =
   | "customs.decide"
+  | "customs.poll_status"
+  | "customs.notices_sync"
   | "compliance.scan"
   | "document.extract"
   | "copilot.embed_knowledge"
@@ -144,6 +152,40 @@ export const jobHandlers: Partial<Record<JobType, Handler>> = {
       });
     }
     return { decision: decision.decision, status: updated.status };
+  },
+
+  /**
+   * Gateway mode (0023): ask the gateway where the filing stands and apply
+   * it. Re-enqueues itself every POLL_INTERVAL_MS until the decision is
+   * terminal or 48 h have passed; the webhook may land first, in which case
+   * the poll simply finds nothing new.
+   */
+  "customs.poll_status": async (tx, job) => {
+    const orgId = job.organizationId;
+    if (!orgId) throw new Error("customs.poll_status requires organization_id");
+    const payload = {
+      movementId: String(job.payload.movementId),
+      referenceNumber: typeof job.payload.referenceNumber === "string" ? job.payload.referenceNumber : null,
+      startedAt: typeof job.payload.startedAt === "string" ? job.payload.startedAt : null,
+      correlationId: typeof job.payload.correlationId === "string" ? job.payload.correlationId : null,
+    };
+    const result = await pollCustomsStatus(tx, orgId, payload);
+    if (result.again) {
+      await enqueueJob(tx, {
+        orgId,
+        jobType: "customs.poll_status",
+        payload: { ...job.payload, startedAt: payload.startedAt ?? new Date().toISOString() },
+        runAt: new Date(Date.now() + POLL_INTERVAL_MS),
+        maxAttempts: 5,
+      });
+    }
+    return result;
+  },
+
+  /** Hourly (vercel.json → /api/jobs/notices-sync): pull CBP/CBSA notices, fan out. */
+  "customs.notices_sync": async (tx) => {
+    const { syncCarrierNotices } = await import("./notices");
+    return syncCarrierNotices(tx);
   },
 
   "document.extract": async (tx, job) => {

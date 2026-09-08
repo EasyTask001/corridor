@@ -139,6 +139,7 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
   // --- integrations -------------------------------------------------------
   "integrations.configs.upsert": "integration.config_update",
   "integrations.configs.clearCredentials": "integration.credentials_cleared",
+  "integrations.testCustoms": "integration.test_connection",
   "integrations.jobs.runNow": "job.run_now",
 
   // --- billing ------------------------------------------------------------

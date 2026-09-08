@@ -35,7 +35,7 @@ import {
   type OrgContext,
 } from "../trpc";
 import { simulateCustomsEvents } from "@corridor/integrations";
-import { transmitMovement } from "../services/customs";
+import { cancelAtCustoms, transmitAmendment, transmitMovement } from "../services/customs";
 import { enqueueJob } from "../services/jobs";
 import {
   acceptMovementSuggestion,
@@ -735,6 +735,9 @@ export const movementRouter = router({
     .mutation(({ ctx, input }) =>
       ctx.rls(async (tx) => {
         const m = await requireMovement(tx, ctx.orgId, input.id);
+        // A filed manifest is withdrawn at the gateway first; a transport
+        // failure throws and nothing below is committed.
+        const ack = await cancelAtCustoms(tx, actorOf(ctx), m, input.reason ?? null);
         const row = await applyTransition(
           tx,
           actorOf(ctx),
@@ -742,7 +745,7 @@ export const movementRouter = router({
           "cancelled",
           "user",
           {},
-          { reason: input.reason ?? null },
+          { reason: input.reason ?? null, ...(ack && { customsAcknowledged: ack.receivedAt }) },
         );
         await writeAudit(
           tx,
@@ -870,6 +873,9 @@ export const movementRouter = router({
         const updated = await applyTransition(tx, actorOf(ctx), m, "sent", "user", set, {
           amendmentNumber: next,
         });
+        // Re-file with the gateway (0023). Throws on transport failure, which
+        // rolls the amendment and the transition back.
+        await transmitAmendment(tx, actorOf(ctx), m.id, next);
         await writeAudit(
           tx,
           ctx.orgId,
