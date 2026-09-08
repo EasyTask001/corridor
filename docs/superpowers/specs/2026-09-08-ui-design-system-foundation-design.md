@@ -1,6 +1,6 @@
 # UI design system foundation — redesign
 
-Status: draft, pending user review
+Status: approved, palette/typography revised against `ui-ux-pro-max` verified data (see Palette/Typography below)
 Branch for implementation: `design/foundation-v2` (off `main`, main untouched until merge)
 
 ## Why
@@ -46,16 +46,53 @@ Three layers, Tailwind v4 `@theme` + CSS custom properties:
 
 ## Palette
 
-Restrained, near-monochrome neutral scale carrying most UI weight, one confident primary accent
-for interactive elements (buttons, links, focus rings, active nav), status colors kept strictly
-separate from the brand accent. This fixes today's anti-pattern where the amber `signal` button
-variant doubles as an implied warning color. Amber stays, scoped to status/warn only; a new
-primary accent (deep indigo/blue candidates, brought as swatches during implementation rather
-than decided in text) carries brand/interactive weight.
+Verified via `ui-ux-pro-max`'s `--design-system` search for "B2B logistics customs compliance
+dashboard SaaS" (density 8, variance 3, motion 4): style match is "Minimalism & Swiss Style",
+explicitly best-for "Enterprise apps, dashboards, SaaS platforms, professional tools" — confirms
+the Linear/Vercel/Stripe direction already chosen. The tool's verified color pairing for this
+product category anchors every value below (exact hexes in Task 1 of the implementation plan);
+this section records the roles and reasoning, not just the numbers.
 
-Concrete swatch values are a visual decision made during implementation (with the
-`design-system`/`ui-ux-pro-max` skills), not fixed in this doc — the plan step should produce
-2-3 concrete palette options for sign-off before they're locked into `tokens.css`.
+- **Neutral scale**: Tailwind's standard `slate` ramp (the tool's own Background/Foreground/
+  Border/Muted values for this category resolve almost exactly to slate at every stop) — more
+  battle-tested than an invented ramp. Carries most UI weight, per Swiss/minimalism style.
+- **Brand accent** (`brand-*`, new primitive family): a blue anchored on the tool's verified
+  Primary/Secondary pair (`#2563eb` / `#3b82f6`). Used for buttons, links, focus rings, active
+  nav — the sole generic interactive color.
+- **Signal** (`signal-*`, existing name, the border/customs domain accent): the tool separately
+  recommends an orange (`#ea580c`) as this category's accent/CTA color. Corridor's amber
+  "signal" is conceptually that same "domain attention" role, so `signal-500` takes that
+  verified value directly rather than the muted gold used before.
+- **Warn** (`warn-*`, generic status): shifted to true amber so it's visually distinct from the
+  now-orange `signal` — the two were near-identical golds in the first draft, which is exactly
+  the anti-pattern (brand accent doubling as implied status color) this section originally
+  flagged.
+- **Danger** (`danger-*`): the tool's verified Destructive value (`#dc2626`), replacing an
+  invented red.
+- **Ok** (`ok-*`): no direct tool output for this role; kept to a standard, well-tested Tailwind
+  hue family (emerald) rather than a custom guess, consistent with the rest of the palette now
+  being sourced from verified/standard scales rather than invented ones.
+
+This is a genuine change from the first draft, not just now-verified versions of the same
+choices — the earlier indigo brand accent and near-identical signal/warn golds are both gone.
+
+## Typography
+
+`ui-ux-pro-max` recommends **Plus Jakarta Sans** for this exact product category ("SaaS, B2B,
+dashboards, productivity tools" — mood: friendly, modern, professional), over the bare
+system-font stack the first draft kept. Loaded via `next/font/google` in the root layout (Next's
+self-hosted approach — avoids the render-blocking external stylesheet request and layout shift a
+raw Google Fonts `<link>`/`@import` would cost), exposed as a CSS custom property that
+`packages/ui/src/tokens.css`'s `--font-sans` wraps with the original system-font stack as a
+fallback (so `packages/ui` itself never depends on `next/font`).
+
+## Motion & accessibility
+
+`ui-ux-pro-max`'s pre-delivery checklist flags `prefers-reduced-motion` support as required; the
+first draft didn't have it. Adding a single global rule in `globals.css` that collapses
+transition/animation durations under that media query. Everything else the checklist calls for
+(150-300ms hover transitions, visible focus rings on every interactive control, no dark-mode-by-
+default) was already true of the plan as designed.
 
 ## Dark mode
 
@@ -96,9 +133,8 @@ No Storybook or visual-regression harness exists in this repo. Verification is:
 (`pnpm dev`) against a couple of real pages (dashboard, settings) in both light and dark theme,
 checking the consolidated nav's collapse/expand and active-route auto-expand behavior.
 
-## Skills to use during implementation
+## Skills used
 
-Per `apps/web` and global CLAUDE.md conventions, implementation should invoke `ui-ux-pro-max` as
-the primary UI/UX skill, with `design-system` for the token architecture/component spec work and
-`brand`/`design`/`ui-styling` as needed for the palette and visual polish decisions called out
-above as "decided during implementation."
+`ui-ux-pro-max` was invoked (`--design-system` search plus targeted `ux`/`color`/`nextjs`
+queries) to source the Palette, Typography, and Motion & accessibility sections above from
+verified data rather than invented values — see those sections for what came from it and why.
