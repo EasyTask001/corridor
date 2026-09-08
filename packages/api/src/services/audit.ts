@@ -136,6 +136,11 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
   "shipment.assign": "shipment.assign",
   "shipment.unassign": "shipment.unassign",
 
+  // --- bulk import (0028) ---------------------------------------------------
+  "imports.validate": "import.validate",
+  "imports.commit": "import.commit",
+  "imports.deleteBatch": "import.delete_batch",
+
   // --- in-bond (0026) -------------------------------------------------------
   "inbond.records.create": "inbond.record_create",
   "inbond.records.update": "inbond.record_update",

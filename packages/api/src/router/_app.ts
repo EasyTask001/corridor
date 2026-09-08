@@ -4,6 +4,7 @@ import { auditRouter } from "./audit";
 import { billingRouter } from "./billing";
 import { copilotRouter } from "./copilot";
 import { documentsRouter } from "./documents";
+import { importsRouter } from "./imports";
 import { inbondRouter } from "./inbond";
 import { integrationsRouter } from "./integrations";
 import { movementRouter } from "./movement";
@@ -25,6 +26,7 @@ export const appRouter = router({
   movement: movementRouter,
   shipment: shipmentRouter,
   inbond: inbondRouter,
+  imports: importsRouter,
   integrations: integrationsRouter,
   billing: billingRouter,
   copilot: copilotRouter,
