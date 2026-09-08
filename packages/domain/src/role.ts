@@ -46,6 +46,7 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleKey, readonly PermissionK
     "shipment.write",
     "inbond.read",
     "inbond.write",
+    "import.run",
     "document.read",
     "document.upload",
     "document.review_extraction",

@@ -52,6 +52,12 @@ export const PERMISSIONS = {
     description: "Create/edit shipments, commodities and their movement assignment",
   },
 
+  // bulk import (0028)
+  "import.run": {
+    module: "shipment",
+    description: "Validate, commit and delete CSV imports of shipments and commodities",
+  },
+
   // in-bond (0026)
   "inbond.read": { module: "shipment", description: "View the in-bond monitor and external shipments" },
   "inbond.write": {

@@ -357,8 +357,10 @@ export const shipments = pgTable(
     releasedAt: timestamp("released_at", { withTimezone: true }),
     arrivedAt: timestamp("arrived_at", { withTimezone: true }),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
-    /** FK added in Task 11 with the import_batches table. */
-    importBatchId: uuid("import_batch_id"),
+    /** 0028 — the CSV batch that created the row. */
+    importBatchId: uuid("import_batch_id").references((): AnyPgColumn => importBatches.id, {
+      onDelete: "set null",
+    }),
     sourceDocumentId: uuid("source_document_id").references((): AnyPgColumn => sourceDocuments.id, {
       onDelete: "set null",
     }),
@@ -377,6 +379,10 @@ export const shipments = pgTable(
       sql`to_tsvector('simple', ${t.controlNumber})`,
     ),
     unique("shipments_organization_id_control_number_key").on(t.organizationId, t.controlNumber),
+    // 0028
+    index("shipments_import_batch_idx")
+      .on(t.importBatchId)
+      .where(sql`${t.importBatchId} is not null`),
   ],
 );
 
@@ -417,6 +423,10 @@ export const commodities = pgTable(
       scale: 3,
       mode: "number",
     }),
+    /** 0028 — the CSV batch that created the line. */
+    importBatchId: uuid("import_batch_id").references((): AnyPgColumn => importBatches.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -427,6 +437,40 @@ export const commodities = pgTable(
       "gin",
       sql`to_tsvector('simple', ${t.commodityDescription})`,
     ),
+    // 0028
+    index("commodities_import_batch_idx")
+      .on(t.importBatchId)
+      .where(sql`${t.importBatchId} is not null`),
+  ],
+);
+
+/** 0028 — one CSV upload of shipments or commodity lines, with its row report. */
+export const importBatches = pgTable(
+  "import_batches",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["shipments", "commodities"] }).notNull(),
+    filename: text("filename").notNull(),
+    rowCount: integer("row_count").notNull().default(0),
+    okCount: integer("ok_count").notNull().default(0),
+    errorCount: integer("error_count").notNull().default(0),
+    status: text("status", { enum: ["validated", "committed", "deleted"] })
+      .notNull()
+      .default("validated"),
+    report: jsonb("report").$type<Record<string, unknown>>().notNull().default({}),
+    createdBy: uuid("created_by").references(() => authUsers.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    committedAt: timestamp("committed_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("import_batches_organization_id_idx").on(t.organizationId),
+    index("import_batches_org_created_idx").on(t.organizationId, t.createdAt.desc()),
   ],
 );
 
