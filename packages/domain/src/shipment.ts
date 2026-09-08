@@ -224,16 +224,40 @@ export const shipmentPatch = z
   .partial();
 export type ShipmentPatch = z.infer<typeof shipmentPatch>;
 
+/** Columns the shipments list can search in one at a time (Task 14). */
+export const SHIPMENT_SEARCH_COLUMNS = [
+  { key: "controlNumber", label: "Control number" },
+  { key: "entryNumber", label: "Entry number" },
+  { key: "inBondNumber", label: "In-bond number" },
+  { key: "shipperName", label: "Shipper" },
+  { key: "movementNumber", label: "Movement #" },
+] as const;
+export const shipmentSearchColumn = z.enum(
+  SHIPMENT_SEARCH_COLUMNS.map((c) => c.key) as [
+    (typeof SHIPMENT_SEARCH_COLUMNS)[number]["key"],
+    ...(typeof SHIPMENT_SEARCH_COLUMNS)[number]["key"][],
+  ],
+);
+export type ShipmentSearchColumn = z.infer<typeof shipmentSearchColumn>;
+
 export const shipmentListInput = z.object({
   regime: regime.optional(),
   status: z.array(shipmentStatus).optional(),
   /** Only shipments not yet attached to a movement. */
   unassignedOnly: z.boolean().optional(),
   q: z.string().trim().max(100).optional(),
+  /** Restrict `q` to one column; omitted = every searchable column. */
+  searchColumn: shipmentSearchColumn.optional(),
+  /** Rows per page; wins over `limit` when both are sent. */
+  pageSize: z.number().int().min(10).max(200).optional(),
   limit: z.number().int().min(1).max(200).default(50),
   offset: z.number().int().min(0).default(0),
 });
 export type ShipmentListInput = z.infer<typeof shipmentListInput>;
+
+/** Bulk delete of draft shipments from the list (Task 14). */
+export const shipmentBulkRemoveInput = z.object({ ids: z.array(uuid).min(1).max(200) });
+export type ShipmentBulkRemoveInput = z.infer<typeof shipmentBulkRemoveInput>;
 
 export const assignShipmentsInput = z.object({
   movementId: uuid,

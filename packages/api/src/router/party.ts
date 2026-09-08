@@ -32,6 +32,8 @@ import {
   trailerInput,
   truckInput,
   uuid,
+  REGISTRY_SEARCH_COLUMNS,
+  registryBulkStatusInput,
   registryExportInput,
   type PermissionKey,
   type PlateEntry,
@@ -69,6 +71,8 @@ interface RegistryConfig<T extends PgTable, I extends z.ZodObject> {
    * rows read back carry it again so the edit form can round-trip it.
    */
   plateOwner?: "truckId" | "trailerId";
+  /** Which registry this is, for the search-column allow-list. */
+  kind: keyof typeof REGISTRY_SEARCH_COLUMNS;
   /** Title and columns of the CSV / PDF export (Task 12). */
   title: string;
   exportColumns: Array<{ key: string; label: string; value?: (row: T["$inferSelect"]) => unknown }>;
@@ -147,7 +151,16 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
           else if (!input.includeArchived) conds.push(sql`${t.status} <> 'archived'`);
           if (input.search) {
             const like = `%${input.search.replace(/[%_\\]/g, "\\$&")}%`;
-            conds.push(or(...searchColumns.map((c) => ilike(c, like)))!);
+            if (input.searchColumn) {
+              // Search-by-column (Task 14): only this registry's advertised columns.
+              const allowed = REGISTRY_SEARCH_COLUMNS[cfg.kind].some((c) => c.key === input.searchColumn);
+              const column = (cfg.table as unknown as Record<string, PgColumn>)[input.searchColumn];
+              if (!allowed || !column)
+                throw new TRPCError({ code: "BAD_REQUEST", message: `Cannot search ${cfg.kind} by ${input.searchColumn}` });
+              conds.push(ilike(column, like));
+            } else {
+              conds.push(or(...searchColumns.map((c) => ilike(c, like)))!);
+            }
           }
           if (input.direction && cfg.entityType === "partner") {
             const pt = cfg.table as unknown as typeof partners;
@@ -160,7 +173,7 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
               .from(t)
               .where(where)
               .orderBy(...orderBy)
-              .limit(input.limit)
+              .limit(input.pageSize ?? input.limit)
               .offset(input.offset),
             tx
               .select({ count: sql<number>`count(*)::int` })
@@ -179,6 +192,34 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
               )
             : rawRows;
           return { rows: rows as unknown as Row[], total: counts[0]?.count ?? 0 };
+        }),
+      ),
+
+    /** Bulk activate / deactivate / archive (Task 14): one audit row per record, like `update`. */
+    bulkSetStatus: permissionProcedure(cfg.write)
+      .input(registryBulkStatusInput)
+      .mutation(({ ctx, input }) =>
+        ctx.rls(async (tx) => {
+          const before = (await tx
+            .select()
+            .from(t)
+            .where(and(eq(t.organizationId, ctx.orgId), inArray(t.id, input.ids)))) as unknown as (Row & {
+            id: string;
+            status: string;
+          })[];
+          let changed = 0;
+          for (const row of before) {
+            if (row.status === input.status) continue;
+            const [after] = await tx
+              .update(t)
+              .set({ status: input.status } as Partial<RegistryTable["$inferInsert"]>)
+              .where(eq(t.id, row.id))
+              .returning();
+            await writeAudit(tx, ctx.orgId, `${cfg.entityType}.update`, cfg.entityType, row.id, row, after ?? null);
+            if (cfg.afterSave && after) await cfg.afterSave(tx, ctx.orgId, after as unknown as Row);
+            changed += 1;
+          }
+          return { changed, total: before.length };
         }),
       ),
 
@@ -457,6 +498,7 @@ export const partyRouter = router({
       read: "driver.read",
       write: "driver.write",
       entityType: "driver",
+    kind: "drivers",
     title: "Drivers",
     exportColumns: [
       { key: "firstName", label: "First name" },
@@ -489,6 +531,7 @@ export const partyRouter = router({
     read: "truck.read",
     write: "truck.write",
     entityType: "truck",
+    kind: "trucks",
     title: "Trucks",
     exportColumns: [
       { key: "unitNumber", label: "Unit" },
@@ -516,6 +559,7 @@ export const partyRouter = router({
     read: "trailer.read",
     write: "trailer.write",
     entityType: "trailer",
+    kind: "trailers",
     title: "Trailers",
     exportColumns: [
       { key: "unitNumber", label: "Unit" },
@@ -541,6 +585,7 @@ export const partyRouter = router({
     read: "partner.read",
     write: "partner.write",
     entityType: "partner",
+    kind: "partners",
     title: "Partners",
     exportColumns: [
       { key: "name", label: "Partner" },

@@ -2,10 +2,31 @@ import { z } from "zod";
 import { isoDateTime, nonEmpty, uuid } from "./common";
 import { carrierCode, iitIndicator, movementStatus, regime, sealInput } from "./movement";
 
+/** Columns the movements list can search in one at a time (Task 14). */
+export const MOVEMENT_SEARCH_COLUMNS = [
+  { key: "movementNumber", label: "Movement #" },
+  { key: "tripNumber", label: "Trip #" },
+  { key: "customsReferenceNumber", label: "Customs ref" },
+  { key: "driver", label: "Driver" },
+  { key: "truckUnit", label: "Truck" },
+  { key: "controlNumber", label: "Control number" },
+] as const;
+export const movementSearchColumn = z.enum(
+  MOVEMENT_SEARCH_COLUMNS.map((c) => c.key) as [
+    (typeof MOVEMENT_SEARCH_COLUMNS)[number]["key"],
+    ...(typeof MOVEMENT_SEARCH_COLUMNS)[number]["key"][],
+  ],
+);
+export type MovementSearchColumn = z.infer<typeof movementSearchColumn>;
+
 export const movementListInput = z.object({
   status: z.array(movementStatus).optional(),
   regime: regime.optional(),
   search: z.string().trim().max(100).optional(),
+  /** Restrict `search` to one column; omitted = every searchable column. */
+  searchColumn: movementSearchColumn.optional(),
+  /** Rows per page; wins over `limit` when both are sent. */
+  pageSize: z.number().int().min(10).max(200).optional(),
   driverId: uuid.optional(),
   portId: uuid.optional(),
   limit: z.number().int().min(1).max(200).default(50),

@@ -280,8 +280,41 @@ export type Partner = z.infer<typeof partnerSchema>;
 // Shared list query
 // ---------------------------------------------------------------------------
 
+/** Columns each registry can search in one at a time (Task 14); keys are row fields. */
+export const REGISTRY_SEARCH_COLUMNS = {
+  drivers: [
+    { key: "lastName", label: "Last name" },
+    { key: "firstName", label: "First name" },
+    { key: "licenseNumber", label: "License #" },
+    { key: "email", label: "Email" },
+    { key: "phone", label: "Phone" },
+  ],
+  trucks: [
+    { key: "unitNumber", label: "Unit" },
+    { key: "vin", label: "VIN" },
+    { key: "plateNumber", label: "Plate" },
+    { key: "make", label: "Make" },
+  ],
+  trailers: [
+    { key: "unitNumber", label: "Unit" },
+    { key: "vin", label: "VIN" },
+    { key: "plateNumber", label: "Plate" },
+  ],
+  partners: [
+    { key: "name", label: "Name" },
+    { key: "contactName", label: "Contact" },
+    { key: "taxId", label: "Tax ID" },
+    { key: "contactEmail", label: "Contact email" },
+  ],
+} as const satisfies Record<string, ReadonlyArray<{ key: string; label: string }>>;
+export type RegistrySearchColumn = (typeof REGISTRY_SEARCH_COLUMNS)[keyof typeof REGISTRY_SEARCH_COLUMNS][number]["key"];
+
 export const registryListInput = z.object({
   search: z.string().trim().max(100).optional(),
+  /** Restrict `search` to one of that registry's columns; the API rejects a column it does not know. */
+  searchColumn: z.string().trim().max(40).optional(),
+  /** Rows per page; wins over `limit` when both are sent. */
+  pageSize: z.number().int().min(10).max(200).optional(),
   /** Partners only: the side of a shipment they can take (`both` always qualifies). */
   direction: z.enum(["shipper", "consignee"]).optional(),
   status: registryStatus.optional(),
@@ -290,6 +323,13 @@ export const registryListInput = z.object({
   offset: z.number().int().min(0).default(0),
 });
 export type RegistryListInput = z.infer<typeof registryListInput>;
+
+/** Bulk activate / deactivate / archive from the list (Task 14). */
+export const registryBulkStatusInput = z.object({
+  ids: z.array(uuid).min(1).max(200),
+  status: registryStatus,
+});
+export type RegistryBulkStatusInput = z.infer<typeof registryBulkStatusInput>;
 
 /** A partner's side of a shipment, for pre-filtering the pickers. */
 export const partnerDirection = z.enum(["shipper", "consignee"]);

@@ -91,20 +91,24 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
   "party.drivers.update": "driver.update",
   "party.drivers.archive": "driver.archive",
   "party.drivers.export": "driver.export",
+  "party.drivers.bulkSetStatus": "driver.update",
   "party.drivers.documents.upsert": "driver.document_add / driver.document_update",
   "party.drivers.documents.remove": "driver.document_remove",
   "party.trucks.create": "truck.create",
   "party.trucks.update": "truck.update",
   "party.trucks.archive": "truck.archive",
   "party.trucks.export": "truck.export",
+  "party.trucks.bulkSetStatus": "truck.update",
   "party.trailers.create": "trailer.create",
   "party.trailers.update": "trailer.update",
   "party.trailers.archive": "trailer.archive",
   "party.trailers.export": "trailer.export",
+  "party.trailers.bulkSetStatus": "trailer.update",
   "party.partners.create": "partner.create",
   "party.partners.update": "partner.update",
   "party.partners.archive": "partner.archive",
   "party.partners.export": "partner.export",
+  "party.partners.bulkSetStatus": "partner.update",
 
   // --- alerts -------------------------------------------------------------
   "alerts.setStatus": "alert.status_update",
@@ -141,6 +145,8 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
   "shipment.unassign": "shipment.unassign",
 
   "organization.updateMe": "user.profile_update",
+
+  "shipment.bulkRemove": "shipment.remove",
 
   // --- bulk import (0028) ---------------------------------------------------
   "imports.validate": "import.validate",

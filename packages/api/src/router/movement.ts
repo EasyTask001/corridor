@@ -146,12 +146,20 @@ export const movementRouter = router({
         if (input.portId) conds.push(eq(movements.portId, input.portId));
         if (input.search) {
           const like = `%${input.search.replace(/[%_\\]/g, "\\$&")}%`;
+          // Search-by-column (Task 14): one column when named, else the three references.
+          const byColumn = {
+            movementNumber: ilike(movements.movementNumber, like),
+            tripNumber: ilike(movements.tripNumber, like),
+            customsReferenceNumber: ilike(movements.customsReferenceNumber, like),
+            driver: sql`exists (select 1 from public.movement_crew mc join public.drivers d on d.id = mc.driver_id
+                        where mc.movement_id = ${movements.id} and (d.first_name || ' ' || d.last_name) ilike ${like})`,
+            truckUnit: sql`exists (select 1 from public.trucks t where t.id = ${movements.truckId} and t.unit_number ilike ${like})`,
+            controlNumber: sql`exists (select 1 from public.shipments s where s.movement_id = ${movements.id} and s.control_number ilike ${like})`,
+          };
           conds.push(
-            or(
-              ilike(movements.movementNumber, like),
-              ilike(movements.tripNumber, like),
-              ilike(movements.customsReferenceNumber, like),
-            )!,
+            input.searchColumn
+              ? byColumn[input.searchColumn]
+              : or(byColumn.movementNumber, byColumn.tripNumber, byColumn.customsReferenceNumber)!,
           );
         }
         const where = and(...conds);
@@ -189,7 +197,7 @@ export const movementRouter = router({
             .leftJoin(ports, eq(ports.id, movements.portId))
             .where(where)
             .orderBy(desc(movements.updatedAt))
-            .limit(input.limit)
+            .limit(input.pageSize ?? input.limit)
             .offset(input.offset),
           tx
             .select({ count: sql<number>`count(*)::int` })

@@ -13,6 +13,7 @@ import {
   commodityUpsertInput,
   isEditable,
   shipmentInput,
+  shipmentBulkRemoveInput,
   shipmentListInput,
   rnsListInput,
   shipmentPatch,
@@ -65,15 +66,22 @@ export const shipmentRouter = router({
         if (input.unassignedOnly) conds.push(isNull(shipments.movementId));
         if (input.q) {
           const like = `%${input.q.replace(/[%_\\]/g, "\\$&")}%`;
+          // Search-by-column (Task 14): one column when named, else every searchable one.
+          const byColumn = {
+            controlNumber: ilike(shipments.controlNumber, like),
+            entryNumber: ilike(shipments.entryNumber, like),
+            inBondNumber: ilike(shipments.inBondNumber, like),
+            shipperName: sql`exists (select 1 from public.partners p where p.id = ${shipments.shipperId} and p.name ilike ${like})`,
+            movementNumber: sql`exists (select 1 from public.movements m where m.id = ${shipments.movementId} and m.movement_number ilike ${like})`,
+          };
           conds.push(
-            or(
-              ilike(shipments.controlNumber, like),
-              ilike(shipments.entryNumber, like),
-              ilike(shipments.inBondNumber, like),
-            )!,
+            input.searchColumn
+              ? byColumn[input.searchColumn]
+              : or(byColumn.controlNumber, byColumn.entryNumber, byColumn.inBondNumber)!,
           );
         }
         const where = and(...conds);
+        const limit = input.pageSize ?? input.limit;
         const [rows, counts] = await Promise.all([
           tx
             .select({
@@ -98,7 +106,7 @@ export const shipmentRouter = router({
             .leftJoin(partners, eq(partners.id, shipments.shipperId))
             .where(where)
             .orderBy(desc(shipments.updatedAt))
-            .limit(input.limit)
+            .limit(limit)
             .offset(input.offset),
           tx
             .select({ count: sql<number>`count(*)::int` })
@@ -254,6 +262,35 @@ export const shipmentRouter = router({
         if (s.movementId) await syncMovementRiskAlerts(tx, ctx.orgId, s.movementId);
         await writeAudit(tx, ctx.orgId, "shipment.remove", "shipment", input.id, s, null);
         return { id: input.id };
+      }),
+    ),
+
+  /** Bulk delete from the list (Task 14): drafts go, anything else is reported back. */
+  bulkRemove: permissionProcedure("shipment.write")
+    .input(shipmentBulkRemoveInput)
+    .mutation(({ ctx, input }) =>
+      ctx.rls(async (tx) => {
+        const rows = await tx
+          .select({ id: shipments.id, controlNumber: shipments.controlNumber, status: shipments.status, movementId: shipments.movementId, movementStatus: movements.status })
+          .from(shipments)
+          .leftJoin(movements, eq(movements.id, shipments.movementId))
+          .where(and(eq(shipments.organizationId, ctx.orgId), inArray(shipments.id, input.ids)));
+        const skipped: string[] = [];
+        const touchedMovements = new Set<string>();
+        let deleted = 0;
+        for (const r of rows) {
+          const editable = r.status === "draft" && (!r.movementStatus || isEditable(r.movementStatus));
+          if (!editable) {
+            skipped.push(r.controlNumber);
+            continue;
+          }
+          await tx.delete(shipments).where(eq(shipments.id, r.id));
+          await writeAudit(tx, ctx.orgId, "shipment.remove", "shipment", r.id, r, null);
+          if (r.movementId) touchedMovements.add(r.movementId);
+          deleted += 1;
+        }
+        for (const movementId of touchedMovements) await syncMovementRiskAlerts(tx, ctx.orgId, movementId);
+        return { deleted, skipped };
       }),
     ),
 
