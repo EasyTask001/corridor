@@ -131,6 +131,27 @@ test.describe("seeded roles", () => {
     await expect(page.getByText("role.delete", { exact: true }).first()).toBeVisible();
   });
 
+  test("help, resources and forgot-password pages render", async ({ page }) => {
+    await page.goto("/forgot-password");
+    await expect(page.getByRole("heading", { name: "Forgot your password?" })).toBeVisible();
+    await page.getByLabel("Email").fill("nobody@pathfinder.demo");
+    await page.getByRole("button", { name: "Send reset link" }).click();
+    await expect(page.getByRole("status")).toHaveText(/reset link is on its way/);
+
+    await login(page, "dispatch@pathfinder.demo");
+    await page.goto("/help");
+    await expect(page.getByRole("heading", { name: "Help" })).toBeVisible();
+    await page.getByRole("link", { name: "Importing from a file" }).first().click();
+    await expect(page).toHaveURL(/\/help\/07-importing/);
+    await expect(page.getByRole("article", { name: "Importing from a file" })).toContainText("Validate, then commit");
+
+    await page.goto("/resources");
+    await expect(page.getByRole("link", { name: "CBP border wait times" })).toHaveAttribute("rel", "noopener");
+
+    await page.goto("/settings/profile");
+    await expect(page.getByLabel("Display name")).toBeVisible();
+  });
+
   test("read-only user is gated out of management UI", async ({ page }) => {
     await login(page, "readonly@pathfinder.demo");
     // Read-Only holds every *.read key, so read pages stay visible…

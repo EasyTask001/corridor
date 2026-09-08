@@ -27,6 +27,8 @@ const NAV: NavItem[] = [
   { href: "/alerts", label: "Alerts", permission: "alert.read" },
   { href: "/reports", label: "Reports", permission: "report.read" },
   { href: "/copilot", label: "Copilot", permission: "copilot.use" },
+  { href: "/resources", label: "Resources" },
+  { href: "/help", label: "Help" },
 ];
 
 const SETTINGS: NavItem[] = [
