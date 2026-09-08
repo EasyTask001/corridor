@@ -157,6 +157,43 @@ export interface CustomsDecisionMessage {
   raw: Record<string, unknown>;
 }
 
+/** GET /manifests/{ref}: where the filing stands right now. */
+export interface CustomsStatusMessage {
+  referenceNumber: string;
+  status: "pending" | "accepted" | "rejected" | "released" | "held" | "cancelled";
+  /** The decision implied by `status`, null while pending or cancelled. */
+  decision: CustomsDecision | null;
+  message: string | null;
+  events: CustomsEventMessage[];
+  shipments: CustomsShipmentMessage[];
+  raw: Record<string, unknown>;
+}
+
+/** A status document pushed by the gateway, with the id that makes it idempotent. */
+export interface InboundCustomsMessage extends CustomsStatusMessage {
+  eventId: string;
+}
+
+/** A CBP/CBSA service notice as the gateway relays it (carrier_notices). */
+export interface CarrierNotice {
+  provider: "cbp_ace" | "cbsa_aci";
+  externalId: string;
+  severity: "info" | "warning" | "critical";
+  title: string;
+  body: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  publishedAt: string;
+}
+
+export interface CustomsCancelAck {
+  referenceNumber: string;
+  receivedAt: string;
+  raw: Record<string, unknown>;
+}
+
+export type CustomsClientMode = "mock" | "gateway";
+
 export class CustomsTransportError extends Error {
   override readonly name = "CustomsTransportError";
   constructor(
@@ -171,8 +208,17 @@ export class CustomsTransportError extends Error {
 export interface CustomsClient {
   readonly provider: "cbp_ace" | "cbsa_aci";
   readonly environment: "sandbox" | "production";
+  readonly mode: CustomsClientMode;
   /** Submit a manifest. Throws CustomsTransportError on gateway failure. */
   transmit(manifest: ManifestPayload, opts?: { correlationId?: string }): Promise<TransmitAck>;
+  /** Re-file an accepted manifest with changes. */
+  amend(
+    manifest: ManifestPayload,
+    referenceNumber: string,
+    opts?: { correlationId?: string },
+  ): Promise<TransmitAck>;
+  /** Withdraw a filed manifest. */
+  cancel(referenceNumber: string, reason: string | null): Promise<CustomsCancelAck>;
   /**
    * Fetch the decision for a reference. Mock providers derive it
    * deterministically; real providers poll or receive a callback.
@@ -182,6 +228,18 @@ export interface CustomsClient {
     manifest: ManifestPayload,
     ctx: { currentStatus: "sent" | "accepted" | "held" },
   ): Promise<CustomsDecisionMessage>;
+  /** Where the filing stands now (the polling primitive). */
+  fetchStatus(referenceNumber: string): Promise<CustomsStatusMessage>;
+  /** Carrier service notices published since `since` (all when null). */
+  fetchNotices(since: Date | null): Promise<CarrierNotice[]>;
+  /** Verify and parse a webhook delivery; null when the signature fails. */
+  parseInbound(
+    rawBody: string,
+    headers: { get(name: string): string | null },
+    secret?: string | null,
+  ): InboundCustomsMessage | null;
+  /** Connection test for the integrations page. */
+  ping(): Promise<{ ok: boolean; mode: CustomsClientMode; live: boolean; detail: unknown }>;
 }
 
 export interface CustomsClientSettings {

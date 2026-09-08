@@ -1,0 +1,13 @@
+{
+  "notices": [
+    {
+      "id": "fixture-notice-2026-09-01",
+      "severity": "warning",
+      "title": "Scheduled ACE/ACI gateway maintenance",
+      "body": "The e-manifest gateway will be unavailable Sunday 02:00-04:00 ET. Manifests filed in that window are queued and forwarded afterwards.",
+      "startsAt": "2026-09-14T06:00:00.000Z",
+      "endsAt": "2026-09-14T08:00:00.000Z",
+      "publishedAt": "2026-09-01T12:00:00.000Z"
+    }
+  ]
+}

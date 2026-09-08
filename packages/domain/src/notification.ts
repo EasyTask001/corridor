@@ -26,6 +26,13 @@ export const NOTIFICATION_EVENT_TYPES = {
     defaultChannel: ["in_app"],
     targeted: false,
   },
+  "customs.notice": {
+    label: "Customs service notice",
+    description: "CBP or CBSA published a service notice (outage, cut-over, port closure).",
+    permission: "movement.read",
+    defaultChannel: ["in_app"],
+    targeted: false,
+  },
   "document.review_needed": {
     label: "Document needs review",
     description: "AI extraction finished with low confidence and needs a human check.",

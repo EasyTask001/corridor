@@ -1,0 +1,18 @@
+{
+  "stages": [
+    {
+      "status": "accepted",
+      "message": "Manifest accepted by CBP (fixture).",
+      "events": [{ "code": "sending" }, { "code": "preliminary_check_passed" }, { "code": "accepted" }],
+      "shipmentStatus": "accepted"
+    },
+    {
+      "status": "released",
+      "message": "Released at primary (fixture).",
+      "eventsPerShipment": [{ "code": "entry_on_file", "withEntry": true }],
+      "events": [{ "code": "arrival_recorded" }, { "code": "released" }],
+      "shipmentStatus": "released",
+      "withEntry": true
+    }
+  ]
+}

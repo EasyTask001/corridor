@@ -1,0 +1,10 @@
+{
+  "stages": [
+    {
+      "status": "rejected",
+      "message": "Manifest rejected: shipment data failed validation (fixture).",
+      "events": [{ "code": "sending" }, { "code": "rejected" }],
+      "shipmentStatus": "rejected"
+    }
+  ]
+}
