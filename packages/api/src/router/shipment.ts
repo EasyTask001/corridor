@@ -14,6 +14,7 @@ import {
   isEditable,
   shipmentInput,
   shipmentListInput,
+  rnsListInput,
   shipmentPatch,
   uuid,
 } from "@corridor/domain";
@@ -30,7 +31,7 @@ import {
   writeHazmat,
 } from "../services/shipments";
 
-const { shipments, commodities, movements, partners, ports } = schema;
+const { shipments, commodities, movements, partners, ports, parsRnsEvents } = schema;
 
 const shipmentIdsInput = z.object({ shipmentIds: z.array(uuid).min(1).max(100) });
 
@@ -208,6 +209,11 @@ export const shipmentRouter = router({
             throw e;
           });
         await writeAudit(tx, ctx.orgId, "shipment.create", "shipment", row!.id, null, row!);
+        // An in-bond shipment is watched on the in-bond monitor from day one (0026).
+        if (row!.shipmentType === "in_bond") {
+          const { ensureInBondRecordForShipment } = await import("../services/inbond");
+          await ensureInBondRecordForShipment(tx, { orgId: ctx.orgId, userId: ctx.session.user.id }, row!);
+        }
         return row!;
       }),
     ),
@@ -437,4 +443,54 @@ export const shipmentRouter = router({
         return { unassigned: rows.length };
       }),
     ),
+
+  /** PARS RNS feed (0027): CBSA release notifications for our PARS shipments. */
+  rns: router({
+    list: permissionProcedure("shipment.read")
+      .input(rnsListInput)
+      .query(({ ctx, input }) =>
+        ctx.rls(async (tx) => {
+          const since = new Date(Date.now() - input.rangeDays * 86_400_000);
+          const conds = [
+            eq(parsRnsEvents.organizationId, ctx.orgId),
+            sql`${parsRnsEvents.receivedAt} >= ${since}`,
+          ];
+          if (input.q) {
+            const like = `%${input.q.replace(/[%_\\]/g, "\\$&")}%`;
+            conds.push(
+              or(
+                ilike(parsRnsEvents.parsNumber, like),
+                ilike(parsRnsEvents.transactionNumber, like),
+                ilike(parsRnsEvents.containerNumber, like),
+              )!,
+            );
+          }
+          const where = and(...conds);
+          const [rows, counts] = await Promise.all([
+            tx
+              .select({
+                id: parsRnsEvents.id,
+                parsNumber: parsRnsEvents.parsNumber,
+                releaseCode: parsRnsEvents.releaseCode,
+                releasedAt: parsRnsEvents.releasedAt,
+                officeCode: parsRnsEvents.officeCode,
+                sublocationCode: parsRnsEvents.sublocationCode,
+                transactionNumber: parsRnsEvents.transactionNumber,
+                containerNumber: parsRnsEvents.containerNumber,
+                receivedAt: parsRnsEvents.receivedAt,
+                shipmentId: parsRnsEvents.shipmentId,
+                movementId: shipments.movementId,
+              })
+              .from(parsRnsEvents)
+              .leftJoin(shipments, eq(shipments.id, parsRnsEvents.shipmentId))
+              .where(where)
+              .orderBy(desc(parsRnsEvents.receivedAt))
+              .limit(input.limit)
+              .offset(input.offset),
+            tx.select({ count: sql<number>`count(*)::int` }).from(parsRnsEvents).where(where),
+          ]);
+          return { rows, total: counts[0]?.count ?? 0 };
+        }),
+      ),
+  }),
 });

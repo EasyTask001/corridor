@@ -4,6 +4,7 @@ import { auditRouter } from "./audit";
 import { billingRouter } from "./billing";
 import { copilotRouter } from "./copilot";
 import { documentsRouter } from "./documents";
+import { inbondRouter } from "./inbond";
 import { integrationsRouter } from "./integrations";
 import { movementRouter } from "./movement";
 import { notificationsRouter } from "./notifications";
@@ -13,6 +14,7 @@ import { pdfRouter } from "./pdf";
 import { referenceRouter } from "./reference";
 import { reportingRouter } from "./reporting";
 import { shipmentRouter } from "./shipment";
+import { trackingRouter } from "./tracking";
 
 export const appRouter = router({
   health: publicProcedure.query(() => ({ ok: true, at: new Date().toISOString() })),
@@ -22,6 +24,7 @@ export const appRouter = router({
   audit: auditRouter,
   movement: movementRouter,
   shipment: shipmentRouter,
+  inbond: inbondRouter,
   integrations: integrationsRouter,
   billing: billingRouter,
   copilot: copilotRouter,
@@ -30,6 +33,7 @@ export const appRouter = router({
   reporting: reportingRouter,
   reference: referenceRouter,
   pdf: pdfRouter,
+  tracking: trackingRouter,
 });
 
 export type AppRouter = typeof appRouter;

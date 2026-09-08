@@ -202,3 +202,42 @@ export function rateLimitFor(tier: RateLimitTier, plan: SubscriptionPlan): RateL
     },
   };
 }
+
+/**
+ * Fixed-ceiling limiter for sessionless public endpoints (0027): counted by an
+ * explicit key (a hashed IP), with a window of the caller's choosing and no
+ * plan multiplier — a public page has no plan. Same sliding window, same
+ * fail-open policy as the plan limiters.
+ */
+export async function checkPublicRateLimit(
+  key: string,
+  limit: number,
+  windowSeconds: number,
+): Promise<RateLimitResult> {
+  const redis = getRedis();
+  try {
+    if (!redis) return await checkWithKv(getKv(), `rl:public:${key}:${windowSeconds}`, limit, windowSeconds);
+    const cacheKey = `public:${limit}:${windowSeconds}`;
+    let limiter = upstashLimiters.get(cacheKey);
+    if (!limiter) {
+      limiter = new Ratelimit({
+        redis,
+        limiter: Ratelimit.slidingWindow(limit, `${windowSeconds} s`),
+        prefix: "corridor:rl:public",
+        analytics: false,
+      });
+      upstashLimiters.set(cacheKey, limiter);
+    }
+    const result = await limiter.limit(key);
+    if (result.success) return allowed(result.limit, result.remaining);
+    return {
+      success: false,
+      limit: result.limit,
+      remaining: 0,
+      retryAfterSeconds: Math.max(1, Math.ceil((result.reset - Date.now()) / 1000)),
+    };
+  } catch (error) {
+    console.error("[ratelimit] public check failed; allowing request", error);
+    return allowed(limit, limit);
+  }
+}

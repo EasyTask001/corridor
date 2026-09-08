@@ -31,6 +31,8 @@ export interface Context {
   session: Session | null;
   supabase: SupabaseClient;
   db: DatabaseClient;
+  /** The request headers, for the few sessionless procedures that count by address (0027). */
+  headers: Headers;
   /** Run a Drizzle transaction under the caller's RLS claims. Throws if unauthenticated. */
   rls: <T>(fn: (tx: RlsTransaction) => Promise<T>) => Promise<T>;
 }
@@ -57,6 +59,7 @@ export async function createContext(opts: CreateContextOptions): Promise<Context
       session: null,
       supabase: opts.supabase,
       db,
+      headers: opts.headers,
       rls: async () => {
         throw new Error("UNAUTHORIZED");
       },
@@ -133,6 +136,7 @@ export async function createContext(opts: CreateContextOptions): Promise<Context
     session,
     supabase: authed,
     db,
+    headers: opts.headers,
     rls: (fn) => withRls(db, { sub: user.id, email: user.email ?? undefined }, fn),
   };
 }

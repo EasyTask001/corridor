@@ -136,6 +136,18 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
   "shipment.assign": "shipment.assign",
   "shipment.unassign": "shipment.unassign",
 
+  // --- in-bond (0026) -------------------------------------------------------
+  "inbond.records.create": "inbond.record_create",
+  "inbond.records.update": "inbond.record_update",
+  "inbond.records.sendArrival": "inbond.send_arrival",
+  "inbond.records.sendExport": "inbond.send_export",
+  "inbond.records.cancel": "inbond.cancel",
+  "inbond.records.requestStatus": "inbond.request_status",
+  "inbond.records.addNote": "inbond.note_add",
+  "inbond.external.create": "inbond.external_create",
+  "inbond.external.update": "inbond.external_update",
+  "inbond.external.close": "inbond.external_close",
+
   // --- integrations -------------------------------------------------------
   "integrations.configs.upsert": "integration.config_update",
   "integrations.configs.clearCredentials": "integration.credentials_cleared",

@@ -27,6 +27,7 @@ const {
   movementAmendments,
   seals,
   shipments,
+  parsRnsEvents,
   drivers,
   driverDocuments,
   trucks,
@@ -135,6 +136,22 @@ async function applyShipmentOutcomes(
 
   for (const e of events) {
     const target = e.shipmentControlNumber ? byControl.get(e.shipmentControlNumber) : undefined;
+    // An ACI release carries CBSA's RNS fields: keep them on the PARS RNS feed (0027).
+    const rns = (e.raw ?? {}) as Record<string, unknown>;
+    if (m.regime === "ACI" && rns.rns === true && e.shipmentControlNumber) {
+      await tx.insert(parsRnsEvents).values({
+        organizationId: actor.orgId,
+        shipmentId: target?.id ?? null,
+        parsNumber: e.shipmentControlNumber,
+        releaseCode: typeof rns.releaseCode === "string" ? rns.releaseCode : null,
+        releasedAt: typeof rns.releasedAt === "string" ? new Date(rns.releasedAt) : new Date(e.occurredAt),
+        officeCode: typeof rns.officeCode === "string" ? rns.officeCode : (e.entryPortCode ?? null),
+        sublocationCode: typeof rns.sublocationCode === "string" ? rns.sublocationCode : null,
+        transactionNumber: typeof rns.transactionNumber === "string" ? rns.transactionNumber : null,
+        containerNumber: typeof rns.containerNumber === "string" ? rns.containerNumber : null,
+        raw: rns,
+      });
+    }
     const payload: CustomsEventPayload = {
       code: e.code,
       label: e.label,
