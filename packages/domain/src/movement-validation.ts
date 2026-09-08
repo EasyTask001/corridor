@@ -77,13 +77,21 @@ export interface MovementForValidation {
     plateNumber: string;
     status: string;
   } | null;
-  trailer: {
-    registrationExpiry: string | null;
-    plateNumber: string;
-    status: string;
-  } | null;
+  /** "Empty Trailer" (ACE) / "Empty Trip" (ACI): the crossing carries no goods. */
+  isEmpty: boolean;
+  /** In tow order, each with the seals recorded on it. */
+  trailers: TrailerForValidation[];
   shipments: ShipmentForValidation[];
+  /** Every seal on the movement, trailer-mounted or on the truck. */
   seals: Array<{ sealNumber: string }>;
+}
+
+export interface TrailerForValidation {
+  unitNumber: string;
+  registrationExpiry: string | null;
+  plateNumber: string;
+  status: string;
+  sealCount: number;
 }
 
 function expired(iso: string | null | undefined, today: string): boolean {
@@ -176,8 +184,23 @@ export function validateForTransmit(
   const expectedShipperCountry = m.regime === "ACE" ? "CA" : "US";
   const expectedConsigneeCountry = m.regime === "ACE" ? "US" : "CA";
 
-  if (m.shipments.length === 0)
-    block("shipments_missing", "Add or assign at least one shipment.", "shipment");
+  if (m.isEmpty && m.shipments.length > 0)
+    block(
+      "empty_with_shipments",
+      "The trip is marked empty but carries shipments — clear the flag or unassign them.",
+      "shipment",
+    );
+  else if (m.shipments.length === 0 && !m.isEmpty) {
+    // An empty crossing is legal and filed as such; anything else needs a
+    // shipment, and a bobtail with nothing to declare needs the empty flag.
+    if (m.trailers.length === 0)
+      block(
+        "empty_or_missing",
+        "Add a trailer and a shipment, or mark the trip empty.",
+        "shipment",
+      );
+    else block("shipments_missing", "Add or assign at least one shipment.", "shipment");
+  }
 
   m.shipments.forEach((s, i) => {
     const label = s.controlNumber || `Shipment ${i + 1}`;
@@ -249,18 +272,18 @@ export function validateForTransmit(
     });
   }
 
-  // --- trailer ---
-  if (!m.trailer) warn("trailer_missing", "No trailer assigned (bobtail?).", "trailer");
-  else {
-    if (m.trailer.status !== "active")
-      block("trailer_inactive", "Assigned trailer is not active.", "trailer");
-    if (expired(m.trailer.registrationExpiry, today))
-      block("trailer_registration_expired", "Trailer registration has expired.", "trailer");
-  }
-
-  // --- seals ---
-  if (m.trailer && m.seals.length === 0)
-    warn("seals_missing", "No seal recorded for the trailer.", "seals");
+  // --- trailers ---
+  if (m.trailers.length === 0) warn("trailer_missing", "No trailer assigned (bobtail?).", "trailer");
+  m.trailers.forEach((t, i) => {
+    const at = (suffix: string) => `trailer_${i}_${suffix}`;
+    if (t.status !== "active")
+      block(at("inactive"), `Trailer ${t.unitNumber} is not active.`, "trailer");
+    if (expired(t.registrationExpiry, today))
+      block(at("registration_expired"), `Trailer ${t.unitNumber}: registration has expired.`, "trailer");
+    // --- seals ---
+    if (t.sealCount === 0)
+      warn(at("seals_missing"), `No seal recorded for trailer ${t.unitNumber}.`, "seals");
+  });
 
   return issues;
 }

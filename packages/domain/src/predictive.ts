@@ -22,7 +22,8 @@ export const movementSuggestionPayload = z.object({
   /** The source movement's crew, offered as a whole (0020). */
   crew: z.array(z.object({ driverId: uuid, role: crewRole })),
   truckId: uuid.nullable(),
-  trailerId: uuid.nullable(),
+  /** The source movement's trailers in tow order (0021). */
+  trailerIds: z.array(uuid),
 });
 
 export type MovementSuggestionPayload = z.infer<typeof movementSuggestionPayload>;

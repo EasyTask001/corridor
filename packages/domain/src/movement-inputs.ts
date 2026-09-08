@@ -21,7 +21,9 @@ export const movementPatch = z.object({
   carrierCode: carrierCode.nullable().optional(),
   scheduledCrossingAt: isoDateTime.nullable().optional(),
   truckId: uuid.nullable().optional(),
-  trailerId: uuid.nullable().optional(),
+  /** "Empty Trailer" (ACE) / "Empty Trip" (ACI). Trailers themselves are a
+   * child list — see `trailerAddInput`. */
+  isEmpty: z.boolean().optional(),
   notes: z.string().trim().max(4000).nullable().optional(),
 });
 export type MovementPatch = z.infer<typeof movementPatch>;
@@ -47,6 +49,20 @@ export type CrewInput = z.infer<typeof crewInput>;
 
 export const crewRemoveInput = z.object({ movementId: uuid, driverId: uuid });
 export const crewSetRoleInput = z.object({ movementId: uuid, driverId: uuid, role: crewRole });
+
+// ---------------------------------------------------------------------------
+// Trailers (movement_trailers, migration 0021)
+// ---------------------------------------------------------------------------
+
+export const trailerAddInput = z.object({ movementId: uuid, trailerId: uuid });
+export type TrailerAddInput = z.infer<typeof trailerAddInput>;
+export const trailerRemoveInput = z.object({ movementId: uuid, trailerId: uuid });
+/** The full tow order — every trailer currently on the movement, first to last. */
+export const trailerReorderInput = z.object({
+  movementId: uuid,
+  trailerIds: z.array(uuid).min(1).max(4),
+});
+export type TrailerReorderInput = z.infer<typeof trailerReorderInput>;
 
 export const sealAddInput = sealInput.extend({ movementId: uuid });
 export const sealRemoveInput = z.object({ movementId: uuid, id: uuid });

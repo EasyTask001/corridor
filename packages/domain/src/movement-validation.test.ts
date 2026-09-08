@@ -55,7 +55,16 @@ const ready: MovementForValidation = {
     plateNumber: "A",
     status: "active",
   },
-  trailer: { registrationExpiry: "2027-01-01", plateNumber: "B", status: "active" },
+  isEmpty: false,
+  trailers: [
+    {
+      unitNumber: "TR-501",
+      registrationExpiry: "2027-01-01",
+      plateNumber: "B",
+      status: "active",
+      sealCount: 1,
+    },
+  ],
   shipments: [shipment],
   seals: [{ sealNumber: "S1" }],
 };
@@ -289,10 +298,46 @@ describe("validateForTransmit", () => {
   });
 
   it("trailer without seal is a warning, not a block", () => {
-    const issues = validateForTransmit({ ...ready, seals: [] }, TODAY);
+    const issues = validateForTransmit(
+      { ...ready, trailers: [{ ...ready.trailers[0]!, sealCount: 0 }], seals: [] },
+      TODAY,
+    );
     expect(issues).toEqual([
-      expect.objectContaining({ code: "seals_missing", severity: "warning" }),
+      expect.objectContaining({ code: "trailer_0_seals_missing", severity: "warning" }),
     ]);
     expect(hasBlockingIssues(issues)).toBe(false);
+  });
+
+  it("checks every trailer on a double: an expired second trailer blocks", () => {
+    const issues = validateForTransmit(
+      {
+        ...ready,
+        trailers: [
+          ready.trailers[0]!,
+          { ...ready.trailers[0]!, unitNumber: "TR-502", registrationExpiry: "2020-01-01" },
+        ],
+      },
+      TODAY,
+    );
+    expect(issues).toContainEqual(
+      expect.objectContaining({ code: "trailer_1_registration_expired", severity: "blocking" }),
+    );
+  });
+
+  it("an empty trip needs no shipment or trailer; a non-empty bobtail with nothing needs one", () => {
+    const empty = validateForTransmit(
+      { ...ready, isEmpty: true, trailers: [], shipments: [], seals: [] },
+      TODAY,
+    );
+    expect(hasBlockingIssues(empty)).toBe(false);
+    expect(empty.map((i) => i.code)).toEqual(["trailer_missing"]);
+
+    const bare = codes({ ...ready, trailers: [], shipments: [], seals: [] });
+    expect(bare).toContain("empty_or_missing");
+    expect(bare).not.toContain("shipments_missing");
+  });
+
+  it("an empty trip that still carries shipments is blocked", () => {
+    expect(codes({ ...ready, isEmpty: true })).toContain("empty_with_shipments");
   });
 });

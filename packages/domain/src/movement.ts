@@ -109,9 +109,9 @@ export const movementSchema = z.object({
   portId: uuid.nullable(),
   carrierCode: z.string().nullable(),
   scheduledCrossingAt: isoDateTime.nullable(),
-  driverId: uuid.nullable(),
   truckId: uuid.nullable(),
-  trailerId: uuid.nullable(),
+  /** "Empty Trailer" (ACE) / "Empty Trip" (ACI) — migration 0021. */
+  isEmpty: z.boolean(),
   customsReferenceNumber: z.string().nullable(),
   submittedAt: isoDateTime.nullable(),
   acceptedAt: isoDateTime.nullable(),
@@ -131,9 +131,8 @@ export const createMovementInput = z.object({
   /** Server defaults to the regime's default carrier code when omitted. */
   carrierCode: carrierCode.optional(),
   scheduledCrossingAt: isoDateTime.optional(),
-  driverId: uuid.optional(),
   truckId: uuid.optional(),
-  trailerId: uuid.optional(),
+  isEmpty: z.boolean().optional(),
 });
 export type CreateMovementInput = z.infer<typeof createMovementInput>;
 
@@ -180,7 +179,8 @@ export const countryCode = z
   .length(2, "ISO 3166-1 alpha-2 country code");
 
 export const sealInput = z.object({
-  trailerId: uuid.nullable().optional(),
+  /** The movement_trailers slot the seal is on; null/absent = a seal on the truck. */
+  movementTrailerId: uuid.nullable().optional(),
   sealNumber: nonEmpty.max(40),
   sealType: z.string().trim().max(40).nullable().optional(),
   appliedBy: z.string().trim().max(120).nullable().optional(),

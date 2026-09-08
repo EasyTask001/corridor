@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { email, isoDate, isoDateTime, nonEmpty, uuid } from "./common";
+import { equipmentType } from "./reference";
 
 export const registryStatus = z.enum(["active", "inactive", "archived"]);
 export type RegistryStatus = z.infer<typeof registryStatus>;
@@ -155,6 +156,20 @@ export type DriverDocumentInput = z.infer<typeof driverDocumentInput>;
 export const driverDocumentRemoveInput = z.object({ driverId: uuid, id: uuid });
 
 // ---------------------------------------------------------------------------
+// Extra licence plates (equipment_plates, migration 0021)
+// ---------------------------------------------------------------------------
+
+/** One additional plate on a truck or trailer; the primary plate is on the unit. */
+export const plateEntry = z.object({
+  plateNumber: nonEmpty.max(20).toUpperCase(),
+  jurisdiction,
+});
+export type PlateEntry = z.infer<typeof plateEntry>;
+
+/** Up to three extra plates (four positions counting the primary). */
+export const extraPlates = z.array(plateEntry).max(3).default([]);
+
+// ---------------------------------------------------------------------------
 // Trucks
 // ---------------------------------------------------------------------------
 
@@ -171,6 +186,17 @@ export const truckInput = z.object({
   insuranceExpiry: optionalDate,
   annualInspectionExpiry: optionalDate,
   transponderNumber: optionalText(40),
+  dotNumber: z
+    .string()
+    .trim()
+    .regex(/^\d{1,8}$/, "US DOT number is 1-8 digits")
+    .nullable()
+    .optional(),
+  hazmatCapable: z.boolean().default(false),
+  insuranceCompany: optionalText(120),
+  insuranceAmount: z.number().min(0).max(9_999_999_999).nullable().optional(),
+  insuranceYear: z.number().int().min(1990).max(2100).nullable().optional(),
+  extraPlates,
   status: registryStatus.default("active"),
   notes: optionalText(2000),
 });
@@ -188,27 +214,21 @@ export type Truck = z.infer<typeof truckSchema>;
 // Trailers
 // ---------------------------------------------------------------------------
 
-export const trailerType = z.enum([
-  "dry_van",
-  "reefer",
-  "flatbed",
-  "tanker",
-  "container_chassis",
-  "step_deck",
-  "other",
-]);
+/** A CBP equipment description code (equipment_types, migration 0021). */
+export const trailerType = equipmentType;
 export type TrailerType = z.infer<typeof trailerType>;
 
 export const trailerInput = z.object({
   unitNumber: nonEmpty.max(40),
   vin: vin.nullable().optional(),
-  trailerType: trailerType.default("dry_van"),
+  trailerType: trailerType.default("TF"),
   plateNumber: nonEmpty.max(20),
   plateJurisdiction: jurisdiction,
   registrationExpiry: optionalDate,
   insuranceExpiry: optionalDate,
   annualInspectionExpiry: optionalDate,
   lengthFt: z.number().positive().max(100).nullable().optional(),
+  extraPlates,
   status: registryStatus.default("active"),
   notes: optionalText(2000),
 });
