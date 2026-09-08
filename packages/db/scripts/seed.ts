@@ -222,21 +222,35 @@ export async function seed() {
 
       await sql`
         insert into public.trucks (organization_id, unit_number, vin, make, model, model_year, plate_number, plate_jurisdiction,
-          registration_expiry, insurance_policy_number, insurance_expiry, annual_inspection_expiry, transponder_number)
+          registration_expiry, insurance_policy_number, insurance_expiry, annual_inspection_expiry, transponder_number,
+          dot_number, hazmat_capable, insurance_company, insurance_amount, insurance_year)
         values
-          (${orgId}, 'T-101', '1FUJGLDR5CSBP8834', 'Freightliner', 'Cascadia', 2022, 'AB12345', 'ON', ${day(300)}, 'POL-77812', ${day(20)},  ${day(90)},  'TX-100001'),
-          (${orgId}, 'T-102', '1XKYDP9X5PJ456789', 'Kenworth',     'T680',     2023, 'CD67890', 'ON', ${day(-3)},  'POL-77812', ${day(250)}, ${day(-40)}, 'TX-100002'),
-          (${orgId}, 'T-103', '3AKJHHDR8LSMD1234', 'Freightliner', 'Cascadia', 2020, 'EF11223', 'MI', ${day(500)}, 'POL-77813', ${day(400)}, ${day(30)},  null)
+          (${orgId}, 'T-101', '1FUJGLDR5CSBP8834', 'Freightliner', 'Cascadia', 2022, 'AB12345', 'ON', ${day(300)}, 'POL-77812', ${day(20)},  ${day(90)},  'TX-100001', '1234567', true,  'Northbridge Insurance', 2000000, 2026),
+          (${orgId}, 'T-102', '1XKYDP9X5PJ456789', 'Kenworth',     'T680',     2023, 'CD67890', 'ON', ${day(-3)},  'POL-77812', ${day(250)}, ${day(-40)}, 'TX-100002', '1234567', false, 'Northbridge Insurance', 2000000, 2026),
+          (${orgId}, 'T-103', '3AKJHHDR8LSMD1234', 'Freightliner', 'Cascadia', 2020, 'EF11223', 'MI', ${day(500)}, 'POL-77813', ${day(400)}, ${day(30)},  null,        '1234567', false, 'Intact Insurance',     1000000, 2025)
         on conflict do nothing`;
 
       await sql`
         insert into public.trailers (organization_id, unit_number, vin, trailer_type, plate_number, plate_jurisdiction,
           registration_expiry, insurance_expiry, annual_inspection_expiry, length_ft)
         values
-          (${orgId}, 'TR-501', '1UYVS2538PU123456', 'dry_van', 'TRL5011', 'ON', ${day(180)}, ${day(180)}, ${day(55)},  53),
-          (${orgId}, 'TR-502', '1UYVS2538PU654321', 'reefer',  'TRL5022', 'ON', ${day(10)},  ${day(365)}, ${day(365)}, 53),
-          (${orgId}, 'TR-503', null,                'flatbed', 'TRL5033', 'MI', ${day(600)}, ${day(600)}, null,        48)
+          (${orgId}, 'TR-501', '1UYVS2538PU123456', 'TF', 'TRL5011', 'ON', ${day(180)}, ${day(180)}, ${day(55)},  53),
+          (${orgId}, 'TR-502', '1UYVS2538PU654321', 'RT', 'TRL5022', 'ON', ${day(10)},  ${day(365)}, ${day(365)}, 53),
+          (${orgId}, 'TR-503', null,                'FT', 'TRL5033', 'MI', ${day(600)}, ${day(600)}, null,        48)
         on conflict do nothing`;
+
+      // Extra plates (equipment_plates, 0021): T-101 and TR-501 are also
+      // registered in Michigan for the Detroit lane.
+      await sql`
+        insert into public.equipment_plates (organization_id, truck_id, trailer_id, plate_number, jurisdiction, position)
+        select ${orgId}, t.id, null, 'AB12345M', 'MI', 1
+        from public.trucks t where t.organization_id = ${orgId} and t.unit_number = 'T-101'
+          and not exists (select 1 from public.equipment_plates p where p.truck_id = t.id)`;
+      await sql`
+        insert into public.equipment_plates (organization_id, truck_id, trailer_id, plate_number, jurisdiction, position)
+        select ${orgId}, null, t.id, 'TRL5011M', 'MI', 1
+        from public.trailers t where t.organization_id = ${orgId} and t.unit_number = 'TR-501'
+          and not exists (select 1 from public.equipment_plates p where p.trailer_id = t.id)`;
 
       await sql`
         insert into public.partners (organization_id, name, type, address, tax_id, contact_name, contact_email, contact_phone)
@@ -299,6 +313,7 @@ export async function seed() {
       const t101 = await ids("trucks", "unit_number", "T-101");
       const t103 = await ids("trucks", "unit_number", "T-103");
       const tr501 = await ids("trailers", "unit_number", "TR-501");
+      const tr502 = await ids("trailers", "unit_number", "TR-502");
       const tr503 = await ids("trailers", "unit_number", "TR-503");
       const maple = await ids("partners", "name", "Maple Ridge Steel Ltd");
       const glf = await ids("partners", "name", "Great Lakes Fabrication Inc");
@@ -355,7 +370,8 @@ export async function seed() {
         driver: string;
         alsoCrew?: Array<{ driverId: string; role: "crew_member" | "passenger" }>;
         truck: string;
-        trailer: string | null;
+        /** Trailers in tow order (0021); empty = bobtail. */
+        trailers: string[];
         portCode: string;
         etaDays: number;
         shipments: Array<{
@@ -373,7 +389,9 @@ export async function seed() {
             origin: string;
           }>;
         }>;
-        seals: string[];
+        /** Seal numbers per trailer position (index = tow position); `truck` = a seal on the tractor. */
+        seals: string[][];
+        truckSeal?: string;
         path: Array<
           "sent" | "accepted" | "rejected" | "released" | "held" | "arrived" | "cancelled"
         >;
@@ -389,11 +407,19 @@ export async function seed() {
         if (!port) throw new Error(`seed: unknown port code ${spec.portCode} for ${spec.regime}`);
         const [m] = await sql<{ id: string }[]>`
           insert into public.movements (organization_id, regime, movement_number, trip_number, port_id, carrier_code,
-            scheduled_crossing_at, truck_id, trailer_id, created_by)
+            scheduled_crossing_at, truck_id, created_by)
           values (${orgId}, ${spec.regime}, ${number}, ${"TRIP-" + String(1000 + seq)}, ${port.id}, ${carrierCode},
-            ${eta.toISOString()}, ${spec.truck}, ${spec.trailer}, ${dispatcherId})
+            ${eta.toISOString()}, ${spec.truck}, ${dispatcherId})
           returning id`;
         const id = m!.id;
+        const slotIds: string[] = [];
+        for (const [i, trailerId] of spec.trailers.entries()) {
+          const [slot] = await sql<{ id: string }[]>`
+            insert into public.movement_trailers (organization_id, movement_id, trailer_id, position)
+            values (${orgId}, ${id}, ${trailerId}, ${i + 1})
+            returning id`;
+          slotIds.push(slot!.id);
+        }
         await sql`
           insert into public.movement_crew (organization_id, movement_id, driver_id, role, position)
           values (${orgId}, ${id}, ${spec.driver}, 'person_in_charge', 1)`;
@@ -415,10 +441,17 @@ export async function seed() {
             movementId: id,
           });
         }
-        for (const s of spec.seals) {
+        for (const [i, numbers] of spec.seals.entries()) {
+          for (const s of numbers) {
+            await sql`
+              insert into public.seals (movement_id, organization_id, movement_trailer_id, seal_number, seal_type, applied_by, applied_at)
+              values (${id}, ${orgId}, ${slotIds[i] ?? null}, ${s}, 'bolt', 'Yard', now())`;
+          }
+        }
+        if (spec.truckSeal) {
           await sql`
-            insert into public.seals (movement_id, organization_id, trailer_id, seal_number, seal_type, applied_by, applied_at)
-            values (${id}, ${orgId}, ${spec.trailer}, ${s}, 'bolt', 'Yard', now())`;
+            insert into public.seals (movement_id, organization_id, movement_trailer_id, seal_number, seal_type, applied_by, applied_at)
+            values (${id}, ${orgId}, null, ${spec.truckSeal}, 'cable', 'Yard', now())`;
         }
         let from = "draft";
         for (const to of spec.path) {
@@ -505,18 +538,20 @@ export async function seed() {
           { driverId: rosa, role: "passenger" },
         ],
         truck: t101,
-        trailer: tr501,
+        // A turnpike double: two trailers, each sealed, plus a cable seal on the tractor.
+        trailers: [tr501, tr502],
         portCode: DET,
         etaDays: 2,
         shipments: [steel("ACE")],
-        seals: ["SL-100231"],
+        seals: [["SL-100231", "SL-100234"], ["SL-100235"]],
+        truckSeal: "SL-100236",
         path: [],
       });
       await seedMovement({
         regime: "ACE",
         driver: dale,
         truck: t103,
-        trailer: tr503,
+        trailers: [tr503],
         portCode: BUF,
         etaDays: 1,
         shipments: [
@@ -536,18 +571,18 @@ export async function seed() {
             ],
           },
         ],
-        seals: ["SL-100232"],
+        seals: [["SL-100232"]],
         path: ["sent"],
       });
       await seedMovement({
         regime: "ACE",
         driver: gurpreet,
         truck: t101,
-        trailer: tr501,
+        trailers: [tr501],
         portCode: DET,
         etaDays: 0,
         shipments: [steel("ACE")],
-        seals: ["SL-100233"],
+        seals: [["SL-100233"]],
         path: ["sent", "accepted"],
         ref: "ACE-A7K2Q9",
       });
@@ -555,11 +590,11 @@ export async function seed() {
         regime: "ACI",
         driver: dale,
         truck: t103,
-        trailer: tr503,
+        trailers: [tr503],
         portCode: WIN,
         etaDays: 0,
         shipments: [fab("ACI")],
-        seals: ["SL-200101"],
+        seals: [["SL-200101"]],
         path: ["sent", "accepted", "released"],
         ref: "ACI-88213Q",
       });
@@ -567,11 +602,11 @@ export async function seed() {
         regime: "ACI",
         driver: marcus,
         truck: t101,
-        trailer: tr501,
+        trailers: [tr501],
         portCode: FE,
         etaDays: 0,
         shipments: [produce("ACI")],
-        seals: ["SL-200102"],
+        seals: [["SL-200102"]],
         path: ["sent", "accepted", "held"],
         ref: "ACI-88214H",
       });
@@ -579,11 +614,11 @@ export async function seed() {
         regime: "ACE",
         driver: marcus,
         truck: t103,
-        trailer: tr503,
+        trailers: [tr503],
         portCode: BUF,
         etaDays: 3,
         shipments: [produce("ACE")],
-        seals: [],
+        seals: [[]],
         path: ["sent", "rejected"],
         ref: "ACE-R0011X",
       });
@@ -591,11 +626,11 @@ export async function seed() {
         regime: "ACE",
         driver: gurpreet,
         truck: t101,
-        trailer: tr501,
+        trailers: [tr501],
         portCode: DET,
         etaDays: -3,
         shipments: [steel("ACE")],
-        seals: ["SL-100229"],
+        seals: [["SL-100229"]],
         path: ["sent", "accepted", "released", "arrived"],
         ref: "ACE-D4M1Z2",
       });
@@ -603,7 +638,7 @@ export async function seed() {
         regime: "ACI",
         driver: dale,
         truck: t103,
-        trailer: null,
+        trailers: [],
         portCode: WIN,
         etaDays: -1,
         shipments: [fab("ACI")],

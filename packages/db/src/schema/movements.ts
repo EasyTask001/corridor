@@ -71,7 +71,8 @@ export const movements = pgTable(
     carrierCode: text("carrier_code"),
     scheduledCrossingAt: timestamp("scheduled_crossing_at", { withTimezone: true }),
     truckId: uuid("truck_id").references(() => trucks.id, { onDelete: "restrict" }),
-    trailerId: uuid("trailer_id").references(() => trailers.id, { onDelete: "restrict" }),
+    /** 0021 — "Empty Trailer" (ACE) / "Empty Trip" (ACI): no goods on board. */
+    isEmpty: boolean("is_empty").notNull().default(false),
     customsReferenceNumber: text("customs_reference_number"),
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }),
@@ -92,9 +93,6 @@ export const movements = pgTable(
     index("movements_truck_idx")
       .on(t.truckId)
       .where(sql`${t.truckId} is not null`),
-    index("movements_trailer_idx")
-      .on(t.trailerId)
-      .where(sql`${t.trailerId} is not null`),
     index("movements_port_idx")
       .on(t.portId)
       .where(sql`${t.portId} is not null`),
@@ -137,6 +135,40 @@ export const movementCrew = pgTable(
       name: "movement_crew_driver_id_fkey",
       columns: [t.driverId, t.organizationId],
       foreignColumns: [drivers.id, drivers.organizationId],
+    }).onDelete("restrict"),
+  ],
+);
+
+/**
+ * 0021 — the trailers on one crossing, in tow order. Replaces
+ * movements.trailer_id: a tractor pulls zero, one or two.
+ */
+export const movementTrailers = pgTable(
+  "movement_trailers",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    movementId: uuid("movement_id")
+      .notNull()
+      .references(() => movements.id, { onDelete: "cascade" }),
+    /** FK is composite — see movement_trailers_trailer_id_fkey below. */
+    trailerId: uuid("trailer_id").notNull(),
+    position: integer("position").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("movement_trailers_organization_id_idx").on(t.organizationId),
+    index("movement_trailers_movement_idx").on(t.movementId, t.position),
+    index("movement_trailers_trailer_idx").on(t.trailerId),
+    unique("movement_trailers_movement_id_trailer_id_key").on(t.movementId, t.trailerId),
+    foreignKey({
+      name: "movement_trailers_trailer_id_fkey",
+      columns: [t.trailerId, t.organizationId],
+      foreignColumns: [trailers.id, trailers.organizationId],
     }).onDelete("restrict"),
   ],
 );
@@ -413,7 +445,10 @@ export const seals = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    trailerId: uuid("trailer_id").references(() => trailers.id, { onDelete: "set null" }),
+    /** 0021 — the trailer slot the seal is on; null = a seal on the truck. */
+    movementTrailerId: uuid("movement_trailer_id").references(() => movementTrailers.id, {
+      onDelete: "cascade",
+    }),
     sealNumber: text("seal_number").notNull(),
     sealType: text("seal_type"),
     appliedBy: text("applied_by"),
@@ -425,5 +460,9 @@ export const seals = pgTable(
     uniqueIndex("seals_movement_number_unique").on(t.movementId, t.sealNumber),
     // 0011
     index("seals_organization_id_idx").on(t.organizationId),
+    // 0021
+    index("seals_movement_trailer_idx")
+      .on(t.movementTrailerId)
+      .where(sql`${t.movementTrailerId} is not null`),
   ],
 );

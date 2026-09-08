@@ -4,6 +4,7 @@ import {
   date,
   foreignKey,
   index,
+  integer,
   jsonb,
   numeric,
   pgTable,
@@ -17,6 +18,7 @@ import {
 import { DRIVER_DOCUMENT_TYPES, GENDERS, PERSON_TYPES } from "@corridor/domain";
 import type { Address } from "@corridor/domain";
 import { authUsers, citext, organizations } from "./core";
+import { equipmentTypes } from "./reference";
 
 const registryStatus = ["active", "inactive", "archived"] as const;
 
@@ -130,6 +132,12 @@ export const trucks = pgTable(
     insuranceExpiry: date("insurance_expiry"),
     annualInspectionExpiry: date("annual_inspection_expiry"),
     transponderNumber: text("transponder_number"),
+    // 0021 — conveyance detail CBP asks for.
+    dotNumber: text("dot_number"),
+    hazmatCapable: boolean("hazmat_capable").notNull().default(false),
+    insuranceCompany: text("insurance_company"),
+    insuranceAmount: numeric("insurance_amount", { precision: 12, scale: 2, mode: "number" }),
+    insuranceYear: integer("insurance_year"),
   },
   (t) => [
     index("trucks_organization_id_idx").on(t.organizationId),
@@ -140,6 +148,8 @@ export const trucks = pgTable(
     uniqueIndex("trucks_org_vin_unique")
       .on(t.organizationId, t.vin)
       .where(sql`${t.vin} is not null and ${t.status} <> 'archived'`),
+    /** 0021 — target for the composite key on equipment_plates. */
+    unique("trucks_id_organization_id_key").on(t.id, t.organizationId),
   ],
 );
 
@@ -149,11 +159,11 @@ export const trailers = pgTable(
     ...base(),
     unitNumber: text("unit_number").notNull(),
     vin: text("vin"),
-    trailerType: text("trailer_type", {
-      enum: ["dry_van", "reefer", "flatbed", "tanker", "container_chassis", "step_deck", "other"],
-    })
+    /** 0021 — a CBP equipment description code (equipment_types.code). */
+    trailerType: text("trailer_type")
       .notNull()
-      .default("dry_van"),
+      .default("TF")
+      .references(() => equipmentTypes.code),
     plateNumber: text("plate_number").notNull(),
     plateJurisdiction: text("plate_jurisdiction").notNull(),
     registrationExpiry: date("registration_expiry"),
@@ -167,6 +177,52 @@ export const trailers = pgTable(
     uniqueIndex("trailers_org_unit_unique")
       .on(t.organizationId, t.unitNumber)
       .where(sql`${t.status} <> 'archived'`),
+    /** 0021 — target for the composite keys on equipment_plates and movement_trailers. */
+    unique("trailers_id_organization_id_key").on(t.id, t.organizationId),
+  ],
+);
+
+/**
+ * 0021 — the additional licence plates on a truck or trailer. The primary
+ * plate stays on the parent row; exactly one of truck_id / trailer_id is set.
+ */
+export const equipmentPlates = pgTable(
+  "equipment_plates",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    /** FKs are composite — see equipment_plates_*_fkey below. */
+    truckId: uuid("truck_id"),
+    trailerId: uuid("trailer_id"),
+    plateNumber: text("plate_number").notNull(),
+    jurisdiction: text("jurisdiction").notNull(),
+    position: integer("position").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("equipment_plates_organization_id_idx").on(t.organizationId),
+    index("equipment_plates_truck_idx")
+      .on(t.truckId)
+      .where(sql`${t.truckId} is not null`),
+    index("equipment_plates_trailer_idx")
+      .on(t.trailerId)
+      .where(sql`${t.trailerId} is not null`),
+    unique("equipment_plates_truck_id_position_key").on(t.truckId, t.position),
+    unique("equipment_plates_trailer_id_position_key").on(t.trailerId, t.position),
+    foreignKey({
+      name: "equipment_plates_truck_id_fkey",
+      columns: [t.truckId, t.organizationId],
+      foreignColumns: [trucks.id, trucks.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "equipment_plates_trailer_id_fkey",
+      columns: [t.trailerId, t.organizationId],
+      foreignColumns: [trailers.id, trailers.organizationId],
+    }).onDelete("cascade"),
   ],
 );
 

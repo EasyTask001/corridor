@@ -68,3 +68,15 @@ export const organizationCarrierCodes = pgTable(
       .where(sql`${t.isDefault}`),
   ],
 );
+
+/**
+ * 0021 — CBP/CBSA equipment description codes (X12 DE40 / ACE Appendix N),
+ * global like `ports`. `trailers.trailer_type` references it.
+ */
+export const equipmentTypes = pgTable("equipment_types", {
+  code: text("code").primaryKey(),
+  label: text("label").notNull(),
+  regimeScope: text("regime_scope", { enum: ["ACE", "ACI", "both"] })
+    .notNull()
+    .default("both"),
+});

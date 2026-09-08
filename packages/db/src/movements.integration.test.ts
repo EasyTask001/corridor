@@ -760,7 +760,7 @@ describe("predictive movement suggestions", () => {
       carrierCode: null,
       crew: [],
       truckId: null,
-      trailerId: null,
+      trailerIds: [],
     };
 
     try {
