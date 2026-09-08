@@ -194,10 +194,12 @@ describe("movement triggers", () => {
     );
     expect(commodityMsg).toMatch(/not editable in status sent/);
 
-    // …and the shipment header itself is frozen too (shipments_guard).
+    // …and the shipment header itself is frozen too (shipments_guard). Since
+    // 0022 the entry number is customs-assigned and stays writable, so the
+    // probe uses a content column.
     const shipmentMsg = await rejection(
       withRls(db, as(dispatcherA), (tx) =>
-        tx.update(shipments).set({ entryNumber: "SNEAK" }).where(eq(shipments.id, shipment.id)),
+        tx.update(shipments).set({ notes: "SNEAK" }).where(eq(shipments.id, shipment.id)),
       ),
     );
     expect(shipmentMsg).toMatch(/not editable in status sent/);
@@ -483,6 +485,8 @@ describe("movements RLS", () => {
           organizationId: ownerB.orgId,
           amendmentNumber: 1,
           reason: "Cross-tenant probe",
+          // An ACI amendment needs a CBSA reason code (0022).
+          reasonCode: "60",
         })
         .returning({ id: movementAmendments.id });
 

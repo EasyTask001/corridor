@@ -175,7 +175,9 @@ describe("shipments_guard()", () => {
     expect(
       await rejection(
         withRls(db, as(dispatcherA), (tx) =>
-          tx.update(shipments).set({ entryNumber: "E-1" }).where(eq(shipments.id, s.id)),
+          // notes is content; the entry number is customs-assigned and stays
+          // writable after transmit (0022).
+          tx.update(shipments).set({ notes: "edited after transmit" }).where(eq(shipments.id, s.id)),
         ),
       ),
     ).toMatch(/not editable in status sent/);

@@ -453,6 +453,16 @@ export async function seed() {
             insert into public.seals (movement_id, organization_id, movement_trailer_id, seal_number, seal_type, applied_by, applied_at)
             values (${id}, ${orgId}, null, ${spec.truckSeal}, 'cable', 'Yard', now())`;
         }
+        // A filed movement has the submission the gateway would have
+        // acknowledged (customs_submissions, 0023), so the webhook can find it.
+        if (spec.ref) {
+          await sql`
+            insert into public.customs_submissions (organization_id, movement_id, kind, provider, mode,
+              reference_number, status, request, response)
+            values (${orgId}, ${id}, 'original', ${spec.regime === "ACE" ? "cbp_ace" : "cbsa_aci"}, 'mock',
+              ${spec.ref}, ${spec.path.includes("released") ? "released" : spec.path.includes("rejected") ? "rejected" : spec.path.includes("held") ? "held" : "accepted"},
+              ${sql.json({ movementNumber: number })}, ${sql.json({ mock: true, acknowledged: true })})`;
+        }
         let from = "draft";
         for (const to of spec.path) {
           const customs = CUSTOMS_DRIVEN.has(to);
@@ -468,6 +478,19 @@ export async function seed() {
             values (${id}, ${orgId}, 'status_change', ${from}, ${to}, ${customs ? "customs_api" : "user"},
               ${customs ? null : dispatcherId})`;
           from = to;
+        }
+        // Shipments ride the movement: their status follows the last step of
+        // the path (a released crossing has released shipments, with entries).
+        if (from !== "draft") {
+          await sql`
+            update public.shipments
+            set status = ${from},
+                entry_number = case when ${from} in ('released','held','arrived')
+                  then '300' || lpad((abs(hashtext(control_number)) % 100000000)::text, 8, '0') else null end,
+                entry_port_id = case when ${from} in ('released','held','arrived') then ${port.id}::uuid else null end,
+                entry_on_file_at = case when ${from} in ('released','held','arrived') then now() else null end,
+                released_at = case when ${from} in ('released','arrived') then now() else null end
+            where movement_id = ${id}`;
         }
       };
 
