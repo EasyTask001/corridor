@@ -33,3 +33,11 @@ export const blankDriverSheetsInput = z
 export type BlankDriverSheetsInput = z.infer<typeof blankDriverSheetsInput>;
 
 export const pdfDownloadInput = z.object({ id: uuid });
+
+/** "Send by email": a rendered document to up to five addresses. */
+export const pdfEmailInput = z.object({
+  id: uuid,
+  to: z.array(z.string().trim().toLowerCase().email()).min(1).max(5),
+  message: z.string().trim().max(1000).optional(),
+});
+export type PdfEmailInput = z.infer<typeof pdfEmailInput>;

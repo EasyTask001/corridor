@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { email, nonEmpty, uuid } from "./common";
+import { address } from "./registry";
 import { membershipStatus } from "./role";
 
 export const subscriptionPlan = z.enum(["trial", "starter", "professional", "enterprise"]);
@@ -70,6 +71,28 @@ export const updateOrganizationInput = createOrganizationInput.partial().extend(
   filerCode: filerCode.optional(),
   /** Print driver sheets without commodity lines (0024). */
   simpleDriverSheet: z.boolean().optional(),
+  // 0025 — company profile
+  timezone: z
+    .string()
+    .trim()
+    .max(64)
+    .refine(
+      (tz) => {
+        try {
+          new Intl.DateTimeFormat("en-CA", { timeZone: tz });
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { message: "Unknown IANA time zone" },
+    )
+    .optional(),
+  billingAddress: address.optional(),
+  /** ACI PARS cargo control numbers carry the PARS prefix. */
+  includeParsInCargoNumbers: z.boolean().optional(),
+  /** Where driver sheets and entry notices are e-mailed (at most five). */
+  dispatchEmails: z.array(email).max(5).optional(),
 });
 export type UpdateOrganizationInput = z.infer<typeof updateOrganizationInput>;
 

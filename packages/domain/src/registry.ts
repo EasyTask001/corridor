@@ -73,6 +73,11 @@ export const driverInput = z.object({
   usAddress: address.default({}),
   phone: optionalText(40),
   email: email.nullable().optional(),
+  // 0025 — SMS entry-number notices, one phone per regime; e-mail the sheet.
+  smsOptIn: z.boolean().default(false),
+  smsPhoneAce: optionalText(40),
+  smsPhoneAci: optionalText(40),
+  emailDriverSheet: z.boolean().default(true),
   status: registryStatus.default("active"),
   notes: optionalText(2000),
 });
