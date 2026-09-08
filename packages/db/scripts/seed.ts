@@ -34,7 +34,7 @@ export const DEMO_ORG = {
   name: "Pathfinder Trans Inc",
   legalName: "PATHFINDER TRANS INC",
   scacCode: "PFTR",
-  canadianCarrierCode: "PFT1",
+  canadianCarrierCode: "7ELU",
   usDotNumber: "1234567",
   mcNumber: "MC-987654",
 } as const;
@@ -156,6 +156,20 @@ export async function seed() {
       on conflict (organization_id, user_id) where user_id is not null
       do update set role_id = excluded.role_id, status = 'active'`;
 
+    // 2b. multi-carrier codes (0018): the demo org files under two ACE codes
+    // (a co-loaded second unit) and one ACI code; Northbound files under one.
+    await sql`
+      insert into public.organization_carrier_codes (organization_id, regime, code, label, is_default)
+      values
+        (${orgId}, 'ACE', 'PFTR', 'Primary US filing code', true),
+        (${orgId}, 'ACE', 'PFTS', 'Secondary US filing code', false),
+        (${orgId}, 'ACI', '7ELU', 'Primary CA filing code', true)
+      on conflict (organization_id, regime, code) do nothing`;
+    await sql`
+      insert into public.organization_carrier_codes (organization_id, regime, code, is_default)
+      values (${otherOrgId}, 'ACE', 'NBFL', true)
+      on conflict (organization_id, regime, code) do nothing`;
+
     // 3. registries for the demo org — dates relative to today so expiry alerts
     //    demo correctly no matter when the seed runs.
     const day = (offset: number) => {
@@ -172,32 +186,71 @@ export async function seed() {
       select count(*)::int as existing from public.partners where organization_id = ${orgId}`;
     if ((partnerCountRows[0]?.existing ?? 0) === 0) {
       await sql`
-        insert into public.drivers (organization_id, first_name, last_name, license_number, license_jurisdiction,
-          license_expiry, fast_card_number, fast_card_expiry, medical_cert_expiry, citizenship, phone, email)
+        insert into public.drivers (organization_id, first_name, last_name, person_type, gender,
+          license_number, license_jurisdiction, license_expiry, medical_cert_expiry, citizenship,
+          hazmat_endorsement, us_address, phone, email)
         values
-          (${orgId}, 'Gurpreet', 'Singh',   'S1234-56789-01234', 'ON', ${day(400)}, 'FAST-88123', ${day(45)},  ${day(200)}, 'CA', '+1 905 555 0101', 'gurpreet@pathfinder.demo'),
-          (${orgId}, 'Marcus',   'Reyes',   'R7788-11223-33445', 'MI', ${day(9)},   null,         null,        ${day(300)}, 'US', '+1 313 555 0102', 'marcus@pathfinder.demo'),
-          (${orgId}, 'Amrit',    'Kaur',    'K5566-99887-77665', 'BC', ${day(-12)}, 'FAST-90455', ${day(500)}, null,        'CA', '+1 604 555 0103', 'amrit@pathfinder.demo'),
-          (${orgId}, 'Dale',     'Thompson','T1010-20203-30304', 'NY', ${day(700)}, null,         null,        ${day(650)}, 'US', '+1 716 555 0104', 'dale@pathfinder.demo')
+          (${orgId}, 'Gurpreet', 'Singh',   'driver',    'M', 'S1234-56789-01234', 'ON', ${day(400)}, ${day(200)}, 'CA', true,  ${sql.json({})}, '+1 905 555 0101', 'gurpreet@pathfinder.demo'),
+          (${orgId}, 'Marcus',   'Reyes',   'driver',    'M', 'R7788-11223-33445', 'MI', ${day(9)},   ${day(300)}, 'US', false, ${sql.json({})}, '+1 313 555 0102', 'marcus@pathfinder.demo'),
+          (${orgId}, 'Amrit',    'Kaur',    'driver',    'F', 'K5566-99887-77665', 'BC', ${day(-12)}, null,        'CA', false, ${sql.json({})}, '+1 604 555 0103', 'amrit@pathfinder.demo'),
+          (${orgId}, 'Dale',     'Thompson','driver',    'M', 'T1010-20203-30304', 'NY', ${day(700)}, ${day(650)}, 'US', false, ${sql.json({})}, '+1 716 555 0104', 'dale@pathfinder.demo'),
+          -- A passenger rides along and never drives: no licence, a travel
+          -- document instead, and a US address for the ACE crew list.
+          (${orgId}, 'Rosa',     'Delgado', 'passenger', 'F', null,                null, null,        null,        'MX', false,
+            ${sql.json({ line1: "2200 Michigan Ave", city: "Detroit", region: "MI", postalCode: "48216", country: "US" })},
+            '+1 313 555 0105', 'rosa@pathfinder.demo')
+        on conflict do nothing`;
+
+      // Travel documents (0020): the FAST cards that used to be columns on
+      // `drivers`, plus the passports the crew actually presents at the booth.
+      await sql`
+        insert into public.driver_documents (organization_id, driver_id, document_type, document_number,
+          issuing_country, issued_on, expires_on, is_primary)
+        select ${orgId}, d.id, x.document_type, x.document_number, x.issuing_country,
+               x.issued_on::date, x.expires_on::date, x.is_primary
+        from (values
+          ('Singh',   'fast',     'FAST-88123', 'CA', ${day(-1200)}, ${day(45)},   false),
+          ('Singh',   'passport', 'HA412355',   'CA', ${day(-1500)}, ${day(1500)}, true),
+          ('Reyes',   'passport', 'US8871220',  'US', ${day(-900)},  ${day(120)},  true),
+          ('Reyes',   'fast',     'FAST-77014', 'US', ${day(-600)},  ${day(900)},  false),
+          ('Kaur',    'fast',     'FAST-90455', 'CA', ${day(-800)},  ${day(500)},  false),
+          ('Delgado', 'laser_visa_bcc', 'BCC-4471902', 'MX', ${day(-400)}, ${day(1100)}, true)
+        ) as x(last_name, document_type, document_number, issuing_country, issued_on, expires_on, is_primary)
+        join public.drivers d
+          on d.organization_id = ${orgId} and d.last_name = x.last_name
         on conflict do nothing`;
 
       await sql`
         insert into public.trucks (organization_id, unit_number, vin, make, model, model_year, plate_number, plate_jurisdiction,
-          registration_expiry, insurance_policy_number, insurance_expiry, annual_inspection_expiry, transponder_number)
+          registration_expiry, insurance_policy_number, insurance_expiry, annual_inspection_expiry, transponder_number,
+          dot_number, hazmat_capable, insurance_company, insurance_amount, insurance_year)
         values
-          (${orgId}, 'T-101', '1FUJGLDR5CSBP8834', 'Freightliner', 'Cascadia', 2022, 'AB12345', 'ON', ${day(300)}, 'POL-77812', ${day(20)},  ${day(90)},  'TX-100001'),
-          (${orgId}, 'T-102', '1XKYDP9X5PJ456789', 'Kenworth',     'T680',     2023, 'CD67890', 'ON', ${day(-3)},  'POL-77812', ${day(250)}, ${day(-40)}, 'TX-100002'),
-          (${orgId}, 'T-103', '3AKJHHDR8LSMD1234', 'Freightliner', 'Cascadia', 2020, 'EF11223', 'MI', ${day(500)}, 'POL-77813', ${day(400)}, ${day(30)},  null)
+          (${orgId}, 'T-101', '1FUJGLDR5CSBP8834', 'Freightliner', 'Cascadia', 2022, 'AB12345', 'ON', ${day(300)}, 'POL-77812', ${day(20)},  ${day(90)},  'TX-100001', '1234567', true,  'Northbridge Insurance', 2000000, 2026),
+          (${orgId}, 'T-102', '1XKYDP9X5PJ456789', 'Kenworth',     'T680',     2023, 'CD67890', 'ON', ${day(-3)},  'POL-77812', ${day(250)}, ${day(-40)}, 'TX-100002', '1234567', false, 'Northbridge Insurance', 2000000, 2026),
+          (${orgId}, 'T-103', '3AKJHHDR8LSMD1234', 'Freightliner', 'Cascadia', 2020, 'EF11223', 'MI', ${day(500)}, 'POL-77813', ${day(400)}, ${day(30)},  null,        '1234567', false, 'Intact Insurance',     1000000, 2025)
         on conflict do nothing`;
 
       await sql`
         insert into public.trailers (organization_id, unit_number, vin, trailer_type, plate_number, plate_jurisdiction,
           registration_expiry, insurance_expiry, annual_inspection_expiry, length_ft)
         values
-          (${orgId}, 'TR-501', '1UYVS2538PU123456', 'dry_van', 'TRL5011', 'ON', ${day(180)}, ${day(180)}, ${day(55)},  53),
-          (${orgId}, 'TR-502', '1UYVS2538PU654321', 'reefer',  'TRL5022', 'ON', ${day(10)},  ${day(365)}, ${day(365)}, 53),
-          (${orgId}, 'TR-503', null,                'flatbed', 'TRL5033', 'MI', ${day(600)}, ${day(600)}, null,        48)
+          (${orgId}, 'TR-501', '1UYVS2538PU123456', 'TF', 'TRL5011', 'ON', ${day(180)}, ${day(180)}, ${day(55)},  53),
+          (${orgId}, 'TR-502', '1UYVS2538PU654321', 'RT', 'TRL5022', 'ON', ${day(10)},  ${day(365)}, ${day(365)}, 53),
+          (${orgId}, 'TR-503', null,                'FT', 'TRL5033', 'MI', ${day(600)}, ${day(600)}, null,        48)
         on conflict do nothing`;
+
+      // Extra plates (equipment_plates, 0021): T-101 and TR-501 are also
+      // registered in Michigan for the Detroit lane.
+      await sql`
+        insert into public.equipment_plates (organization_id, truck_id, trailer_id, plate_number, jurisdiction, position)
+        select ${orgId}, t.id, null, 'AB12345M', 'MI', 1
+        from public.trucks t where t.organization_id = ${orgId} and t.unit_number = 'T-101'
+          and not exists (select 1 from public.equipment_plates p where p.truck_id = t.id)`;
+      await sql`
+        insert into public.equipment_plates (organization_id, truck_id, trailer_id, plate_number, jurisdiction, position)
+        select ${orgId}, null, t.id, 'TRL5011M', 'MI', 1
+        from public.trailers t where t.organization_id = ${orgId} and t.unit_number = 'TR-501'
+          and not exists (select 1 from public.equipment_plates p where p.trailer_id = t.id)`;
 
       await sql`
         insert into public.partners (organization_id, name, type, address, tax_id, contact_name, contact_email, contact_phone)
@@ -228,6 +281,17 @@ export async function seed() {
       values (${otherOrgId}, 'Nora', 'Bergstrom', 'B9999-00000-11111', 'BC', ${day(365)})
       on conflict do nothing`;
 
+    // Singh gets entry numbers by text (0025); two demo dispatch inboxes.
+    await sql`
+      update public.drivers set sms_opt_in = true, sms_phone_ace = '+1 905 555 0101', sms_phone_aci = '+1 905 555 0101'
+      where organization_id = ${orgId} and last_name = 'Singh'`;
+    await sql`
+      update public.organizations
+      set dispatch_emails = array['dispatch@pathfinder.demo', 'ops@pathfinder.demo'],
+          timezone = 'America/Toronto',
+          billing_address = ${sql.json({ line1: "1 Corridor Way", city: "Mississauga", region: "ON", postalCode: "L5T 2M8", country: "CA" })}
+      where id = ${orgId} and cardinality(dispatch_emails) = 0`;
+
     // 3b. integration configs — sandbox mock gateways with a short decision delay
     await sql`
       insert into public.integration_configs (organization_id, provider, environment, settings)
@@ -256,35 +320,89 @@ export async function seed() {
       const gurpreet = await ids("drivers", "last_name", "Singh");
       const marcus = await ids("drivers", "last_name", "Reyes");
       const dale = await ids("drivers", "last_name", "Thompson");
+      const rosa = await ids("drivers", "last_name", "Delgado");
       const t101 = await ids("trucks", "unit_number", "T-101");
       const t103 = await ids("trucks", "unit_number", "T-103");
       const tr501 = await ids("trailers", "unit_number", "TR-501");
+      const tr502 = await ids("trailers", "unit_number", "TR-502");
       const tr503 = await ids("trailers", "unit_number", "TR-503");
       const maple = await ids("partners", "name", "Maple Ridge Steel Ltd");
       const glf = await ids("partners", "name", "Great Lakes Fabrication Inc");
       const erie = await ids("partners", "name", "Erie Produce Co");
 
-      const CUSTOMS_DRIVEN = new Set(["accepted", "rejected", "released", "held"]);
-      let seq = 0;
-      const seedMovement = async (spec: {
+      /** One shipment plus its commodity lines; `movementId` null = unassigned. */
+      const seedShipment = async (spec: {
         regime: "ACE" | "ACI";
-        driver: string;
-        truck: string;
-        trailer: string | null;
-        crossing: { code: string; name: string };
-        etaDays: number;
-        cargo: Array<{
+        carrierCode: string;
+        /** Defaults to the regime's plain filing (ACE regular_bill / ACI regular). */
+        type?: string;
+        controlReference: string;
+        shipper: string;
+        consignee: string;
+        movementId: string | null;
+        isPars?: boolean;
+        commodities: Array<{
           desc: string;
           hs: string;
           kg: number;
-          pcs: number;
-          shipper: string;
-          consignee: string;
+          qty: number;
+          unit: string;
           value: number;
           ccy: "USD" | "CAD";
           origin: string;
         }>;
-        seals: string[];
+      }) => {
+        const [shipment] = await sql<{ id: string }[]>`
+          insert into public.shipments (organization_id, regime, movement_id, carrier_code,
+            shipment_type, cargo_type, control_reference, is_pars, shipper_id, consignee_id)
+          values (${orgId}, ${spec.regime}, ${spec.movementId}, ${spec.carrierCode},
+            ${spec.regime === "ACE" ? (spec.type ?? "regular_bill") : null},
+            ${spec.regime === "ACI" ? (spec.type ?? "regular") : null},
+            ${spec.controlReference}, ${spec.isPars ?? false}, ${spec.shipper}, ${spec.consignee})
+          returning id`;
+        let line = 0;
+        for (const c of spec.commodities) {
+          line++;
+          await sql`
+            insert into public.commodities (shipment_id, organization_id, line_number, commodity_description,
+              hs_code, weight_kg, weight_unit, quantity, quantity_unit, packaging_type, value_amount,
+              value_currency, country_of_origin)
+            values (${shipment!.id}, ${orgId}, ${line}, ${c.desc}, ${c.hs}, ${c.kg}, 'KG', ${c.qty},
+              ${c.unit}, 'pallet', ${c.value}, ${c.ccy}, ${c.origin})`;
+        }
+        return shipment!.id;
+      };
+
+      const CUSTOMS_DRIVEN = new Set(["accepted", "rejected", "released", "held"]);
+      let seq = 0;
+      const seedMovement = async (spec: {
+        regime: "ACE" | "ACI";
+        /** The person in charge; `alsoCrew` rides along. */
+        driver: string;
+        alsoCrew?: Array<{ driverId: string; role: "crew_member" | "passenger" }>;
+        truck: string;
+        /** Trailers in tow order (0021); empty = bobtail. */
+        trailers: string[];
+        portCode: string;
+        etaDays: number;
+        shipments: Array<{
+          controlReference: string;
+          shipper: string;
+          consignee: string;
+          commodities: Array<{
+            desc: string;
+            hs: string;
+            kg: number;
+            qty: number;
+            unit: string;
+            value: number;
+            ccy: "USD" | "CAD";
+            origin: string;
+          }>;
+        }>;
+        /** Seal numbers per trailer position (index = tow position); `truck` = a seal on the tractor. */
+        seals: string[][];
+        truckSeal?: string;
         path: Array<
           "sent" | "accepted" | "rejected" | "released" | "held" | "arrived" | "cancelled"
         >;
@@ -294,29 +412,67 @@ export async function seed() {
         const number = `${spec.regime}-${new Date().getUTCFullYear().toString().slice(-2)}-${String(seq).padStart(5, "0")}`;
         const eta = new Date();
         eta.setUTCDate(eta.getUTCDate() + spec.etaDays);
+        const carrierCode = spec.regime === "ACE" ? "PFTR" : "7ELU";
+        const [port] = await sql<{ id: string }[]>`
+          select id from public.ports where regime = ${spec.regime} and code = ${spec.portCode} limit 1`;
+        if (!port) throw new Error(`seed: unknown port code ${spec.portCode} for ${spec.regime}`);
         const [m] = await sql<{ id: string }[]>`
-          insert into public.movements (organization_id, regime, movement_number, trip_number, crossing_point,
-            scheduled_crossing_at, driver_id, truck_id, trailer_id, created_by)
-          values (${orgId}, ${spec.regime}, ${number}, ${"TRIP-" + String(1000 + seq)}, ${sql.json(spec.crossing)},
-            ${eta.toISOString()}, ${spec.driver}, ${spec.truck}, ${spec.trailer}, ${dispatcherId})
+          insert into public.movements (organization_id, regime, movement_number, trip_number, port_id, carrier_code,
+            scheduled_crossing_at, truck_id, created_by)
+          values (${orgId}, ${spec.regime}, ${number}, ${"TRIP-" + String(1000 + seq)}, ${port.id}, ${carrierCode},
+            ${eta.toISOString()}, ${spec.truck}, ${dispatcherId})
           returning id`;
         const id = m!.id;
+        const slotIds: string[] = [];
+        for (const [i, trailerId] of spec.trailers.entries()) {
+          const [slot] = await sql<{ id: string }[]>`
+            insert into public.movement_trailers (organization_id, movement_id, trailer_id, position)
+            values (${orgId}, ${id}, ${trailerId}, ${i + 1})
+            returning id`;
+          slotIds.push(slot!.id);
+        }
+        await sql`
+          insert into public.movement_crew (organization_id, movement_id, driver_id, role, position)
+          values (${orgId}, ${id}, ${spec.driver}, 'person_in_charge', 1)`;
+        let crewPosition = 1;
+        for (const extra of spec.alsoCrew ?? []) {
+          crewPosition++;
+          await sql`
+            insert into public.movement_crew (organization_id, movement_id, driver_id, role, position)
+            values (${orgId}, ${id}, ${extra.driverId}, ${extra.role}, ${crewPosition})`;
+        }
         await sql`
           insert into public.movement_events (movement_id, organization_id, event_type, from_status, to_status, actor_type, actor_id, payload)
           values (${id}, ${orgId}, 'status_change', null, 'draft', 'user', ${dispatcherId}, ${sql.json({ movementNumber: number })})`;
-        let line = 0;
-        for (const c of spec.cargo) {
-          line++;
-          await sql`
-            insert into public.cargo (movement_id, organization_id, line_number, shipper_id, consignee_id, commodity_description,
-              hs_code, weight_kg, piece_count, packaging_type, value_amount, value_currency, country_of_origin)
-            values (${id}, ${orgId}, ${line}, ${c.shipper}, ${c.consignee}, ${c.desc}, ${c.hs}, ${c.kg}, ${c.pcs}, 'pallet',
-              ${c.value}, ${c.ccy}, ${c.origin})`;
+        for (const spec_shipment of spec.shipments) {
+          await seedShipment({
+            ...spec_shipment,
+            regime: spec.regime,
+            carrierCode,
+            movementId: id,
+          });
         }
-        for (const s of spec.seals) {
+        for (const [i, numbers] of spec.seals.entries()) {
+          for (const s of numbers) {
+            await sql`
+              insert into public.seals (movement_id, organization_id, movement_trailer_id, seal_number, seal_type, applied_by, applied_at)
+              values (${id}, ${orgId}, ${slotIds[i] ?? null}, ${s}, 'bolt', 'Yard', now())`;
+          }
+        }
+        if (spec.truckSeal) {
           await sql`
-            insert into public.seals (movement_id, organization_id, trailer_id, seal_number, seal_type, applied_by, applied_at)
-            values (${id}, ${orgId}, ${spec.trailer}, ${s}, 'bolt', 'Yard', now())`;
+            insert into public.seals (movement_id, organization_id, movement_trailer_id, seal_number, seal_type, applied_by, applied_at)
+            values (${id}, ${orgId}, null, ${spec.truckSeal}, 'cable', 'Yard', now())`;
+        }
+        // A filed movement has the submission the gateway would have
+        // acknowledged (customs_submissions, 0023), so the webhook can find it.
+        if (spec.ref) {
+          await sql`
+            insert into public.customs_submissions (organization_id, movement_id, kind, provider, mode,
+              reference_number, status, request, response)
+            values (${orgId}, ${id}, 'original', ${spec.regime === "ACE" ? "cbp_ace" : "cbsa_aci"}, 'mock',
+              ${spec.ref}, ${spec.path.includes("released") ? "released" : spec.path.includes("rejected") ? "rejected" : spec.path.includes("held") ? "held" : "accepted"},
+              ${sql.json({ movementNumber: number })}, ${sql.json({ mock: true, acknowledged: true })})`;
         }
         let from = "draft";
         for (const to of spec.path) {
@@ -334,87 +490,133 @@ export async function seed() {
               ${customs ? null : dispatcherId})`;
           from = to;
         }
+        // Shipments ride the movement: their status follows the last step of
+        // the path (a released crossing has released shipments, with entries).
+        if (from !== "draft") {
+          await sql`
+            update public.shipments
+            set status = ${from},
+                entry_number = case when ${from} in ('released','held','arrived')
+                  then '300' || lpad((abs(hashtext(control_number)) % 100000000)::text, 8, '0') else null end,
+                entry_port_id = case when ${from} in ('released','held','arrived') then ${port.id}::uuid else null end,
+                entry_on_file_at = case when ${from} in ('released','held','arrived') then now() else null end,
+                released_at = case when ${from} in ('released','arrived') then now() else null end
+            where movement_id = ${id}`;
+        }
       };
 
-      const DET = { code: "3801", name: "Detroit — Ambassador Bridge, MI" };
-      const BUF = { code: "0901", name: "Buffalo — Peace Bridge, NY" };
-      const WIN = { code: "0453", name: "Windsor — Ambassador Bridge, ON" };
-      const FE = { code: "0410", name: "Fort Erie — Peace Bridge, ON" };
-      const steel = {
+      const DET = "3801"; // Detroit — Ambassador Bridge, MI
+      const BUF = "0901"; // Buffalo — Peace Bridge, NY
+      const WIN = "0453"; // Windsor — Ambassador Bridge, ON
+      const FE = "0410"; // Fort Erie — Peace Bridge, ON
+      const steelLine = {
         desc: "Hot-rolled steel coils",
         hs: "7208.10",
         kg: 21500,
-        pcs: 12,
-        shipper: maple,
-        consignee: glf,
+        qty: 12,
+        unit: "Coil",
         value: 48000,
         ccy: "USD" as const,
         origin: "CA",
       };
-      const produce = {
+      const produceLine = {
         desc: "Fresh apples, bulk bins",
         hs: "0808.10",
         kg: 18200,
-        pcs: 40,
-        shipper: erie,
-        consignee: erie,
+        qty: 40,
+        unit: "Crate",
         value: 22000,
         ccy: "USD" as const,
         origin: "US",
       };
-      const fab = {
+      const fabLine = {
         desc: "Fabricated steel brackets",
         hs: "7308.90",
         kg: 9800,
-        pcs: 22,
-        shipper: glf,
-        consignee: maple,
+        qty: 22,
+        unit: "Pallet",
         value: 31000,
         ccy: "CAD" as const,
         origin: "US",
       };
 
+      // ACE bills are PAPS-numbered, ACI ones PARS-numbered.
+      let bill = 0;
+      const nextRef = (regime: "ACE" | "ACI") =>
+        `${regime === "ACE" ? "PAPS" : "PARS"}${String(++bill).padStart(5, "0")}`;
+      const steel = (regime: "ACE" | "ACI") => ({
+        controlReference: nextRef(regime),
+        shipper: maple,
+        consignee: glf,
+        commodities: [steelLine],
+      });
+      const produce = (regime: "ACE" | "ACI") => ({
+        controlReference: nextRef(regime),
+        shipper: erie,
+        consignee: erie,
+        commodities: [produceLine],
+      });
+      const fab = (regime: "ACE" | "ACI") => ({
+        controlReference: nextRef(regime),
+        shipper: glf,
+        consignee: maple,
+        commodities: [fabLine],
+      });
+
       await seedMovement({
         regime: "ACE",
         driver: gurpreet,
+        // Two people in the cab: a second driver and a passenger.
+        alsoCrew: [
+          { driverId: marcus, role: "crew_member" },
+          { driverId: rosa, role: "passenger" },
+        ],
         truck: t101,
-        trailer: tr501,
-        crossing: DET,
+        // A turnpike double: two trailers, each sealed, plus a cable seal on the tractor.
+        trailers: [tr501, tr502],
+        portCode: DET,
         etaDays: 2,
-        cargo: [steel],
-        seals: ["SL-100231"],
+        shipments: [steel("ACE")],
+        seals: [["SL-100231", "SL-100234"], ["SL-100235"]],
+        truckSeal: "SL-100236",
         path: [],
       });
       await seedMovement({
         regime: "ACE",
         driver: dale,
         truck: t103,
-        trailer: tr503,
-        crossing: BUF,
+        trailers: [tr503],
+        portCode: BUF,
         etaDays: 1,
-        cargo: [
-          steel,
+        shipments: [
           {
-            ...steel,
-            desc: "Galvanized sheet, coils",
-            hs: "7210.49",
-            kg: 4000,
-            pcs: 3,
-            value: 9000,
+            ...steel("ACE"),
+            commodities: [
+              steelLine,
+              {
+                ...steelLine,
+                desc: "Galvanized sheet, coils",
+                hs: "7210.49",
+                kg: 4000,
+                qty: 3,
+                unit: "Coil",
+                value: 9000,
+              },
+            ],
           },
         ],
-        seals: ["SL-100232"],
+        seals: [["SL-100232"]],
         path: ["sent"],
       });
       await seedMovement({
         regime: "ACE",
         driver: gurpreet,
         truck: t101,
-        trailer: tr501,
-        crossing: DET,
+        trailers: [tr501],
+        portCode: DET,
         etaDays: 0,
-        cargo: [steel],
-        seals: ["SL-100233"],
+        shipments: [steel("ACE")],
+        seals: [["SL-100233"]],
         path: ["sent", "accepted"],
         ref: "ACE-A7K2Q9",
       });
@@ -422,11 +624,11 @@ export async function seed() {
         regime: "ACI",
         driver: dale,
         truck: t103,
-        trailer: tr503,
-        crossing: WIN,
+        trailers: [tr503],
+        portCode: WIN,
         etaDays: 0,
-        cargo: [fab],
-        seals: ["SL-200101"],
+        shipments: [fab("ACI")],
+        seals: [["SL-200101"]],
         path: ["sent", "accepted", "released"],
         ref: "ACI-88213Q",
       });
@@ -434,11 +636,11 @@ export async function seed() {
         regime: "ACI",
         driver: marcus,
         truck: t101,
-        trailer: tr501,
-        crossing: FE,
+        trailers: [tr501],
+        portCode: FE,
         etaDays: 0,
-        cargo: [produce],
-        seals: ["SL-200102"],
+        shipments: [produce("ACI")],
+        seals: [["SL-200102"]],
         path: ["sent", "accepted", "held"],
         ref: "ACI-88214H",
       });
@@ -446,11 +648,11 @@ export async function seed() {
         regime: "ACE",
         driver: marcus,
         truck: t103,
-        trailer: tr503,
-        crossing: BUF,
+        trailers: [tr503],
+        portCode: BUF,
         etaDays: 3,
-        cargo: [produce],
-        seals: [],
+        shipments: [produce("ACE")],
+        seals: [[]],
         path: ["sent", "rejected"],
         ref: "ACE-R0011X",
       });
@@ -458,11 +660,11 @@ export async function seed() {
         regime: "ACE",
         driver: gurpreet,
         truck: t101,
-        trailer: tr501,
-        crossing: DET,
+        trailers: [tr501],
+        portCode: DET,
         etaDays: -3,
-        cargo: [steel],
-        seals: ["SL-100229"],
+        shipments: [steel("ACE")],
+        seals: [["SL-100229"]],
         path: ["sent", "accepted", "released", "arrived"],
         ref: "ACE-D4M1Z2",
       });
@@ -470,12 +672,76 @@ export async function seed() {
         regime: "ACI",
         driver: dale,
         truck: t103,
-        trailer: null,
-        crossing: WIN,
+        trailers: [],
+        portCode: WIN,
         etaDays: -1,
-        cargo: [fab],
+        shipments: [fab("ACI")],
         seals: [],
         path: ["cancelled"],
+      });
+
+      // In-bond (0026): one of our shipments moving IT to a bonded warehouse,
+      // with its monitor record, and one shipment another carrier filed.
+      const inBondShipmentId = await seedShipment({
+        regime: "ACE",
+        carrierCode: "PFTR",
+        type: "in_bond",
+        controlReference: "PAPS90010",
+        shipper: maple,
+        consignee: glf,
+        movementId: null,
+        commodities: [steelLine],
+      });
+      const [detPort] = await sql<{ id: string }[]>`
+        select id from public.ports where regime = 'ACE' and kind = 'port_of_entry' and code = ${DET} limit 1`;
+      const [chiBond] = await sql<{ id: string }[]>`
+        select id from public.ports where regime = 'ACE' and kind = 'in_bond_destination' and code = '3901' limit 1`;
+      await sql`
+        update public.shipments set in_bond_entry_type = 'IT', in_bond_number = '300112233', entry_port_id = ${detPort!.id}::uuid,
+          in_bond_destination_port_id = ${chiBond?.id ?? detPort!.id}::uuid
+        where id = ${inBondShipmentId}`;
+      const [inBondRecord] = await sql<{ id: string }[]>`
+        insert into public.in_bond_records (organization_id, shipment_id, bond_number, entry_type, arrival_port_id, export_port_id, firms_code, created_by)
+        values (${orgId}, ${inBondShipmentId}, '300112233', 'IT', ${detPort!.id}::uuid, ${chiBond?.id ?? detPort!.id}::uuid, 'G123', ${dispatcherId})
+        returning id`;
+      await sql`
+        insert into public.in_bond_events (organization_id, in_bond_record_id, kind, actor_type, payload)
+        values (${orgId}, ${inBondRecord!.id}, 'note', 'system', ${sql.json({ body: "Record opened from the in-bond shipment." })})`;
+      await sql`
+        insert into public.external_shipments (organization_id, regime, control_number, in_bond_number, originating_carrier_code, description, created_by)
+        values (${orgId}, 'ACE', 'XYZL77120045', '300998877', 'XYZL', 'Machinery crates in bond from Laredo, moving to Detroit FTZ', ${dispatcherId})`;
+
+      // Unassigned shipments: keyed in from a broker's email, waiting for a trip.
+      await seedShipment({
+        regime: "ACE",
+        carrierCode: "PFTR",
+        type: "regular_bill",
+        controlReference: "PAPS90001",
+        shipper: maple,
+        consignee: glf,
+        movementId: null,
+        commodities: [steelLine],
+      });
+      await seedShipment({
+        regime: "ACE",
+        carrierCode: "PFTR",
+        type: "section_321",
+        controlReference: "PAPS90002",
+        shipper: erie,
+        consignee: glf,
+        movementId: null,
+        commodities: [{ ...produceLine, kg: 900, qty: 4, value: 780 }],
+      });
+      await seedShipment({
+        regime: "ACI",
+        carrierCode: "7ELU",
+        type: "regular",
+        controlReference: "PARS90003",
+        shipper: glf,
+        consignee: maple,
+        movementId: null,
+        isPars: true,
+        commodities: [fabLine],
       });
 
       await sql`

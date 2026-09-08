@@ -13,7 +13,7 @@ import { isEditable, movementSuggestionPayload } from "@corridor/domain";
 import { suggestMovement, type MovementFingerprint } from "@corridor/ai";
 import { requireMovement } from "./movements";
 
-const { movements, movementSuggestions, cargo } = schema;
+const { movements, movementCrew, movementTrailers, movementSuggestions, shipments, ports } = schema;
 
 export async function generateMovementSuggestion(
   tx: RlsTransaction,
@@ -27,24 +27,24 @@ export async function generateMovementSuggestion(
   }
 
   const [targetLane] = await tx
-    .select({ shipperId: cargo.shipperId, consigneeId: cargo.consigneeId })
-    .from(cargo)
-    .where(eq(cargo.movementId, movementId))
-    .orderBy(cargo.lineNumber)
+    .select({ shipperId: shipments.shipperId, consigneeId: shipments.consigneeId })
+    .from(shipments)
+    .where(eq(shipments.movementId, movementId))
+    .orderBy(shipments.createdAt)
     .limit(1);
 
   const history = await tx
     .select({
       id: movements.id,
       regime: movements.regime,
-      crossingPoint: movements.crossingPoint,
+      portId: movements.portId,
       createdAt: movements.createdAt,
       shipperId: sql<
         string | null
-      >`(select c.shipper_id from public.cargo c where c.movement_id = ${movements.id} order by c.line_number limit 1)`,
+      >`(select s.shipper_id from public.shipments s where s.movement_id = ${movements.id} order by s.created_at limit 1)`,
       consigneeId: sql<
         string | null
-      >`(select c.consignee_id from public.cargo c where c.movement_id = ${movements.id} order by c.line_number limit 1)`,
+      >`(select s.consignee_id from public.shipments s where s.movement_id = ${movements.id} order by s.created_at limit 1)`,
     })
     .from(movements)
     .where(
@@ -52,11 +52,12 @@ export async function generateMovementSuggestion(
         eq(movements.organizationId, orgId),
         eq(movements.regime, target.regime),
         notInArray(movements.status, ["draft", "rejected", "cancelled"]),
-        isNotNull(movements.crossingPoint),
-        isNotNull(movements.driverId),
+        isNotNull(movements.portId),
         isNotNull(movements.truckId),
+        sql`exists (select 1 from public.movement_crew mc
+                    where mc.movement_id = ${movements.id} and mc.role = 'person_in_charge')`,
         sql`exists (
-          select 1 from public.cargo complete
+          select 1 from public.shipments complete
           where complete.movement_id = ${movements.id}
             and complete.shipper_id is not null
             and complete.consignee_id is not null
@@ -69,7 +70,9 @@ export async function generateMovementSuggestion(
   const fingerprint: MovementFingerprint = {
     id: target.id,
     regime: target.regime,
-    crossingCode: target.crossingPoint?.code ?? null,
+    // Identity comparison only (see similarity.ts) — the port's id serves
+    // just as well as its code and needs no extra join here.
+    crossingCode: target.portId ?? null,
     shipperId: targetLane?.shipperId ?? null,
     consigneeId: targetLane?.consigneeId ?? null,
     createdAt: target.createdAt,
@@ -79,7 +82,7 @@ export async function generateMovementSuggestion(
     history.map((candidate) => ({
       id: candidate.id,
       regime: candidate.regime,
-      crossingCode: candidate.crossingPoint?.code ?? null,
+      crossingCode: candidate.portId ?? null,
       shipperId: candidate.shipperId,
       consigneeId: candidate.consigneeId,
       createdAt: candidate.createdAt,
@@ -93,32 +96,36 @@ export async function generateMovementSuggestion(
     .where(and(eq(movements.id, best.movementId), eq(movements.organizationId, orgId)))
     .limit(1);
   if (!source) return null;
-  const sourceCargo = await tx
-    .select({
-      shipperId: cargo.shipperId,
-      consigneeId: cargo.consigneeId,
-      commodityDescription: cargo.commodityDescription,
-      hsCode: cargo.hsCode,
-      weightKg: cargo.weightKg,
-      pieceCount: cargo.pieceCount,
-      packagingType: cargo.packagingType,
-      valueAmount: cargo.valueAmount,
-      valueCurrency: cargo.valueCurrency,
-      countryOfOrigin: cargo.countryOfOrigin,
-    })
-    .from(cargo)
-    .where(eq(cargo.movementId, source.id))
-    .orderBy(cargo.lineNumber);
+  // Snapshot the source's port (id + code/name), not just its id, so the
+  // suggestion still displays correctly even if the port catalogue changes.
+  const sourcePort = source.portId
+    ? await tx
+        .select({ id: ports.id, code: ports.code, name: ports.name })
+        .from(ports)
+        .where(eq(ports.id, source.portId))
+        .then((r) => r[0] ?? null)
+    : null;
+
+  const sourceCrew = await tx
+    .select({ driverId: movementCrew.driverId, role: movementCrew.role })
+    .from(movementCrew)
+    .where(eq(movementCrew.movementId, source.id))
+    .orderBy(movementCrew.position);
+  const sourceTrailers = await tx
+    .select({ trailerId: movementTrailers.trailerId })
+    .from(movementTrailers)
+    .where(eq(movementTrailers.movementId, source.id))
+    .orderBy(movementTrailers.position);
 
   const payload = movementSuggestionPayload.parse({
     sourceMovementId: source.id,
     sourceMovementNumber: source.movementNumber,
     targetUpdatedAt: target.updatedAt.toISOString(),
-    crossingPoint: source.crossingPoint ?? null,
-    driverId: source.driverId,
+    port: sourcePort,
+    carrierCode: source.carrierCode ?? null,
+    crew: sourceCrew,
     truckId: source.truckId,
-    trailerId: source.trailerId,
-    cargo: sourceCargo,
+    trailerIds: sourceTrailers.map((t) => t.trailerId),
   });
   const [suggestion] = await tx
     .insert(movementSuggestions)
@@ -166,30 +173,46 @@ export async function acceptMovementSuggestion(
   }
 
   const patch = {
-    ...(!movement.crossingPoint &&
-      payload.crossingPoint && {
-        crossingPoint: payload.crossingPoint,
-      }),
-    ...(!movement.driverId && payload.driverId && { driverId: payload.driverId }),
+    ...(!movement.portId && payload.port && { portId: payload.port.id }),
+    ...(!movement.carrierCode && payload.carrierCode && { carrierCode: payload.carrierCode }),
     ...(!movement.truckId && payload.truckId && { truckId: payload.truckId }),
-    ...(!movement.trailerId && payload.trailerId && { trailerId: payload.trailerId }),
   };
   if (Object.keys(patch).length > 0) {
     await tx.update(movements).set(patch).where(eq(movements.id, movement.id));
   }
 
-  const [existingCargo] = await tx
-    .select({ id: cargo.id })
-    .from(cargo)
-    .where(eq(cargo.movementId, movement.id))
+  // Crew is offered whole, and only onto an empty crew list — never merged into
+  // one the dispatcher has already started building.
+  const existingCrew = await tx
+    .select({ id: movementCrew.id })
+    .from(movementCrew)
+    .where(eq(movementCrew.movementId, movement.id))
     .limit(1);
-  if (!existingCargo && payload.cargo.length > 0) {
-    await tx.insert(cargo).values(
-      payload.cargo.map((line, index) => ({
-        ...line,
-        movementId: movement.id,
+  if (existingCrew.length === 0 && payload.crew.length > 0) {
+    await tx.insert(movementCrew).values(
+      payload.crew.map((c, i) => ({
         organizationId: orgId,
-        lineNumber: index + 1,
+        movementId: movement.id,
+        driverId: c.driverId,
+        role: c.role,
+        position: i + 1,
+      })),
+    );
+  }
+
+  // Trailers likewise: the whole tow, only onto a movement with none yet.
+  const existingTrailers = await tx
+    .select({ id: movementTrailers.id })
+    .from(movementTrailers)
+    .where(eq(movementTrailers.movementId, movement.id))
+    .limit(1);
+  if (existingTrailers.length === 0 && payload.trailerIds.length > 0) {
+    await tx.insert(movementTrailers).values(
+      payload.trailerIds.map((trailerId, i) => ({
+        organizationId: orgId,
+        movementId: movement.id,
+        trailerId,
+        position: i + 1,
       })),
     );
   }

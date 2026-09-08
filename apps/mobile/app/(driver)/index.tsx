@@ -81,7 +81,7 @@ export default function DriverBoard() {
           </View>
           <Text style={styles.muted}>
             {item.regime} ·{" "}
-            {item.crossingPoint?.name ?? item.crossingPoint?.code ?? "crossing not set"}
+            {item.port?.name ?? item.port?.code ?? "crossing not set"}
           </Text>
           <Text style={styles.muted}>
             {item.truckUnit ? `Truck ${item.truckUnit}` : "No truck"}

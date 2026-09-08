@@ -92,15 +92,39 @@ export function isEditable(status: MovementStatus): boolean {
 // Movement
 // ---------------------------------------------------------------------------
 
-export const crossingPoint = z.object({
-  /** CBP port code (4 digits) or CBSA office code (3–4 digits) */
-  code: z
-    .string()
-    .trim()
-    .regex(/^[0-9A-Z]{3,4}$/i),
-  name: z.string().trim().max(120).optional(),
-});
-export type CrossingPoint = z.infer<typeof crossingPoint>;
+/** 2-4 alphanumerics: an ACE SCAC-style code or an ACI carrier code. */
+export const carrierCode = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^[A-Z0-9]{2,4}$/, "Carrier code must be 2-4 alphanumeric characters");
+
+/** Instruments of International Traffic — Avaal's three options (0022). */
+export const IIT_INDICATORS = ["none", "iit_carrier_bond", "iit_importer_bond"] as const;
+export const iitIndicator = z.enum(IIT_INDICATORS);
+export type IitIndicator = z.infer<typeof iitIndicator>;
+export const IIT_INDICATOR_LABELS: Record<IitIndicator, string> = {
+  none: "None",
+  iit_carrier_bond: "IIT under carrier bond",
+  iit_importer_bond: "IIT under importer bond",
+};
+
+/** CBSA ACI trip flags; always false on an ACE manifest (DB check). */
+export const ACI_FLAG_KEYS = [
+  "aciLvs",
+  "aciPostal",
+  "aciFlyingTruck",
+  "aciInTransit",
+  "aciIit",
+] as const;
+export type AciFlagKey = (typeof ACI_FLAG_KEYS)[number];
+export const ACI_FLAG_LABELS: Record<AciFlagKey, string> = {
+  aciLvs: "Low value shipment (LVS)",
+  aciPostal: "Postal",
+  aciFlyingTruck: "Flying truck",
+  aciInTransit: "In transit",
+  aciIit: "IIT (instruments of international traffic)",
+};
 
 export const movementSchema = z.object({
   id: uuid,
@@ -109,11 +133,18 @@ export const movementSchema = z.object({
   movementNumber: nonEmpty.max(40),
   tripNumber: z.string().trim().max(40).nullable(),
   status: movementStatus,
-  crossingPoint: crossingPoint.nullable(),
+  portId: uuid.nullable(),
+  carrierCode: z.string().nullable(),
   scheduledCrossingAt: isoDateTime.nullable(),
-  driverId: uuid.nullable(),
   truckId: uuid.nullable(),
-  trailerId: uuid.nullable(),
+  /** "Empty Trailer" (ACE) / "Empty Trip" (ACI) — migration 0021. */
+  isEmpty: z.boolean(),
+  iitIndicator,
+  aciLvs: z.boolean(),
+  aciPostal: z.boolean(),
+  aciFlyingTruck: z.boolean(),
+  aciInTransit: z.boolean(),
+  aciIit: z.boolean(),
   customsReferenceNumber: z.string().nullable(),
   submittedAt: isoDateTime.nullable(),
   acceptedAt: isoDateTime.nullable(),
@@ -129,11 +160,12 @@ export type Movement = z.infer<typeof movementSchema>;
 export const createMovementInput = z.object({
   regime,
   tripNumber: z.string().trim().max(40).optional(),
-  crossingPoint: crossingPoint.optional(),
+  portId: uuid.optional(),
+  /** Server defaults to the regime's default carrier code when omitted. */
+  carrierCode: carrierCode.optional(),
   scheduledCrossingAt: isoDateTime.optional(),
-  driverId: uuid.optional(),
   truckId: uuid.optional(),
-  trailerId: uuid.optional(),
+  isEmpty: z.boolean().optional(),
 });
 export type CreateMovementInput = z.infer<typeof createMovementInput>;
 
@@ -146,6 +178,8 @@ export const movementEventType = z.enum([
   "note",
   "customs_response",
   "ai_flag",
+  /** 0022 — one gateway message (sending, accepted, entry on file, …). */
+  "customs_event",
 ]);
 export type MovementEventType = z.infer<typeof movementEventType>;
 
@@ -164,7 +198,8 @@ export const movementEventSchema = z.object({
 export type MovementEvent = z.infer<typeof movementEventSchema>;
 
 // ---------------------------------------------------------------------------
-// Cargo — the SAME schema validates AI extraction output and the DB insert.
+// Shared commodity value types. The commodity line itself lives in
+// shipment.ts — it hangs off a shipment, not a movement (migration 0019).
 // ---------------------------------------------------------------------------
 
 export const currency = z.enum(["USD", "CAD"]);
@@ -178,36 +213,9 @@ export const countryCode = z
   .toUpperCase()
   .length(2, "ISO 3166-1 alpha-2 country code");
 
-export const cargoInput = z.object({
-  shipperId: uuid.nullable().optional(),
-  consigneeId: uuid.nullable().optional(),
-  commodityDescription: nonEmpty.max(500),
-  hsCode: hsCode.nullable().optional(),
-  weightKg: z.number().positive().max(100_000).nullable().optional(),
-  pieceCount: z.number().int().positive().nullable().optional(),
-  packagingType: z.string().trim().max(60).nullable().optional(),
-  entryNumber: z.string().trim().max(40).nullable().optional(),
-  inBondNumber: z.string().trim().max(40).nullable().optional(),
-  valueAmount: z.number().nonnegative().nullable().optional(),
-  valueCurrency: currency.nullable().optional(),
-  countryOfOrigin: countryCode.nullable().optional(),
-  sourceDocumentId: uuid.nullable().optional(),
-  /** 0..1 — populated only when the row originated from AI extraction. */
-  extractionConfidence: z.number().min(0).max(1).nullable().optional(),
-});
-export type CargoInput = z.infer<typeof cargoInput>;
-
-export const cargoSchema = cargoInput.extend({
-  id: uuid,
-  movementId: uuid,
-  organizationId: uuid,
-  createdAt: isoDateTime,
-  updatedAt: isoDateTime,
-});
-export type Cargo = z.infer<typeof cargoSchema>;
-
 export const sealInput = z.object({
-  trailerId: uuid.nullable().optional(),
+  /** The movement_trailers slot the seal is on; null/absent = a seal on the truck. */
+  movementTrailerId: uuid.nullable().optional(),
   sealNumber: nonEmpty.max(40),
   sealType: z.string().trim().max(40).nullable().optional(),
   appliedBy: z.string().trim().max(120).nullable().optional(),

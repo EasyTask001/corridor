@@ -39,6 +39,7 @@ import {
   deadPushTokens,
   sendEmail,
   sendExpoPush,
+  sendSms,
   type ExpoPushMessage,
 } from "@corridor/integrations";
 import {
@@ -54,7 +55,7 @@ import {
 import { logIntegrationEvent } from "./customs";
 import { enqueueJob } from "./jobs";
 
-const { authUsers, drivers, notificationRules, notifications, userDevices } = schema;
+const { authUsers, drivers, notificationRules, notifications, userDevices, userProfiles } = schema;
 
 export interface NotifyInput {
   orgId: string;
@@ -100,6 +101,28 @@ export async function notifyOrganization(tx: RlsTransaction, input: NotifyInput)
     await deliverEmail(tx, input, r.email);
   }
 
+  // SMS (0025) goes to the member's profile phone; no phone, nothing sent.
+  const smsTargets = rows.filter((r) => r.channel?.includes("sms"));
+  let smsSent = 0;
+  if (smsTargets.length > 0) {
+    const phones = await tx
+      .select({ userId: userProfiles.userId, phone: userProfiles.phone })
+      .from(userProfiles)
+      .where(
+        inArray(
+          userProfiles.userId,
+          smsTargets.map((r) => r.user_id),
+        ),
+      );
+    const phoneOf = new Map(phones.map((p) => [p.userId, p.phone]));
+    for (const r of smsTargets) {
+      const phone = phoneOf.get(r.user_id);
+      if (!phone) continue;
+      await deliverSms(tx, input, phone);
+      smsSent += 1;
+    }
+  }
+
   // Push is handed to the worker rather than sent here: it needs the service
   // role, and this code runs inside the caller's RLS transaction.
   const pushTargets = rows.filter((r) => r.channel?.includes("push"));
@@ -114,7 +137,12 @@ export async function notifyOrganization(tx: RlsTransaction, input: NotifyInput)
     });
   }
 
-  return { notified: rows.length, emailed: emailTargets.length, queuedPush: pushTargets.length };
+  return {
+    notified: rows.length,
+    emailed: emailTargets.length,
+    queuedPush: pushTargets.length,
+    smsSent,
+  };
 }
 
 /**
@@ -173,6 +201,15 @@ export async function notifyUser(db: DatabaseClient, input: NotifyUserInput) {
     }
 
     const pushed = channel.includes("push") ? await deliverPushInTx(tx, input) : 0;
+
+    if (channel.includes("sms")) {
+      const [profile] = await tx
+        .select({ phone: userProfiles.phone })
+        .from(userProfiles)
+        .where(eq(userProfiles.userId, input.userId))
+        .limit(1);
+      if (profile?.phone) await deliverSms(tx, input, profile.phone);
+    }
 
     return { notified: 1, emailed, pushed };
   });
@@ -302,6 +339,25 @@ async function pruneDeadDevices(
 // ---------------------------------------------------------------------------
 // delivery
 // ---------------------------------------------------------------------------
+
+async function deliverSms(tx: RlsTransaction, input: NotifyInput, to: string) {
+  const started = Date.now();
+  const result = await sendSms({
+    to,
+    body: [input.title, input.body].filter(Boolean).join(" — ").slice(0, 640),
+  });
+  await logIntegrationEvent(tx, {
+    orgId: input.orgId,
+    provider: "sms",
+    direction: "outbound",
+    operation: `notify:${input.eventType}`,
+    request: { to, title: input.title },
+    response: { id: result.id, mode: result.mode },
+    success: !result.error,
+    error: result.error,
+    durationMs: Date.now() - started,
+  });
+}
 
 async function deliverEmail(tx: RlsTransaction, input: NotifyInput, to: string) {
   const started = Date.now();

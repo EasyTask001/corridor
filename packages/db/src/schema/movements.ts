@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  boolean,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -14,9 +16,17 @@ import {
   uuid,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+import {
+  ACE_SHIPMENT_TYPES,
+  ACI_CARGO_TYPES,
+  CBSA_AMENDMENT_REASON_CODE_VALUES,
+  CREW_ROLES,
+  IIT_INDICATORS,
+} from "@corridor/domain";
 import type { MovementSuggestionPayload } from "@corridor/domain";
 import { authUsers, organizations } from "./core";
 import { sourceDocuments } from "./documents";
+import { ports } from "./reference";
 import { drivers, partners, trailers, trucks } from "./registry";
 
 /**
@@ -60,11 +70,22 @@ export const movements = pgTable(
     movementNumber: text("movement_number").notNull(),
     tripNumber: text("trip_number"),
     status: text("status", { enum: MOVEMENT_STATUSES }).notNull().default("draft"),
-    crossingPoint: jsonb("crossing_point").$type<{ code: string; name?: string }>(),
+    portId: uuid("port_id").references(() => ports.id),
+    /** Snapshot of the org's carrier code at the time it was set — not an FK,
+     * see migration 0018: the control number is built from this text and
+     * must not move if the org edits its codes later. */
+    carrierCode: text("carrier_code"),
     scheduledCrossingAt: timestamp("scheduled_crossing_at", { withTimezone: true }),
-    driverId: uuid("driver_id").references(() => drivers.id, { onDelete: "restrict" }),
     truckId: uuid("truck_id").references(() => trucks.id, { onDelete: "restrict" }),
-    trailerId: uuid("trailer_id").references(() => trailers.id, { onDelete: "restrict" }),
+    /** 0021 — "Empty Trailer" (ACE) / "Empty Trip" (ACI): no goods on board. */
+    isEmpty: boolean("is_empty").notNull().default(false),
+    // 0022 — manifest flags
+    iitIndicator: text("iit_indicator", { enum: IIT_INDICATORS }).notNull().default("none"),
+    aciLvs: boolean("aci_lvs").notNull().default(false),
+    aciPostal: boolean("aci_postal").notNull().default(false),
+    aciFlyingTruck: boolean("aci_flying_truck").notNull().default(false),
+    aciInTransit: boolean("aci_in_transit").notNull().default(false),
+    aciIit: boolean("aci_iit").notNull().default(false),
     customsReferenceNumber: text("customs_reference_number"),
     submittedAt: timestamp("submitted_at", { withTimezone: true }),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }),
@@ -82,16 +103,86 @@ export const movements = pgTable(
     index("movements_org_status_idx").on(t.organizationId, t.status),
     index("movements_org_created_idx").on(t.organizationId, t.createdAt.desc()),
     index("movements_org_scheduled_idx").on(t.organizationId, t.scheduledCrossingAt),
-    index("movements_driver_idx")
-      .on(t.driverId)
-      .where(sql`${t.driverId} is not null`),
     index("movements_truck_idx")
       .on(t.truckId)
       .where(sql`${t.truckId} is not null`),
-    index("movements_trailer_idx")
-      .on(t.trailerId)
-      .where(sql`${t.trailerId} is not null`),
+    index("movements_port_idx")
+      .on(t.portId)
+      .where(sql`${t.portId} is not null`),
     unique("movements_organization_id_movement_number_key").on(t.organizationId, t.movementNumber),
+  ],
+);
+
+/**
+ * 0020 — the people on one crossing. Replaces movements.driver_id: CBP/CBSA
+ * accept a person in charge plus additional crew members and passengers, and
+ * the role belongs to the pairing, not to the person.
+ */
+export const movementCrew = pgTable(
+  "movement_crew",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    movementId: uuid("movement_id")
+      .notNull()
+      .references(() => movements.id, { onDelete: "cascade" }),
+    /** FK is composite — see movement_crew_driver_id_fkey below. */
+    driverId: uuid("driver_id").notNull(),
+    role: text("role", { enum: CREW_ROLES }).notNull().default("crew_member"),
+    position: integer("position").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("movement_crew_organization_id_idx").on(t.organizationId),
+    index("movement_crew_movement_idx").on(t.movementId, t.position),
+    index("movement_crew_driver_idx").on(t.driverId),
+    uniqueIndex("movement_crew_pic_unique")
+      .on(t.movementId)
+      .where(sql`${t.role} = 'person_in_charge'`),
+    unique("movement_crew_movement_id_driver_id_key").on(t.movementId, t.driverId),
+    foreignKey({
+      name: "movement_crew_driver_id_fkey",
+      columns: [t.driverId, t.organizationId],
+      foreignColumns: [drivers.id, drivers.organizationId],
+    }).onDelete("restrict"),
+  ],
+);
+
+/**
+ * 0021 — the trailers on one crossing, in tow order. Replaces
+ * movements.trailer_id: a tractor pulls zero, one or two.
+ */
+export const movementTrailers = pgTable(
+  "movement_trailers",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    movementId: uuid("movement_id")
+      .notNull()
+      .references(() => movements.id, { onDelete: "cascade" }),
+    /** FK is composite — see movement_trailers_trailer_id_fkey below. */
+    trailerId: uuid("trailer_id").notNull(),
+    position: integer("position").notNull().default(1),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("movement_trailers_organization_id_idx").on(t.organizationId),
+    index("movement_trailers_movement_idx").on(t.movementId, t.position),
+    index("movement_trailers_trailer_idx").on(t.trailerId),
+    unique("movement_trailers_movement_id_trailer_id_key").on(t.movementId, t.trailerId),
+    foreignKey({
+      name: "movement_trailers_trailer_id_fkey",
+      columns: [t.trailerId, t.organizationId],
+      foreignColumns: [trailers.id, trailers.organizationId],
+    }).onDelete("restrict"),
   ],
 );
 
@@ -139,8 +230,12 @@ export const movementEvents = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
+    /** 0019 — the shipment this row is about, when it is about one. */
+    shipmentId: uuid("shipment_id").references((): AnyPgColumn => shipments.id, {
+      onDelete: "set null",
+    }),
     eventType: text("event_type", {
-      enum: ["status_change", "amendment", "note", "customs_response", "ai_flag"],
+      enum: ["status_change", "amendment", "note", "customs_response", "ai_flag", "customs_event"],
     }).notNull(),
     fromStatus: text("from_status"),
     toStatus: text("to_status"),
@@ -170,6 +265,12 @@ export const movementAmendments = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     amendmentNumber: integer("amendment_number").notNull(),
     reason: text("reason").notNull(),
+    /** 0022 — the shipment the amendment is about; null = the trip header. */
+    shipmentId: uuid("shipment_id").references((): AnyPgColumn => shipments.id, {
+      onDelete: "set null",
+    }),
+    /** 0022 — CBSA ECCRD reason code, required on an ACI amendment (trigger). */
+    reasonCode: text("reason_code", { enum: CBSA_AMENDMENT_REASON_CODE_VALUES }),
     diff: jsonb("diff")
       .$type<Record<string, { before: unknown; after: unknown }>>()
       .notNull()
@@ -188,31 +289,129 @@ export const movementAmendments = pgTable(
     ),
     // 0011
     index("movement_amendments_organization_id_idx").on(t.organizationId),
+    // 0022
+    index("movement_amendments_shipment_idx")
+      .on(t.shipmentId)
+      .where(sql`${t.shipmentId} is not null`),
   ],
 );
 
-export const cargo = pgTable(
-  "cargo",
+export const SHIPMENT_STATUSES = [
+  "draft",
+  "sent",
+  "accepted",
+  "rejected",
+  "entry_on_file",
+  "released",
+  "held",
+  "arrived",
+  "cancelled",
+] as const;
+
+export const shipments = pgTable(
+  "shipments",
   {
     id: uuid("id")
       .primaryKey()
       .default(sql`gen_random_uuid()`),
-    movementId: uuid("movement_id")
+    organizationId: uuid("organization_id")
       .notNull()
-      .references(() => movements.id, { onDelete: "cascade" }),
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    regime: text("regime", { enum: ["ACE", "ACI"] }).notNull(),
+    /** Null while the shipment is waiting to be put on a trip. */
+    movementId: uuid("movement_id").references(() => movements.id, { onDelete: "set null" }),
+    carrierCode: text("carrier_code").notNull(),
+    shipmentType: text("shipment_type", { enum: ACE_SHIPMENT_TYPES }),
+    cargoType: text("cargo_type", { enum: ACI_CARGO_TYPES }),
+    controlReference: text("control_reference").notNull(),
+    /** Denormalised `carrier_code || control_reference`, kept by the
+     * shipments_control_number() trigger — never written by application code. */
+    controlNumber: text("control_number").notNull().default(""),
+    isPars: boolean("is_pars").notNull().default(false),
+    entryNumber: text("entry_number"),
+    entryPortId: uuid("entry_port_id").references(() => ports.id),
+    inBondEntryType: text("in_bond_entry_type", { enum: ["IT", "TE", "IE"] }),
+    inBondDestinationPortId: uuid("in_bond_destination_port_id").references(() => ports.id),
+    inBondNumber: text("in_bond_number"),
+    shipperId: uuid("shipper_id").references(() => partners.id, { onDelete: "restrict" }),
+    consigneeId: uuid("consignee_id").references(() => partners.id, { onDelete: "restrict" }),
+    destinationPortId: uuid("destination_port_id").references(() => ports.id),
+    sublocationPortId: uuid("sublocation_port_id").references(() => ports.id),
+    loadingCountry: text("loading_country"),
+    loadingProvince: text("loading_province"),
+    loadingCity: text("loading_city"),
+    deliveryAddress: jsonb("delivery_address")
+      .$type<{
+        line1?: string;
+        line2?: string;
+        city?: string;
+        region?: string;
+        postalCode?: string;
+        country?: string;
+      }>()
+      .notNull()
+      .default({}),
+    consigneeBusinessNumber: text("consignee_business_number"),
+    status: text("status", { enum: SHIPMENT_STATUSES }).notNull().default("draft"),
+    entryOnFileAt: timestamp("entry_on_file_at", { withTimezone: true }),
+    releasedAt: timestamp("released_at", { withTimezone: true }),
+    arrivedAt: timestamp("arrived_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    /** 0028 — the CSV batch that created the row. */
+    importBatchId: uuid("import_batch_id").references((): AnyPgColumn => importBatches.id, {
+      onDelete: "set null",
+    }),
+    sourceDocumentId: uuid("source_document_id").references((): AnyPgColumn => sourceDocuments.id, {
+      onDelete: "set null",
+    }),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("shipments_organization_id_idx").on(t.organizationId),
+    index("shipments_org_status_idx").on(t.organizationId, t.status),
+    index("shipments_movement_idx")
+      .on(t.movementId)
+      .where(sql`${t.movementId} is not null`),
+    index("shipments_control_search_idx").using(
+      "gin",
+      sql`to_tsvector('simple', ${t.controlNumber})`,
+    ),
+    unique("shipments_organization_id_control_number_key").on(t.organizationId, t.controlNumber),
+    // 0028
+    index("shipments_import_batch_idx")
+      .on(t.importBatchId)
+      .where(sql`${t.importBatchId} is not null`),
+  ],
+);
+
+/** 0019 — `cargo`, renamed and re-parented onto the shipment. */
+export const commodities = pgTable(
+  "commodities",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    shipmentId: uuid("shipment_id")
+      .notNull()
+      .references(() => shipments.id, { onDelete: "cascade" }),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     lineNumber: integer("line_number").notNull().default(1),
-    shipperId: uuid("shipper_id").references(() => partners.id, { onDelete: "restrict" }),
-    consigneeId: uuid("consignee_id").references(() => partners.id, { onDelete: "restrict" }),
     commodityDescription: text("commodity_description").notNull(),
     hsCode: text("hs_code"),
+    /** Canonical weight; `weightUnit` records what the user typed. */
     weightKg: numeric("weight_kg", { precision: 12, scale: 2, mode: "number" }),
-    pieceCount: integer("piece_count"),
+    weightUnit: text("weight_unit", { enum: ["KG", "LB"] })
+      .notNull()
+      .default("KG"),
+    quantity: integer("quantity"),
+    quantityUnit: text("quantity_unit"),
     packagingType: text("packaging_type"),
-    entryNumber: text("entry_number"),
-    inBondNumber: text("in_bond_number"),
+    marksAndNumbers: text("marks_and_numbers"),
+    isConsolidated: boolean("is_consolidated").notNull().default(false),
     valueAmount: numeric("value_amount", { precision: 14, scale: 2, mode: "number" }),
     valueCurrency: text("value_currency", { enum: ["USD", "CAD"] }),
     countryOfOrigin: text("country_of_origin"),
@@ -224,16 +423,80 @@ export const cargo = pgTable(
       scale: 3,
       mode: "number",
     }),
+    /** 0028 — the CSV batch that created the line. */
+    importBatchId: uuid("import_batch_id").references((): AnyPgColumn => importBatches.id, {
+      onDelete: "set null",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    index("cargo_movement_idx").on(t.movementId, t.lineNumber),
-    index("cargo_organization_id_idx").on(t.organizationId),
-    index("cargo_commodity_search_idx").using(
+    index("commodities_shipment_idx").on(t.shipmentId, t.lineNumber),
+    index("commodities_organization_id_idx").on(t.organizationId),
+    index("commodities_commodity_search_idx").using(
       "gin",
       sql`to_tsvector('simple', ${t.commodityDescription})`,
     ),
+    // 0028
+    index("commodities_import_batch_idx")
+      .on(t.importBatchId)
+      .where(sql`${t.importBatchId} is not null`),
+  ],
+);
+
+/** 0028 — one CSV upload of shipments or commodity lines, with its row report. */
+export const importBatches = pgTable(
+  "import_batches",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["shipments", "commodities"] }).notNull(),
+    filename: text("filename").notNull(),
+    rowCount: integer("row_count").notNull().default(0),
+    okCount: integer("ok_count").notNull().default(0),
+    errorCount: integer("error_count").notNull().default(0),
+    status: text("status", { enum: ["validated", "committed", "deleted"] })
+      .notNull()
+      .default("validated"),
+    report: jsonb("report").$type<Record<string, unknown>>().notNull().default({}),
+    createdBy: uuid("created_by").references(() => authUsers.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    committedAt: timestamp("committed_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("import_batches_organization_id_idx").on(t.organizationId),
+    index("import_batches_org_created_idx").on(t.organizationId, t.createdAt.desc()),
+  ],
+);
+
+/** Up to three dangerous-goods declarations per commodity line. */
+export const commodityHazmat = pgTable(
+  "commodity_hazmat",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    commodityId: uuid("commodity_id")
+      .notNull()
+      .references(() => commodities.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    unCode: text("un_code").notNull(),
+    description: text("description"),
+    emergencyContact: text("emergency_contact"),
+    emergencyPhone: text("emergency_phone"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("commodity_hazmat_organization_id_idx").on(t.organizationId),
+    unique("commodity_hazmat_commodity_id_position_key").on(t.commodityId, t.position),
   ],
 );
 
@@ -249,7 +512,10 @@ export const seals = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    trailerId: uuid("trailer_id").references(() => trailers.id, { onDelete: "set null" }),
+    /** 0021 — the trailer slot the seal is on; null = a seal on the truck. */
+    movementTrailerId: uuid("movement_trailer_id").references(() => movementTrailers.id, {
+      onDelete: "cascade",
+    }),
     sealNumber: text("seal_number").notNull(),
     sealType: text("seal_type"),
     appliedBy: text("applied_by"),
@@ -261,5 +527,42 @@ export const seals = pgTable(
     uniqueIndex("seals_movement_number_unique").on(t.movementId, t.sealNumber),
     // 0011
     index("seals_organization_id_idx").on(t.organizationId),
+    // 0021
+    index("seals_movement_trailer_idx")
+      .on(t.movementTrailerId)
+      .where(sql`${t.movementTrailerId} is not null`),
+  ],
+);
+
+/**
+ * 0027 — CBSA Release Notification System messages for PARS shipments, one
+ * per message; the PARS RNS screen reads them by PARS number and release code.
+ */
+export const parsRnsEvents = pgTable(
+  "pars_rns_events",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    shipmentId: uuid("shipment_id").references((): AnyPgColumn => shipments.id, {
+      onDelete: "set null",
+    }),
+    parsNumber: text("pars_number").notNull(),
+    releaseCode: text("release_code"),
+    releasedAt: timestamp("released_at", { withTimezone: true }),
+    officeCode: text("office_code"),
+    sublocationCode: text("sublocation_code"),
+    transactionNumber: text("transaction_number"),
+    containerNumber: text("container_number"),
+    raw: jsonb("raw").$type<Record<string, unknown>>(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("pars_rns_events_organization_id_idx").on(t.organizationId),
+    index("pars_rns_events_org_received_idx").on(t.organizationId, t.receivedAt.desc()),
+    index("pars_rns_events_pars_idx").on(t.parsNumber),
   ],
 );

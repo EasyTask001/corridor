@@ -7,29 +7,41 @@ import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, eq, schema, type RlsTransaction } from "@corridor/db";
-import { hasBlockingIssues } from "@corridor/domain";
+import { and, desc, eq, schema, withServiceRole, type DatabaseClient, type RlsTransaction } from "@corridor/db";
+import { canTransition, hasBlockingIssues, type MovementStatus } from "@corridor/domain";
 import {
   CustomsTransportError,
   buildManifest,
   createCustomsClient,
   hasCustomsCredentials,
   providerForRegime,
+  type CustomsClient,
   type CustomsClientSettings,
   type CustomsCredentials,
+  type CustomsStatusMessage,
+  type InboundCustomsMessage,
   type ManifestPayload,
 } from "@corridor/integrations";
 import { enqueueJob } from "./jobs";
 import {
+  applyCustomsDecision,
   applyTransition,
   loadFull,
   loadOrganization,
+  markShipmentsSent,
+  requireMovement,
   validationFor,
   type Actor,
   type FullMovement,
 } from "./movements";
 
-const { integrationConfigs, integrationEvents } = schema;
+const { integrationConfigs, integrationEvents, customsSubmissions } = schema;
+
+type MovementRow = typeof schema.movements.$inferSelect;
+
+/** How long transmit keeps polling a gateway for a decision before giving up. */
+export const POLL_WINDOW_MS = 48 * 60 * 60 * 1000;
+export const POLL_INTERVAL_MS = 2 * 60 * 1000;
 
 /** Shape of the JSON document held in the Vault secret for a customs provider. */
 const customsCredentialsSchema = z
@@ -122,16 +134,89 @@ export async function customsClientFor(tx: RlsTransaction, orgId: string, regime
   }
   const settings = (cfg?.settings ?? {}) as CustomsClientSettings;
   const environment = cfg?.environment ?? "sandbox";
-  // Sandbox always runs against the mock gateway, so it never needs (and never
-  // decrypts) the org's real credentials.
+  const mode = cfg?.mode ?? "mock";
+  // The mock gateway in sandbox never needs (and never decrypts) the org's
+  // real credentials; a gateway needs its API key whatever the environment.
   const credentials =
-    environment === "production" && cfg?.credentialsRef
+    (mode === "gateway" || environment === "production") && cfg?.credentialsRef
       ? await credentialsFor(orgId, provider)
       : undefined;
   return {
-    client: createCustomsClient({ regime, environment, settings, credentials }),
+    client: createCustomsClient({
+      regime,
+      mode,
+      environment,
+      settings,
+      credentials,
+      baseUrl: cfg?.baseUrl ?? process.env.CUSTOMS_GATEWAY_BASE_URL ?? null,
+      apiKey: credentials?.apiKey ?? process.env.CUSTOMS_GATEWAY_API_KEY ?? null,
+      webhookSecret: process.env.CUSTOMS_GATEWAY_WEBHOOK_SECRET ?? null,
+    }),
     config: cfg ?? null,
   };
+}
+
+/** Audit of one outbound filing (customs_submissions, 0023). */
+export async function recordSubmission(
+  tx: RlsTransaction,
+  s: {
+    orgId: string;
+    movementId: string | null;
+    kind: "original" | "amendment" | "cancel" | "in_bond";
+    client: Pick<CustomsClient, "provider" | "mode">;
+    referenceNumber: string | null;
+    correlationId: string | null;
+    status: "sent" | "acknowledged" | "failed";
+    request?: Record<string, unknown> | null;
+    response?: Record<string, unknown> | null;
+  },
+) {
+  const [row] = await tx
+    .insert(customsSubmissions)
+    .values({
+      organizationId: s.orgId,
+      movementId: s.movementId,
+      kind: s.kind,
+      provider: s.client.provider,
+      mode: s.client.mode,
+      referenceNumber: s.referenceNumber,
+      correlationId: s.correlationId,
+      status: s.status,
+      request: s.request ?? null,
+      response: s.response ?? null,
+    })
+    .returning({ id: customsSubmissions.id });
+  return row!;
+}
+
+/**
+ * After an acknowledgement: the mock decides on its own clock
+ * (`customs.decide`); a gateway is polled until it answers or the webhook
+ * beats the poll to it (`customs.poll_status`).
+ */
+async function scheduleDecision(
+  tx: RlsTransaction,
+  orgId: string,
+  client: Pick<CustomsClient, "mode">,
+  payload: { movementId: string; referenceNumber: string; correlationId: string | null },
+  etaMs: number,
+) {
+  if (client.mode === "gateway") {
+    await enqueueJob(tx, {
+      orgId,
+      jobType: "customs.poll_status",
+      payload: { ...payload, startedAt: new Date().toISOString() },
+      runAt: new Date(Date.now() + etaMs),
+      maxAttempts: 5,
+    });
+  } else {
+    await enqueueJob(tx, {
+      orgId,
+      jobType: "customs.decide",
+      payload,
+      runAt: new Date(Date.now() + etaMs),
+    });
+  }
 }
 
 export function manifestFor(
@@ -141,22 +226,63 @@ export function manifestFor(
   return buildManifest({
     organization: {
       name: org.name,
-      scacCode: org.scacCode,
-      canadianCarrierCode: org.canadianCarrierCode,
       usDotNumber: org.usDotNumber,
+      filerCode: org.filerCode,
     },
     movement: {
       regime: full.regime,
       movementNumber: full.movementNumber,
       tripNumber: full.tripNumber,
-      crossingPoint: full.crossingPoint ?? null,
+      carrierCode: full.carrierCode,
+      port: full.port ? { code: full.port.code, name: full.port.name } : null,
       scheduledCrossingAt: full.scheduledCrossingAt,
+      isEmpty: full.isEmpty,
+      iitIndicator: full.iitIndicator,
+      aciLvs: full.aciLvs,
+      aciPostal: full.aciPostal,
+      aciFlyingTruck: full.aciFlyingTruck,
+      aciInTransit: full.aciInTransit,
+      aciIit: full.aciIit,
     },
-    driver: full.driver,
-    truck: full.truck,
-    trailer: full.trailer,
-    seals: full.seals,
-    cargo: full.cargo,
+    crew: full.crew,
+    truck: full.truck
+      ? {
+          unitNumber: full.truck.unitNumber,
+          vin: full.truck.vin,
+          plateNumber: full.truck.plateNumber,
+          plateJurisdiction: full.truck.plateJurisdiction,
+          dotNumber: full.truck.dotNumber,
+          insurancePolicyNumber: full.truck.insurancePolicyNumber,
+          insuranceCompany: full.truck.insuranceCompany,
+          insuranceAmount: full.truck.insuranceAmount,
+          insuranceYear: full.truck.insuranceYear,
+          plates: full.truck.plates,
+          seals: full.seals.filter((s) => !s.movementTrailerId).map((s) => s.sealNumber),
+        }
+      : null,
+    trailers: full.trailers.map((t) => ({
+      unitNumber: t.unitNumber,
+      trailerType: t.trailerType,
+      plateNumber: t.plateNumber,
+      plateJurisdiction: t.plateJurisdiction,
+      plates: t.plates,
+      seals: t.seals.map((s) => s.sealNumber),
+    })),
+    shipments: full.shipments.map((s) => ({
+      controlNumber: s.controlNumber,
+      shipmentType: s.shipmentType,
+      cargoType: s.cargoType,
+      entryNumber: s.entryNumber,
+      entryPortCode: s.entryPortCode,
+      inBondEntryType: s.inBondEntryType,
+      inBondDestinationPortCode: s.inBondDestinationPortCode,
+      inBondNumber: s.inBondNumber,
+      shipperName: s.shipperName,
+      shipperAddress: s.shipperAddress,
+      consigneeName: s.consigneeName,
+      consigneeAddress: s.consigneeAddress,
+      commodities: s.commodities,
+    })),
   });
 }
 
@@ -238,6 +364,17 @@ export async function transmitMovement(tx: RlsTransaction, actor: Actor, movemen
       durationMs: Date.now() - started,
       correlationId,
     });
+    await recordSubmission(tx, {
+      orgId: actor.orgId,
+      movementId,
+      kind: "original",
+      client,
+      referenceNumber: ack.referenceNumber,
+      correlationId,
+      status: "acknowledged",
+      request: manifest as unknown as Record<string, unknown>,
+      response: ack.raw,
+    });
     const updated = await applyTransition(
       tx,
       actor,
@@ -249,16 +386,21 @@ export async function transmitMovement(tx: RlsTransaction, actor: Actor, movemen
         regime: full.regime,
         provider: client.provider,
         environment: client.environment,
+        mode: client.mode,
         referenceNumber: ack.referenceNumber,
         warnings: issues.map((i) => i.code),
       },
     );
-    await enqueueJob(tx, {
-      orgId: actor.orgId,
-      jobType: "customs.decide",
-      payload: { movementId, referenceNumber: ack.referenceNumber, correlationId },
-      runAt: new Date(Date.now() + ack.decisionEtaMs),
-    });
+    // The movement itself is now `sent`; put its shipments in the one state
+    // from which a customs decision can actually cascade to them.
+    await markShipmentsSent(tx, movementId);
+    await scheduleDecision(
+      tx,
+      actor.orgId,
+      client,
+      { movementId, referenceNumber: ack.referenceNumber, correlationId },
+      ack.decisionEtaMs,
+    );
     return {
       movement: updated,
       referenceNumber: ack.referenceNumber,
@@ -281,6 +423,17 @@ export async function transmitMovement(tx: RlsTransaction, actor: Actor, movemen
         durationMs: Date.now() - started,
         correlationId,
       });
+      await recordSubmission(tx, {
+        orgId: actor.orgId,
+        movementId,
+        kind: "original",
+        client,
+        referenceNumber: null,
+        correlationId,
+        status: "failed",
+        request: manifest as unknown as Record<string, unknown>,
+        response: { error: err.message, statusCode: err.statusCode },
+      });
       return {
         movement: full,
         transportError: {
@@ -292,4 +445,290 @@ export async function transmitMovement(tx: RlsTransaction, actor: Actor, movemen
     }
     throw err;
   }
+}
+
+/**
+ * Re-file an accepted manifest after the router recorded the amendment and
+ * moved the movement back to `sent`. A transport failure throws, which rolls
+ * the whole amendment back: the manifest stays `accepted` as filed.
+ */
+export async function transmitAmendment(
+  tx: RlsTransaction,
+  actor: Actor,
+  movementId: string,
+  amendmentNumber: number,
+) {
+  const full = await loadFull(tx, actor.orgId, movementId);
+  const ref = full.customsReferenceNumber;
+  if (!ref) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Manifest has no customs reference" });
+  }
+  const org = await loadOrganization(tx, actor.orgId);
+  const { client } = await customsClientFor(tx, actor.orgId, full.regime);
+  const manifest = manifestFor(org, full);
+  const correlationId = randomUUID();
+  const started = Date.now();
+  try {
+    const ack = await client.amend(manifest, ref, { correlationId });
+    await logIntegrationEvent(tx, {
+      orgId: actor.orgId,
+      movementId,
+      provider: client.provider,
+      direction: "outbound",
+      operation: "amend",
+      request: { amendmentNumber, referenceNumber: ref },
+      response: { referenceNumber: ack.referenceNumber, receivedAt: ack.receivedAt, ...ack.raw },
+      statusCode: 200,
+      success: true,
+      durationMs: Date.now() - started,
+      correlationId,
+    });
+    await recordSubmission(tx, {
+      orgId: actor.orgId,
+      movementId,
+      kind: "amendment",
+      client,
+      referenceNumber: ack.referenceNumber,
+      correlationId,
+      status: "acknowledged",
+      request: { amendmentNumber, manifest },
+      response: ack.raw,
+    });
+    await scheduleDecision(
+      tx,
+      actor.orgId,
+      client,
+      { movementId, referenceNumber: ack.referenceNumber, correlationId },
+      ack.decisionEtaMs,
+    );
+    return ack;
+  } catch (err) {
+    if (err instanceof CustomsTransportError) {
+      throw new TRPCError({
+        code: "BAD_GATEWAY",
+        message: err.retryable
+          ? `${err.message}. The amendment was not transmitted — try again shortly.`
+          : `${err.message}. Check the integration settings.`,
+      });
+    }
+    throw err;
+  }
+}
+
+/**
+ * Tell the gateway a filed manifest is withdrawn. Only meaningful once a
+ * reference exists (sent / accepted / held); a draft needs no call.
+ */
+export async function cancelAtCustoms(
+  tx: RlsTransaction,
+  actor: Actor,
+  m: MovementRow,
+  reason: string | null,
+) {
+  if (!m.customsReferenceNumber || !["sent", "accepted", "held"].includes(m.status)) return null;
+  const { client } = await customsClientFor(tx, actor.orgId, m.regime);
+  const correlationId = randomUUID();
+  const started = Date.now();
+  try {
+    const ack = await client.cancel(m.customsReferenceNumber, reason);
+    await logIntegrationEvent(tx, {
+      orgId: actor.orgId,
+      movementId: m.id,
+      provider: client.provider,
+      direction: "outbound",
+      operation: "cancel",
+      request: { referenceNumber: m.customsReferenceNumber, reason },
+      response: ack.raw,
+      statusCode: 200,
+      success: true,
+      durationMs: Date.now() - started,
+      correlationId,
+    });
+    await recordSubmission(tx, {
+      orgId: actor.orgId,
+      movementId: m.id,
+      kind: "cancel",
+      client,
+      referenceNumber: m.customsReferenceNumber,
+      correlationId,
+      status: "acknowledged",
+      request: { reason },
+      response: ack.raw,
+    });
+    return ack;
+  } catch (err) {
+    if (err instanceof CustomsTransportError) {
+      throw new TRPCError({
+        code: "BAD_GATEWAY",
+        message: `${err.message}. The cancellation was not transmitted.`,
+      });
+    }
+    throw err;
+  }
+}
+
+/** The movement statuses a gateway status document walks through, from `from`. */
+function stepsTowards(from: MovementStatus, target: MovementStatus): MovementStatus[] {
+  if (from === target) return [];
+  if (canTransition(from, target)) return [target];
+  // sent → released / held go through accepted first.
+  if (from === "sent" && canTransition("accepted", target)) return ["accepted", target];
+  return [];
+}
+
+/**
+ * Apply a gateway status document (from a poll or the webhook) to a movement:
+ * transition as far as the document says, writing the customs events and
+ * shipment outcomes on the final step, and stamp the filing's status.
+ */
+export async function applyStatusMessage(
+  tx: RlsTransaction,
+  actor: Actor,
+  m: MovementRow,
+  status: CustomsStatusMessage,
+): Promise<{ changed: boolean; status: MovementStatus; terminal: boolean }> {
+  let current = m;
+  let changed = false;
+
+  if (status.status === "cancelled") {
+    if (current.status !== "cancelled" && canTransition(current.status, "cancelled")) {
+      current = await applyTransition(tx, actor, current, "cancelled", "customs_api", {}, {
+        referenceNumber: status.referenceNumber,
+        message: status.message,
+      });
+      changed = true;
+    }
+  } else if (status.decision) {
+    const steps = stepsTowards(current.status, status.decision);
+    for (const [i, step] of steps.entries()) {
+      const last = i === steps.length - 1;
+      if (step === "accepted" || step === "rejected" || step === "released" || step === "held") {
+        current = await applyCustomsDecision(tx, actor, current, {
+          decision: step,
+          referenceNumber: status.referenceNumber,
+          message: last ? status.message : null,
+          raw: last ? status.raw : undefined,
+          events: last ? status.events : [],
+          shipments: last ? status.shipments : [],
+        });
+        changed = true;
+      }
+    }
+  }
+
+  if (changed || status.status !== "pending") {
+    await tx
+      .update(customsSubmissions)
+      .set({ status: status.status === "pending" ? "acknowledged" : status.status })
+      .where(
+        and(
+          eq(customsSubmissions.organizationId, actor.orgId),
+          eq(customsSubmissions.referenceNumber, status.referenceNumber),
+        ),
+      );
+  }
+
+  const terminal = ["released", "rejected", "arrived", "cancelled"].includes(current.status);
+  return { changed, status: current.status, terminal };
+}
+
+/**
+ * One poll of a gateway-mode filing (`customs.poll_status` job). Returns
+ * whether the job should re-enqueue itself.
+ */
+export async function pollCustomsStatus(
+  tx: RlsTransaction,
+  orgId: string,
+  payload: { movementId: string; referenceNumber?: string | null; startedAt?: string | null; correlationId?: string | null },
+): Promise<{ status: string; changed: boolean; again: boolean; reason?: string }> {
+  const m = await requireMovement(tx, orgId, payload.movementId);
+  if (m.status !== "sent" && m.status !== "accepted" && m.status !== "held") {
+    return { status: m.status, changed: false, again: false, reason: `movement is ${m.status}` };
+  }
+  const ref = payload.referenceNumber ?? m.customsReferenceNumber;
+  if (!ref) return { status: m.status, changed: false, again: false, reason: "no reference number" };
+  const { client, config } = await customsClientFor(tx, orgId, m.regime);
+  const started = Date.now();
+  const status = await client.fetchStatus(ref);
+  await logIntegrationEvent(tx, {
+    orgId,
+    movementId: m.id,
+    provider: client.provider,
+    direction: "inbound",
+    operation: "poll",
+    request: { referenceNumber: ref, currentStatus: m.status },
+    response: { status: status.status, message: status.message, events: status.events.length },
+    statusCode: 200,
+    success: true,
+    durationMs: Date.now() - started,
+    correlationId: payload.correlationId ?? null,
+  });
+  if (config) {
+    await tx
+      .update(integrationConfigs)
+      .set({ lastPolledAt: new Date() })
+      .where(eq(integrationConfigs.id, config.id));
+  }
+  const result = await applyStatusMessage(tx, { orgId, userId: null }, m, status);
+  const startedAt = payload.startedAt ? new Date(payload.startedAt).getTime() : Date.now();
+  const withinWindow = Date.now() - startedAt < POLL_WINDOW_MS;
+  return {
+    status: result.status,
+    changed: result.changed,
+    again: !result.terminal && withinWindow,
+    reason: result.terminal ? "terminal" : withinWindow ? undefined : "poll window elapsed",
+  };
+}
+
+/**
+ * Webhook entry point: resolve the gateway's reference to a movement through
+ * customs_submissions, apply once per event id, log the delivery. There is
+ * no session behind a webhook, so this runs under the service role and
+ * scopes everything by the submission's organization.
+ */
+export async function applyInboundCustomsMessage(
+  db: DatabaseClient,
+  message: InboundCustomsMessage,
+): Promise<
+  | { applied: boolean; status?: MovementStatus; duplicate?: boolean }
+  | { applied: false; reason: "unknown reference" }
+> {
+  return withServiceRole(db, async (tx) => {
+    const [sub] = await tx
+      .select({ orgId: customsSubmissions.organizationId, movementId: customsSubmissions.movementId, provider: customsSubmissions.provider })
+      .from(customsSubmissions)
+      .where(eq(customsSubmissions.referenceNumber, message.referenceNumber))
+      .orderBy(desc(customsSubmissions.createdAt))
+      .limit(1);
+    if (!sub?.movementId) return { applied: false as const, reason: "unknown reference" as const };
+
+    const correlationId = `webhook:${message.eventId}`;
+    const [seen] = await tx
+      .select({ id: integrationEvents.id })
+      .from(integrationEvents)
+      .where(
+        and(
+          eq(integrationEvents.organizationId, sub.orgId),
+          eq(integrationEvents.correlationId, correlationId),
+        ),
+      )
+      .limit(1);
+    if (seen) return { applied: false, duplicate: true };
+
+    const m = await requireMovement(tx, sub.orgId, sub.movementId);
+    await logIntegrationEvent(tx, {
+      orgId: sub.orgId,
+      movementId: m.id,
+      provider: sub.provider,
+      direction: "inbound",
+      operation: "webhook",
+      request: { eventId: message.eventId, referenceNumber: message.referenceNumber },
+      response: { status: message.status, message: message.message, events: message.events.length },
+      statusCode: 200,
+      success: true,
+      correlationId,
+    });
+    const result = await applyStatusMessage(tx, { orgId: sub.orgId, userId: null }, m, message);
+    return { applied: result.changed, status: result.status };
+  });
 }

@@ -8,6 +8,10 @@
     {
       "path": "/api/jobs/process",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/jobs/notices-sync",
+      "schedule": "0 * * * *"
     }
   ]
 }

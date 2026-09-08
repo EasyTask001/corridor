@@ -8,9 +8,12 @@ const nextConfig: NextConfig = {
     "@corridor/db",
     "@corridor/domain",
     "@corridor/integrations",
+    "@corridor/pdf",
     "@corridor/ui",
   ],
-  serverExternalPackages: ["postgres"],
+  // react-pdf ships its own React reconciler; bundling it into the server
+  // build breaks font/asset resolution, so it stays an external package.
+  serverExternalPackages: ["postgres", "@react-pdf/renderer"],
   headers: async () => [
     {
       source: "/(.*)",

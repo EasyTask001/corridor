@@ -8,20 +8,26 @@ import {
   ArrowLeftRight,
   BarChart3,
   Bell,
+  BookOpen,
   Building2,
+  CircleUser,
   CreditCard,
+  FileCheck2,
   FileText,
   Handshake,
+  HelpCircle,
   LayoutDashboard,
   Package,
   Plug,
   ScrollText,
   Settings as SettingsIcon,
   ShieldCheck,
+  Ship,
   Sparkles,
   Truck,
   UserRound,
   Users,
+  Warehouse,
   type LucideIcon,
 } from "lucide-react";
 import type { PermissionKey } from "@corridor/domain";
@@ -39,6 +45,9 @@ interface NavItem {
 const NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/movements", label: "Movements", icon: ArrowLeftRight, permission: "movement.read" },
+  { href: "/shipments", label: "Shipments", icon: Ship, permission: "shipment.read" },
+  { href: "/in-bond", label: "In-bond", icon: Warehouse, permission: "inbond.read" },
+  { href: "/pars-rns", label: "PARS RNS", icon: FileCheck2, permission: "shipment.read" },
   { href: "/documents", label: "Documents", icon: FileText, permission: "document.read" },
 ];
 
@@ -53,6 +62,8 @@ const REST: NavItem[] = [
   { href: "/alerts", label: "Alerts", icon: AlertTriangle, permission: "alert.read" },
   { href: "/reports", label: "Reports", icon: BarChart3, permission: "report.read" },
   { href: "/copilot", label: "Copilot", icon: Sparkles, permission: "copilot.use" },
+  { href: "/resources", label: "Resources", icon: BookOpen },
+  { href: "/help", label: "Help", icon: HelpCircle },
 ];
 
 const SETTINGS: NavItem[] = [
@@ -63,6 +74,7 @@ const SETTINGS: NavItem[] = [
   { href: "/settings/billing", label: "Billing", icon: CreditCard, permission: "billing.read" },
   { href: "/settings/integrations", label: "Integrations", icon: Plug, permission: "integrations.manage" },
   { href: "/settings/notifications", label: "Notifications", icon: Bell },
+  { href: "/settings/profile", label: "My profile", icon: CircleUser },
 ];
 
 function isActive(pathname: string, href: string) {

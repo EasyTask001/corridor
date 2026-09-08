@@ -7,40 +7,115 @@ import { CustomsTransportError, hasCustomsCredentials } from "./types";
 const src: ManifestSource = {
   organization: {
     name: "Pathfinder",
-    scacCode: "PFTR",
-    canadianCarrierCode: "PFT1",
+    filerCode: "F01",
     usDotNumber: "1234567",
   },
   movement: {
     regime: "ACE",
     movementNumber: "ACE-26-00001",
     tripNumber: "TRIP-1",
-    crossingPoint: { code: "3801", name: "Detroit" },
+    carrierCode: "PFTR",
+    port: { code: "3801", name: "Detroit" },
     scheduledCrossingAt: "2026-09-08T14:00:00.000Z",
+    isEmpty: false,
+    iitIndicator: "none",
+    aciLvs: false,
+    aciPostal: false,
+    aciFlyingTruck: false,
+    aciInTransit: false,
+    aciIit: false,
   },
-  driver: {
-    firstName: "G",
-    lastName: "S",
-    licenseNumber: "L1",
-    licenseJurisdiction: "ON",
-    citizenship: "CA",
-    fastCardNumber: null,
-  },
-  truck: { unitNumber: "T-101", vin: null, plateNumber: "AB1", plateJurisdiction: "ON" },
-  trailer: { unitNumber: "TR-501", plateNumber: "TRL1", plateJurisdiction: "ON" },
-  seals: [{ sealNumber: "S1" }, { sealNumber: "S2" }],
-  cargo: [
+  crew: [
     {
-      lineNumber: 1,
+      role: "person_in_charge",
+      firstName: "G",
+      lastName: "S",
+      gender: "M",
+      licenseNumber: "L1",
+      licenseJurisdiction: "ON",
+      citizenship: "CA",
+      hazmatEndorsement: true,
+      documents: [
+        {
+          documentType: "passport",
+          documentNumber: "P123",
+          issuingCountry: "CA",
+          issuingState: null,
+          expiresOn: "2030-01-01",
+        },
+      ],
+    },
+    {
+      role: "passenger",
+      firstName: "A",
+      lastName: "R",
+      gender: "F",
+      licenseNumber: null,
+      licenseJurisdiction: null,
+      citizenship: "US",
+      hazmatEndorsement: false,
+      documents: [],
+    },
+  ],
+  truck: {
+    unitNumber: "T-101",
+    vin: null,
+    plateNumber: "AB1",
+    plateJurisdiction: "ON",
+    dotNumber: "1234567",
+    insurancePolicyNumber: "POL-1",
+    insuranceCompany: "Northbridge",
+    insuranceAmount: 2000000,
+    insuranceYear: 2026,
+    plates: [{ plateNumber: "AB1-MI", jurisdiction: "MI" }],
+    seals: ["S0"],
+  },
+  trailers: [
+    {
+      unitNumber: "TR-501",
+      trailerType: "TF",
+      plateNumber: "TRL1",
+      plateJurisdiction: "ON",
+      plates: [],
+      seals: ["S1", "S2"],
+    },
+    {
+      unitNumber: "TR-502",
+      trailerType: "RT",
+      plateNumber: "TRL2",
+      plateJurisdiction: "ON",
+      plates: [{ plateNumber: "TRL2-QC", jurisdiction: "QC" }],
+      seals: ["S3"],
+    },
+  ],
+  shipments: [
+    {
+      controlNumber: "PFTRPAPS0001",
+      shipmentType: "regular_bill",
+      cargoType: null,
+      entryNumber: "ENT-1",
+      entryPortCode: "3801",
+      inBondEntryType: null,
+      inBondDestinationPortCode: null,
+      inBondNumber: null,
       shipperName: "A",
+      shipperAddress: { line1: "1 Mill Rd", city: "Hamilton", region: "ON", country: "CA" },
       consigneeName: "B",
-      commodityDescription: "Steel",
-      hsCode: "7208.10",
-      weightKg: 100,
-      pieceCount: 2,
-      valueAmount: 10,
-      valueCurrency: "USD",
-      countryOfOrigin: "CA",
+      consigneeAddress: null,
+      commodities: [
+        {
+          commodityDescription: "Steel",
+          hsCode: "7208.10",
+          quantity: 2,
+          quantityUnit: "Coil",
+          weightKg: 100,
+          marksAndNumbers: null,
+          countryOfOrigin: "CA",
+          valueAmount: 10,
+          valueCurrency: "USD",
+          hazmat: [{ unCode: "UN1203", description: "Gasoline" }],
+        },
+      ],
     },
   ],
 };
@@ -53,15 +128,67 @@ describe("buildManifest", () => {
   it("maps movement → provider-neutral e-manifest", () => {
     const m = buildManifest(src);
     expect(m.trip.portOfEntry).toBe("3801");
+    expect(m.crew.map((c) => c.role)).toEqual(["person_in_charge", "passenger"]);
     expect(m.crew[0]?.licenseNumber).toBe("L1");
+    expect(m.crew[0]?.hazmatEndorsement).toBe(true);
+    expect(m.crew[0]?.documents).toEqual([
+      {
+        type: "passport",
+        number: "P123",
+        issuingCountry: "CA",
+        issuingState: null,
+        expiresOn: "2030-01-01",
+      },
+    ]);
+    expect(m.crew[1]?.gender).toBe("F");
+    expect(m.trip.isEmpty).toBe(false);
+    expect(m.conveyance.dotNumber).toBe("1234567");
+    expect(m.conveyance.plates).toEqual([{ plate: "AB1-MI", jurisdiction: "MI" }]);
+    expect(m.conveyance.insurance).toEqual({
+      company: "Northbridge",
+      policyNumber: "POL-1",
+      amount: 2000000,
+      year: 2026,
+    });
+    expect(m.conveyance.seals).toEqual(["S0"]);
+    expect(m.equipment.map((e) => e.unitNumber)).toEqual(["TR-501", "TR-502"]);
+    expect(m.equipment[0]?.type).toBe("TF");
     expect(m.equipment[0]?.seals).toEqual(["S1", "S2"]);
-    expect(m.shipments[0]?.value).toEqual({ amount: 10, currency: "USD" });
+    expect(m.equipment[1]?.seals).toEqual(["S3"]);
+    expect(m.equipment[1]?.plates).toEqual([{ plate: "TRL2-QC", jurisdiction: "QC" }]);
+    expect(m.shipments[0]?.controlNumber).toBe("PFTRPAPS0001");
+    expect(m.shipments[0]?.shipper).toEqual({
+      name: "A",
+      address: "1 Mill Rd, Hamilton, ON, CA",
+    });
+    expect(m.shipments[0]?.consignee).toEqual({ name: "B", address: null });
+    expect(m.shipments[0]?.commodities[0]?.value).toEqual({ amount: 10, currency: "USD" });
+    expect(m.shipments[0]?.commodities[0]?.hazmat).toEqual([
+      { unCode: "UN1203", description: "Gasoline" },
+    ]);
   });
   it("refuses incomplete movements", () => {
-    expect(() => buildManifest({ ...src, driver: null })).toThrow(/driver/);
+    expect(() => buildManifest({ ...src, crew: [] })).toThrow(/person in charge/);
+    expect(() => buildManifest({ ...src, movement: { ...src.movement, port: null } })).toThrow(
+      /port/,
+    );
     expect(() =>
-      buildManifest({ ...src, movement: { ...src.movement, crossingPoint: null } }),
-    ).toThrow(/crossing/);
+      buildManifest({ ...src, movement: { ...src.movement, carrierCode: null } }),
+    ).toThrow(/carrier code/);
+    expect(() => buildManifest({ ...src, shipments: [] })).toThrow(/shipment/);
+    expect(() =>
+      buildManifest({ ...src, movement: { ...src.movement, isEmpty: true } }),
+    ).toThrow(/empty trip/);
+  });
+  it("files an empty trip with no shipments and no equipment", () => {
+    const m = buildManifest({
+      ...src,
+      movement: { ...src.movement, isEmpty: true },
+      shipments: [],
+      trailers: [],
+    });
+    expect(m.trip.isEmpty).toBe(true);
+    expect(m.equipment).toEqual([]);
   });
 });
 
@@ -110,6 +237,51 @@ describe("mock customs client", () => {
     await expect(lucky.transmit(withTrip("OK"))).resolves.toBeTruthy();
   });
 
+  it("emits the Avaal message sequence behind each decision", async () => {
+    const c = createMockCustomsClient({ provider: "cbp_ace", now: fixedNow });
+    const ok = withTrip("TRIP-OK");
+    const accepted = await c.fetchDecision("R", ok, { currentStatus: "sent" });
+    expect(accepted.events.map((e) => e.code)).toEqual([
+      "sending",
+      "preliminary_check_passed",
+      "accepted",
+    ]);
+    expect(accepted.events[2]?.label).toBe("Accepted");
+    expect(accepted.shipments).toEqual([{ controlNumber: "PFTRPAPS0001", status: "accepted" }]);
+
+    const released = await c.fetchDecision("R", ok, { currentStatus: "accepted" });
+    expect(released.events.map((e) => e.code)).toEqual([
+      "entry_on_file",
+      "arrival_recorded",
+      "released",
+    ]);
+    expect(released.events[0]).toMatchObject({
+      shipmentControlNumber: "PFTRPAPS0001",
+      entryPortCode: "3801",
+      entryNumber: expect.stringMatching(/^300\d{8}$/),
+    });
+    expect(released.shipments[0]).toMatchObject({
+      controlNumber: "PFTRPAPS0001",
+      status: "released",
+      entryNumber: released.events[0]?.entryNumber,
+    });
+    // Deterministic: the same control number always gets the same entry number.
+    const again = await c.fetchDecision("R", ok, { currentStatus: "accepted" });
+    expect(again.shipments[0]?.entryNumber).toBe(released.shipments[0]?.entryNumber);
+
+    const held = await c.fetchDecision("R", withTrip("TRIP-HOLD"), { currentStatus: "accepted" });
+    expect(held.events.map((e) => e.code)).toEqual(["entry_on_file", "held"]);
+    expect(held.shipments[0]?.status).toBe("held");
+    const rejected = await c.fetchDecision("R", withTrip("TRIP-REJECT"), {
+      currentStatus: "sent",
+    });
+    expect(rejected.events.map((e) => e.code)).toEqual(["sending", "rejected"]);
+
+    const aci = createMockCustomsClient({ provider: "cbsa_aci", now: fixedNow });
+    const rns = await aci.fetchDecision("R", { ...ok, regime: "ACI" }, { currentStatus: "accepted" });
+    expect(rns.events.map((e) => e.code)).toEqual(["entered_and_released", "released"]);
+  });
+
   it("decisions follow the trip hooks through the lifecycle", async () => {
     const c = createMockCustomsClient({ provider: "cbp_ace" });
     const ok = withTrip("TRIP-OK");
@@ -123,6 +295,26 @@ describe("mock customs client", () => {
     expect((await c.fetchDecision("R", hold, { currentStatus: "sent" })).decision).toBe("accepted");
     expect((await c.fetchDecision("R", hold, { currentStatus: "accepted" })).decision).toBe("held");
     expect((await c.fetchDecision("R", hold, { currentStatus: "held" })).decision).toBe("released");
+  });
+});
+
+describe("mock in-bond", () => {
+  it("acknowledges and remembers the last message per bond", async () => {
+    const c = createMockCustomsClient({ provider: "cbp_ace", now: fixedNow });
+    const rec = {
+      bondNumber: "123456789",
+      entryType: "IT" as const,
+      arrivalPortCode: "3801",
+      exportPortCode: "0901",
+      firmsCode: "A123",
+      carrierCode: "PFTR",
+      controlNumber: null,
+    };
+    expect((await c.inBondStatus("123456789")).status).toBe("open");
+    expect((await c.inBondArrival(rec)).referenceNumber).toMatch(/^ARR-/);
+    expect((await c.inBondStatus("123456789")).status).toBe("arrived");
+    expect((await c.inBondCancel(rec, "oops")).raw.reason).toBe("oops");
+    expect((await c.inBondStatus("123456789")).status).toBe("cancelled");
   });
 });
 

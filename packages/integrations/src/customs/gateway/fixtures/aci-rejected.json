@@ -1,0 +1,10 @@
+{
+  "stages": [
+    {
+      "status": "rejected",
+      "message": "Manifest rejected: cargo control number already on file (fixture).",
+      "events": [{ "code": "sending" }, { "code": "rejected" }],
+      "shipmentStatus": "rejected"
+    }
+  ]
+}

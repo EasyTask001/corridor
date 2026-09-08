@@ -1,0 +1,8 @@
+# source: FIRMS (Facilities Information and Resources Management System)
+# codes identify a specific bonded facility, not a port — they are not part of
+# the published Schedule D list. These are illustrative starter rows for the
+# demo tenant's ports (Detroit, Buffalo); replace with your own facility's
+# FIRMS code before production use.
+regime,kind,code,name,state_province,country,parent_code
+ACE,firms,D101,AMBASSADOR BRIDGE FREIGHT TERMINAL,MI,US,3801
+ACE,firms,B201,PEACE BRIDGE FREIGHT TERMINAL,NY,US,0901

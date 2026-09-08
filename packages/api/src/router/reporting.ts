@@ -1,12 +1,20 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, desc, eq, gte, schema, sql, type RlsTransaction, type SQL } from "@corridor/db";
-import { reportQuery, type ReportQuery } from "@corridor/domain";
+import {
+  crossingReportInput,
+  reportExportInput,
+  reportQuery,
+  type ReportQuery,
+} from "@corridor/domain";
 import { translateReportQuestion, UnsupportedReportQuestionError } from "@corridor/ai";
 import { permissionProcedure, router } from "../trpc";
 import { writeAudit } from "../services/audit";
+import { crossingReport, dashboardData } from "../services/crossings";
+import { loadOrganization } from "../services/movements";
+import { exportTable } from "../services/reporting-export";
 
-const { movements, cargo } = schema;
+const { movements, shipments, commodities, ports } = schema;
 
 const reportInput = z.object({ question: z.string().trim().min(1).max(500) });
 
@@ -27,7 +35,7 @@ function dimensionSql(dimension: ReportQuery["dimension"]): { label: SQL<string>
     case "regime":
       return { label: sql<string>`${movements.regime}`, group: sql`${movements.regime}` };
     case "crossing": {
-      const expression = sql<string>`coalesce(${movements.crossingPoint} ->> 'name', ${movements.crossingPoint} ->> 'code', 'Unspecified')`;
+      const expression = sql<string>`coalesce(${ports.name}, 'Unspecified')`;
       return { label: expression, group: expression };
     }
     case "month": {
@@ -42,13 +50,13 @@ function dimensionSql(dimension: ReportQuery["dimension"]): { label: SQL<string>
 function metricSql(metric: ReportQuery["metric"]): SQL<number> {
   switch (metric) {
     case "cargo_weight_kg":
-      return sql<number>`coalesce(sum(${cargo.weightKg}), 0)::float8`;
+      return sql<number>`coalesce(sum(${commodities.weightKg}), 0)::float8`;
     case "average_cargo_weight_kg":
-      return sql<number>`coalesce(sum(${cargo.weightKg}) / nullif(count(distinct ${movements.id}), 0), 0)::float8`;
+      return sql<number>`coalesce(sum(${commodities.weightKg}) / nullif(count(distinct ${movements.id}), 0), 0)::float8`;
     case "piece_count":
-      return sql<number>`coalesce(sum(${cargo.pieceCount}), 0)::float8`;
+      return sql<number>`coalesce(sum(${commodities.quantity}), 0)::float8`;
     case "declared_value":
-      return sql<number>`coalesce(sum(${cargo.valueAmount}), 0)::float8`;
+      return sql<number>`coalesce(sum(${commodities.valueAmount}), 0)::float8`;
     case "rejection_rate":
       return sql<number>`coalesce(
         100.0 * count(distinct ${movements.id}) filter (
@@ -82,14 +90,16 @@ async function executeReport(tx: RlsTransaction, orgId: string, query: ReportQue
     query.regime ? eq(movements.regime, query.regime) : undefined,
     query.status ? eq(movements.status, query.status) : undefined,
     query.metric === "declared_value" && query.currency
-      ? eq(cargo.valueCurrency, query.currency)
+      ? eq(commodities.valueCurrency, query.currency)
       : undefined,
   ];
 
   return tx
     .select({ label: dimension.label, value })
     .from(movements)
-    .leftJoin(cargo, eq(cargo.movementId, movements.id))
+    .leftJoin(shipments, eq(shipments.movementId, movements.id))
+    .leftJoin(commodities, eq(commodities.shipmentId, shipments.id))
+    .leftJoin(ports, eq(ports.id, movements.portId))
     .where(and(...filters))
     .groupBy(dimension.group)
     .orderBy(query.dimension === "month" ? dimension.label : desc(value))
@@ -123,6 +133,72 @@ function summarize(
 }
 
 export const reportingRouter = router({
+  /** Crossing log: one row per movement in a date range, with whichever columns were picked. */
+  crossings: permissionProcedure("report.read", "movement.read")
+    .input(crossingReportInput)
+    .query(({ ctx, input }) =>
+      ctx.rls(async (tx) => {
+        const org = await loadOrganization(tx, ctx.orgId);
+        return crossingReport(tx, ctx.orgId, input, org.timezone ?? undefined);
+      }),
+    ),
+
+  /** CSV or PDF of the crossing report or of a question's result; stored as a generated document. */
+  export: permissionProcedure("report.read", "movement.read")
+    .input(reportExportInput)
+    .mutation(({ ctx, input }) =>
+      ctx.rls(async (tx) => {
+        const actor = { orgId: ctx.orgId, userId: ctx.session.user.id };
+        let doc;
+        if (input.source.kind === "crossings") {
+          const org = await loadOrganization(tx, ctx.orgId);
+          const q = { ...input.source.query, limit: 1000, offset: 0 };
+          const report = await crossingReport(tx, ctx.orgId, q, org.timezone ?? undefined);
+          doc = await exportTable(tx, actor, {
+            kind: "report",
+            scope: "crossings",
+            format: input.format,
+            data: {
+              title: "Crossing report",
+              subtitle: `${q.from} to ${q.to}${q.regime ? ` · ${q.regime}` : ""}`,
+              columns: report.columns,
+              rows: report.rows,
+            },
+            metadata: { report: "crossings", from: q.from, to: q.to, columns: q.columns },
+          });
+        } else {
+          const rows = await executeReport(tx, ctx.orgId, input.source.query);
+          const unit = unitFor(input.source.query);
+          doc = await exportTable(tx, actor, {
+            kind: "report",
+            scope: "question",
+            format: input.format,
+            data: {
+              title: input.source.title,
+              subtitle: input.source.query.range.replace(/_/g, " "),
+              columns: [
+                { key: "label", label: "Group", width: 60 },
+                { key: "value", label: unit, width: 40 },
+              ],
+              rows,
+            },
+            metadata: { report: "question", query: input.source.query },
+          });
+        }
+        await writeAudit(tx, ctx.orgId, "report.export", "generated_document", doc.id, null, {
+          format: input.format,
+          source: input.source.kind,
+          byteSize: doc.byteSize,
+        });
+        return { id: doc.id, signedUrl: doc.signedUrl, byteSize: doc.byteSize, format: input.format };
+      }),
+    ),
+
+  /** Dashboard tiles, the trailing-year series and the latest shipments. */
+  dashboard: permissionProcedure("movement.read").query(({ ctx }) =>
+    ctx.rls((tx) => dashboardData(tx, ctx.orgId)),
+  ),
+
   run: permissionProcedure("report.read", "movement.read")
     .input(reportInput)
     .mutation(({ ctx, input }) =>

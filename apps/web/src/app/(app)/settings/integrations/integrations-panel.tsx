@@ -93,6 +93,19 @@ export function IntegrationsPanel({
     trpc.integrations.configs.clearCredentials.mutationOptions({ onSuccess: invalidate }),
   );
   const [saved, setSaved] = useState<string | null>(null);
+  const [tested, setTested] = useState<Record<string, string>>({});
+  const testCustoms = useMutation(
+    trpc.integrations.testCustoms.mutationOptions({
+      onSuccess: (r, vars) =>
+        setTested((t) => ({
+          ...t,
+          [vars.provider]: r.ok
+            ? `Connected (${r.mode}${r.live ? ", live" : ", fixture replay"}, ${r.durationMs} ms)`
+            : `Failed: ${r.error ?? "no response"}`,
+        })),
+      onError: (e, vars) => setTested((t) => ({ ...t, [vars.provider]: `Failed: ${e.message}` })),
+    }),
+  );
 
   const cfgFor = (p: string) => configsQ.data.find((c) => c.provider === p);
 
@@ -122,6 +135,8 @@ export function IntegrationsPanel({
                     provider: p.key,
                     environment: (fd.get("environment") as "sandbox" | "production") ?? "sandbox",
                     status: fd.get("enabled") ? "active" : "disabled",
+                    mode: p.mock ? ((fd.get("mode") as "mock" | "gateway") ?? "mock") : "mock",
+                    baseUrl: p.mock ? String(fd.get("baseUrl") ?? "").trim() || null : null,
                     settings: p.mock
                       ? {
                           mockDelayMs: Number(fd.get("mockDelayMs") ?? 4000),
@@ -202,6 +217,33 @@ export function IntegrationsPanel({
                   </label>
                   {p.mock && (
                     <>
+                      <div>
+                        <label className="label" htmlFor={`${p.key}-mode`}>
+                          Filing mode
+                        </label>
+                        <select
+                          id={`${p.key}-mode`}
+                          name="mode"
+                          defaultValue={cfg?.mode ?? "mock"}
+                          className="input"
+                        >
+                          <option value="mock">Mock gateway (in-process)</option>
+                          <option value="gateway">EDI gateway (REST API)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="label" htmlFor={`${p.key}-base-url`}>
+                          Gateway base URL
+                        </label>
+                        <input
+                          id={`${p.key}-base-url`}
+                          name="baseUrl"
+                          type="url"
+                          placeholder="https://gateway.example.com/api (blank = fixtures)"
+                          defaultValue={cfg?.baseUrl ?? ""}
+                          className="input"
+                        />
+                      </div>
                       <div>
                         <label className="label" htmlFor={`${p.key}-delay`}>
                           Decision delay (ms)
@@ -301,11 +343,35 @@ export function IntegrationsPanel({
                       )}
                     </fieldset>
                   )}
-                  <div className="col-span-2 flex items-center gap-3">
+                  <div className="col-span-2 flex flex-wrap items-center gap-3">
                     <button className="btn-primary" disabled={upsert.isPending}>
                       Save
                     </button>
                     {saved === p.key && <span className="text-sm text-ok-500">Saved.</span>}
+                    {p.mock && (
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        disabled={testCustoms.isPending}
+                        onClick={() =>
+                          testCustoms.mutate({ provider: p.key as "cbp_ace" | "cbsa_aci" })
+                        }
+                      >
+                        Test connection
+                      </button>
+                    )}
+                    {tested[p.key] && (
+                      <span
+                        className={`text-sm ${tested[p.key]!.startsWith("Failed") ? "text-danger-500" : "text-ok-500"}`}
+                      >
+                        {tested[p.key]}
+                      </span>
+                    )}
+                    {cfg?.lastPolledAt && (
+                      <span className="text-xs text-ink-500">
+                        last polled {new Date(cfg.lastPolledAt).toLocaleString("en-CA")}
+                      </span>
+                    )}
                   </div>
                 </div>
               )}

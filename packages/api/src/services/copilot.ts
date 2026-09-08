@@ -19,7 +19,7 @@ import {
 } from "@corridor/ai";
 import { getKv } from "../infra/redis";
 
-const { movements, drivers, movementEvents } = schema;
+const { movements, drivers, movementEvents, ports } = schema;
 
 /**
  * Retrieval caching. The regulation corpus is global and changes only when it
@@ -211,23 +211,26 @@ export function copilotTools(rls: RlsRunner, orgId: string): ToolSet {
   return {
     lookupMovementStatus: tool({
       description:
-        "Look up a movement (e-manifest) by its movement number (e.g. ACE-26-00001) and return its current status, crossing point, ETA and customs reference.",
+        "Look up a movement (e-manifest) by its movement number (e.g. ACE-26-00001) and return its current status, port of entry, ETA and customs reference.",
       inputSchema: z.object({
         movementNumber: z.string().describe("The movement number, e.g. ACE-26-00001"),
       }),
       execute: async ({ movementNumber }) =>
         rls(async (tx) => {
-          const [m] = await tx
+          const [raw] = await tx
             .select({
               id: movements.id,
               movementNumber: movements.movementNumber,
               status: movements.status,
               regime: movements.regime,
-              crossingPoint: movements.crossingPoint,
+              portCode: ports.code,
+              portName: ports.name,
+              carrierCode: movements.carrierCode,
               scheduledCrossingAt: movements.scheduledCrossingAt,
               customsReferenceNumber: movements.customsReferenceNumber,
             })
             .from(movements)
+            .leftJoin(ports, eq(ports.id, movements.portId))
             .where(
               and(
                 eq(movements.organizationId, orgId),
@@ -235,8 +238,10 @@ export function copilotTools(rls: RlsRunner, orgId: string): ToolSet {
               ),
             )
             .limit(1);
-          if (!m)
+          if (!raw)
             return { found: false, message: `No movement found matching "${movementNumber}".` };
+          const { portCode, portName, ...m } = raw;
+          const port = portCode ? { code: portCode, name: portName! } : null;
           const [lastEvent] = await tx
             .select({
               eventType: movementEvents.eventType,
@@ -247,7 +252,7 @@ export function copilotTools(rls: RlsRunner, orgId: string): ToolSet {
             .where(eq(movementEvents.movementId, m.id))
             .orderBy(desc(movementEvents.occurredAt))
             .limit(1);
-          return { found: true, ...m, lastEvent: lastEvent ?? null };
+          return { found: true, ...m, port, lastEvent: lastEvent ?? null };
         }),
     }),
 
@@ -275,7 +280,7 @@ export function copilotTools(rls: RlsRunner, orgId: string): ToolSet {
 
     checkDriverExpiry: tool({
       description:
-        "Check a driver's license, FAST card and medical certificate expiry dates by name.",
+        "Check a driver's license, travel documents (FAST/NEXUS/passport) and medical certificate expiry dates by name.",
       inputSchema: z.object({ driverName: z.string().describe("Driver's first and/or last name") }),
       execute: async ({ driverName }) =>
         rls(async (tx) => {
@@ -286,9 +291,13 @@ export function copilotTools(rls: RlsRunner, orgId: string): ToolSet {
               lastName: drivers.lastName,
               licenseNumber: drivers.licenseNumber,
               licenseExpiry: drivers.licenseExpiry,
-              fastCardNumber: drivers.fastCardNumber,
-              fastCardExpiry: drivers.fastCardExpiry,
               medicalCertExpiry: drivers.medicalCertExpiry,
+              travelDocuments: sql<
+                { type: string; number: string; expiresOn: string | null }[]
+              >`coalesce((select jsonb_agg(jsonb_build_object('type', dd.document_type,
+                                                             'number', dd.document_number,
+                                                             'expiresOn', dd.expires_on))
+                          from public.driver_documents dd where dd.driver_id = ${drivers.id}), '[]'::jsonb)`,
               status: drivers.status,
             })
             .from(drivers)

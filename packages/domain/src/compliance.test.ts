@@ -67,22 +67,44 @@ describe("evaluateExpiries", () => {
 });
 
 describe("document sets", () => {
-  it("driver: FAST card only tracked when a card number exists", () => {
-    const without = driverDocuments({
-      licenseExpiry: null,
-      fastCardNumber: null,
-      fastCardExpiry: null,
-      medicalCertExpiry: null,
-    });
+  it("driver: travel documents are tracked by document type", () => {
+    const without = driverDocuments({ licenseExpiry: null, medicalCertExpiry: null });
     expect(without.map((d) => d.field)).toEqual(["license_expiry", "medical_cert_expiry"]);
 
-    const withCard = driverDocuments({
+    const withCards = driverDocuments({ licenseExpiry: null, medicalCertExpiry: null }, [
+      { documentType: "fast", expiresOn: "2026-01-01" },
+      { documentType: "passport", expiresOn: "2030-01-01" },
+    ]);
+    expect(withCards.map((d) => d.field)).toEqual([
+      "license_expiry",
+      "fast",
+      "passport",
+      "medical_cert_expiry",
+    ]);
+    // A travel document with no expiry on file is normal, so it is not a finding.
+    expect(withCards.filter((d) => d.requiredForCrossing).map((d) => d.field)).toEqual([
+      "license_expiry",
+    ]);
+  });
+
+  it("driver: FAST expiry now dedupes on the document type", () => {
+    const [finding] = evaluateExpiries(
+      driver,
+      driverDocuments({ licenseExpiry: "2030-01-01", medicalCertExpiry: null }, [
+        { documentType: "fast", expiresOn: "2026-09-20" },
+      ]),
+      TODAY,
+    );
+    expect(finding).toMatchObject({ field: "fast", dedupeKey: "driver:d1:fast", label: "FAST card" });
+  });
+
+  it("driver: a passenger has no license to expire", () => {
+    const docs = driverDocuments({
       licenseExpiry: null,
-      fastCardNumber: "12345",
-      fastCardExpiry: null,
       medicalCertExpiry: null,
+      personType: "passenger",
     });
-    expect(withCard.map((d) => d.field)).toContain("fast_card_expiry");
+    expect(docs.filter((d) => d.requiredForCrossing)).toEqual([]);
   });
 
   it("truck: registration + insurance required, inspection optional", () => {

@@ -81,20 +81,34 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
   "organization.members.acceptInvite": "member.accept_invite",
   "organization.sso.configure": "organization.sso_configure",
   "organization.sso.remove": "organization.sso_remove",
+  "organization.carrierCodes.upsert":
+    "organization.carrier_code_create / organization.carrier_code_update",
+  "organization.carrierCodes.remove": "organization.carrier_code_remove",
+  "organization.carrierCodes.setDefault": "organization.carrier_code_set_default",
 
   // --- registries ---------------------------------------------------------
   "party.drivers.create": "driver.create",
   "party.drivers.update": "driver.update",
   "party.drivers.archive": "driver.archive",
+  "party.drivers.export": "driver.export",
+  "party.drivers.bulkSetStatus": "driver.update",
+  "party.drivers.documents.upsert": "driver.document_add / driver.document_update",
+  "party.drivers.documents.remove": "driver.document_remove",
   "party.trucks.create": "truck.create",
   "party.trucks.update": "truck.update",
   "party.trucks.archive": "truck.archive",
+  "party.trucks.export": "truck.export",
+  "party.trucks.bulkSetStatus": "truck.update",
   "party.trailers.create": "trailer.create",
   "party.trailers.update": "trailer.update",
   "party.trailers.archive": "trailer.archive",
+  "party.trailers.export": "trailer.export",
+  "party.trailers.bulkSetStatus": "trailer.update",
   "party.partners.create": "partner.create",
   "party.partners.update": "partner.update",
   "party.partners.archive": "partner.archive",
+  "party.partners.export": "partner.export",
+  "party.partners.bulkSetStatus": "partner.update",
 
   // --- alerts -------------------------------------------------------------
   "alerts.setStatus": "alert.status_update",
@@ -103,8 +117,12 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
   // --- movements ----------------------------------------------------------
   "movement.create": "movement.create",
   "movement.update": "movement.update",
-  "movement.cargo.upsert": "movement.cargo_upsert",
-  "movement.cargo.remove": "movement.cargo_remove",
+  "movement.crew.add": "movement.crew_add",
+  "movement.crew.remove": "movement.crew_remove",
+  "movement.crew.setRole": "movement.crew_set_role",
+  "movement.trailers.add": "movement.trailer_add",
+  "movement.trailers.remove": "movement.trailer_remove",
+  "movement.trailers.reorder": "movement.trailer_reorder",
   "movement.seals.add": "movement.seal_add",
   "movement.seals.remove": "movement.seal_remove",
   "movement.addNote": "movement.note_add",
@@ -117,9 +135,40 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
   "movement.suggestions.accept": "movement.suggestion_accept",
   "movement.suggestions.dismiss": "movement.suggestion_dismiss",
 
+  // --- shipments ----------------------------------------------------------
+  "shipment.create": "shipment.create",
+  "shipment.update": "shipment.update",
+  "shipment.remove": "shipment.remove",
+  "shipment.commodities.upsert": "shipment.commodity_upsert",
+  "shipment.commodities.remove": "shipment.commodity_remove",
+  "shipment.assign": "shipment.assign",
+  "shipment.unassign": "shipment.unassign",
+
+  "organization.updateMe": "user.profile_update",
+
+  "shipment.bulkRemove": "shipment.remove",
+
+  // --- bulk import (0028) ---------------------------------------------------
+  "imports.validate": "import.validate",
+  "imports.commit": "import.commit",
+  "imports.deleteBatch": "import.delete_batch",
+
+  // --- in-bond (0026) -------------------------------------------------------
+  "inbond.records.create": "inbond.record_create",
+  "inbond.records.update": "inbond.record_update",
+  "inbond.records.sendArrival": "inbond.send_arrival",
+  "inbond.records.sendExport": "inbond.send_export",
+  "inbond.records.cancel": "inbond.cancel",
+  "inbond.records.requestStatus": "inbond.request_status",
+  "inbond.records.addNote": "inbond.note_add",
+  "inbond.external.create": "inbond.external_create",
+  "inbond.external.update": "inbond.external_update",
+  "inbond.external.close": "inbond.external_close",
+
   // --- integrations -------------------------------------------------------
   "integrations.configs.upsert": "integration.config_update",
   "integrations.configs.clearCredentials": "integration.credentials_cleared",
+  "integrations.testCustoms": "integration.test_connection",
   "integrations.jobs.runNow": "job.run_now",
 
   // --- billing ------------------------------------------------------------
@@ -140,6 +189,12 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
 
   // --- reporting ----------------------------------------------------------
   "reporting.run": "report.run",
+  "reporting.export": "report.export",
+
+  // --- printable documents (0024) -----------------------------------------
+  "pdf.generate": "pdf.generate",
+  "pdf.blankDriverSheets": "pdf.blank_driver_sheets",
+  "pdf.email": "pdf.email",
 };
 
 /**

@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { Button } from "@corridor/ui";
 import { useTRPC } from "@/lib/trpc/client";
 
 const EXAMPLES = [
@@ -16,6 +17,12 @@ export function ReportWorkbench() {
   const [question, setQuestion] = useState(EXAMPLES[0]!);
   const run = useMutation(trpc.reporting.run.mutationOptions());
   const result = run.data;
+  const [exported, setExported] = useState<{ url: string; format: string } | null>(null);
+  const exportResult = useMutation(
+    trpc.reporting.export.mutationOptions({
+      onSuccess: (r) => setExported({ url: r.signedUrl, format: r.format }),
+    }),
+  );
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -24,13 +31,10 @@ export function ReportWorkbench() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Reports</h1>
-        <p className="text-sm text-ink-500">
-          Ask about movement volume, cargo, rejection, or hold history. Questions are translated
-          into a constrained reporting query—never raw SQL.
-        </p>
-      </header>
+      <p className="text-sm text-ink-500">
+        Ask about movement volume, cargo, rejection, or hold history. Questions are translated
+        into a constrained reporting query, never raw SQL.
+      </p>
 
       <form className="panel space-y-3 p-5" onSubmit={submit} aria-label="Run a report">
         <label className="label" htmlFor="reportQuestion">
@@ -84,6 +88,40 @@ export function ReportWorkbench() {
                   {key}: {String(value)}
                 </span>
               ))}
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
+              {(["csv", "pdf"] as const).map((format) => (
+                <Button
+                  key={format}
+                  variant="secondary"
+                  size="sm"
+                  disabled={exportResult.isPending || result.rows.length === 0}
+                  onClick={() =>
+                    exportResult.mutate({
+                      format,
+                      source: { kind: "query", query: result.query, title: result.title },
+                    })
+                  }
+                >
+                  Export {format.toUpperCase()}
+                </Button>
+              ))}
+              {exported && (
+                <a
+                  href={exported.url}
+                  target="_blank"
+                  rel="noopener"
+                  data-testid="report-export-link"
+                  className="font-medium underline underline-offset-2"
+                >
+                  Download {exported.format.toUpperCase()}
+                </a>
+              )}
+              {exportResult.error && (
+                <span role="alert" className="text-danger-500">
+                  {exportResult.error.message}
+                </span>
+              )}
             </div>
           </section>
 

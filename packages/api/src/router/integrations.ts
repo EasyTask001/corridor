@@ -5,6 +5,7 @@ import { uuid } from "@corridor/domain";
 import { getBorderWait, lookupHsCode, searchTariff } from "@corridor/integrations";
 import { permissionProcedure, router } from "../trpc";
 import { writeAudit } from "../services/audit";
+import { customsClientFor } from "../services/customs";
 import { processDueJobs } from "../services/jobs";
 
 const { integrationConfigs, integrationEvents, backgroundJobs, movements } = schema;
@@ -25,6 +26,9 @@ const publicConfigColumns = {
   settings: integrationConfigs.settings,
   status: integrationConfigs.status,
   lastError: integrationConfigs.lastError,
+  mode: integrationConfigs.mode,
+  baseUrl: integrationConfigs.baseUrl,
+  lastPolledAt: integrationConfigs.lastPolledAt,
   createdAt: integrationConfigs.createdAt,
   updatedAt: integrationConfigs.updatedAt,
   hasCredentials: sql<boolean>`${integrationConfigs.credentialsRef} is not null`,
@@ -61,6 +65,9 @@ export const integrationsRouter = router({
           provider,
           environment: z.enum(["sandbox", "production"]).default("sandbox"),
           status: z.enum(["active", "disabled"]).default("active"),
+          /** 0023 — mock gateway, or the certified EDI gateway's REST API. */
+          mode: z.enum(["mock", "gateway"]).default("mock"),
+          baseUrl: z.string().trim().url().max(300).nullable().optional(),
           settings: z
             .object({
               mockDelayMs: z.number().int().min(0).max(120_000).optional(),
@@ -95,6 +102,8 @@ export const integrationsRouter = router({
               environment: input.environment,
               status: input.status,
               settings: input.settings,
+              mode: input.mode,
+              baseUrl: input.baseUrl ?? null,
             })
             .onConflictDoUpdate({
               target: [integrationConfigs.organizationId, integrationConfigs.provider],
@@ -102,6 +111,8 @@ export const integrationsRouter = router({
                 environment: input.environment,
                 status: input.status,
                 settings: input.settings,
+                mode: input.mode,
+                baseUrl: input.baseUrl ?? null,
                 lastError: null,
               },
             })
@@ -175,6 +186,39 @@ export const integrationsRouter = router({
         return { cleared };
       }),
   }),
+
+  /** "Test connection" on the integrations page: GET /manifests/ping (or the fixture / mock). */
+  testCustoms: permissionProcedure("integrations.manage")
+    .input(z.object({ provider: z.enum(["cbp_ace", "cbsa_aci"]) }))
+    .mutation(({ ctx, input }) =>
+      ctx.rls(async (tx) => {
+        const regime = input.provider === "cbp_ace" ? "ACE" : "ACI";
+        const { client } = await customsClientFor(tx, ctx.orgId, regime);
+        const started = Date.now();
+        let result: { ok: boolean; mode: string; live: boolean; detail: unknown; error?: string };
+        try {
+          result = await client.ping();
+        } catch (e) {
+          result = {
+            ok: false,
+            mode: client.mode,
+            live: false,
+            detail: null,
+            error: e instanceof Error ? e.message : String(e),
+          };
+        }
+        await writeAudit(
+          tx,
+          ctx.orgId,
+          "integration.test_connection",
+          "integration_config",
+          input.provider,
+          null,
+          { ok: result.ok, mode: result.mode, live: result.live, error: result.error ?? null },
+        );
+        return { ...result, durationMs: Date.now() - started };
+      }),
+    ),
 
   events: router({
     list: permissionProcedure("integrations.manage")

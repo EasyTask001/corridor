@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useRef, useState } from "react";
+import Link from "next/link";
 import { emailDomain } from "@corridor/domain";
 import { Alert, Button, Input, Label } from "@corridor/ui";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -107,6 +108,18 @@ export function LoginForm({ next }: { next: string }) {
             autoComplete="current-password"
             required
           />
+        </div>
+      )}
+
+      {!passwordHidden && (
+        <div className="flex items-center justify-between text-sm">
+          <label className="flex items-center gap-2" htmlFor="remember">
+            <input id="remember" name="remember" type="checkbox" defaultChecked />
+            Stay signed in
+          </label>
+          <Link href="/forgot-password" className="text-ink-500 underline-offset-2 hover:underline">
+            Forgot password?
+          </Link>
         </div>
       )}
 

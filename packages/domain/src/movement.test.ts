@@ -5,7 +5,6 @@ import {
   TERMINAL_STATUSES,
   actorMayTransition,
   canTransition,
-  cargoInput,
   hsCode,
   isEditable,
   movementStatus,
@@ -67,27 +66,12 @@ describe("movement state machine", () => {
   });
 });
 
-describe("cargo schema", () => {
+describe("hs code", () => {
   it("accepts HS codes at 4, 6, 8 and 10 digits", () => {
     for (const c of ["8471", "8471.30", "8471.30.01", "8471.30.01.00"]) {
       expect(hsCode.safeParse(c).success).toBe(true);
     }
     expect(hsCode.safeParse("847").success).toBe(false);
     expect(hsCode.safeParse("8471.3").success).toBe(false);
-  });
-
-  it("rejects negative weight and out-of-range confidence", () => {
-    expect(
-      cargoInput.safeParse({ commodityDescription: "Steel coils", weightKg: -1 }).success,
-    ).toBe(false);
-    expect(
-      cargoInput.safeParse({ commodityDescription: "Steel coils", extractionConfidence: 1.2 })
-        .success,
-    ).toBe(false);
-  });
-
-  it("normalizes country code to uppercase", () => {
-    const parsed = cargoInput.parse({ commodityDescription: "Lumber", countryOfOrigin: "ca" });
-    expect(parsed.countryOfOrigin).toBe("CA");
   });
 });

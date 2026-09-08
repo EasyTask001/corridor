@@ -53,3 +53,47 @@ body {
     scroll-behavior: auto !important;
   }
 }
+
+/* Rendered user manual (docs/user-manual, via marked) */
+.manual {
+  max-width: 72ch;
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+.manual h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.manual h2 {
+  margin-top: 1.75rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+.manual p,
+.manual ul,
+.manual ol {
+  margin-top: 0.75rem;
+}
+.manual ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+.manual ol {
+  list-style: decimal;
+  padding-left: 1.25rem;
+}
+.manual li + li {
+  margin-top: 0.25rem;
+}
+.manual code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.85em;
+  background: var(--color-surface-sunken);
+  padding: 0.1em 0.35em;
+  border-radius: 0.25rem;
+}
+.manual a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

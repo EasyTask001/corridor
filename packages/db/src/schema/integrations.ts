@@ -41,6 +41,13 @@ export const integrationConfigs = pgTable(
       .notNull()
       .default("active"),
     lastError: text("last_error"),
+    // 0023 — `mock` keeps the deterministic gateway; `gateway` files through
+    // the certified EDI gateway's REST API (fixture replay when unconfigured).
+    mode: text("mode", { enum: ["mock", "gateway"] })
+      .notNull()
+      .default("mock"),
+    baseUrl: text("base_url"),
+    lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -109,6 +116,77 @@ export const backgroundJobs = pgTable(
       .on(t.runAt)
       .where(sql`${t.status} = 'pending'`),
   ],
+);
+
+export const CUSTOMS_SUBMISSION_KINDS = ["original", "amendment", "cancel", "in_bond"] as const;
+export const CUSTOMS_SUBMISSION_STATUSES = [
+  "sent",
+  "acknowledged",
+  "failed",
+  "accepted",
+  "rejected",
+  "released",
+  "held",
+  "cancelled",
+] as const;
+
+/**
+ * 0023 — one manifest filing as the gateway knows it: the reference number it
+ * assigned and the status the acknowledgements and decisions move it through.
+ * The webhook resolves an inbound message to a movement through this table.
+ */
+export const customsSubmissions = pgTable(
+  "customs_submissions",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    movementId: uuid("movement_id").references(() => movements.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: CUSTOMS_SUBMISSION_KINDS }).notNull(),
+    provider: text("provider", { enum: ["cbp_ace", "cbsa_aci"] }).notNull(),
+    mode: text("mode", { enum: ["mock", "gateway"] }).notNull(),
+    referenceNumber: text("reference_number"),
+    correlationId: text("correlation_id"),
+    status: text("status", { enum: CUSTOMS_SUBMISSION_STATUSES }).notNull().default("sent"),
+    request: jsonb("request").$type<Record<string, unknown>>(),
+    response: jsonb("response").$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("customs_submissions_organization_id_idx").on(t.organizationId),
+    index("customs_submissions_movement_idx")
+      .on(t.movementId, t.createdAt.desc())
+      .where(sql`${t.movementId} is not null`),
+    index("customs_submissions_reference_idx")
+      .on(t.referenceNumber)
+      .where(sql`${t.referenceNumber} is not null`),
+  ],
+);
+
+/** 0023 — CBP/CBSA service notices, global like `ports`. */
+export const carrierNotices = pgTable(
+  "carrier_notices",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    provider: text("provider", { enum: ["cbp_ace", "cbsa_aci"] }).notNull(),
+    externalId: text("external_id").notNull().unique(),
+    severity: text("severity", { enum: ["info", "warning", "critical"] })
+      .notNull()
+      .default("info"),
+    title: text("title").notNull(),
+    body: text("body"),
+    startsAt: timestamp("starts_at", { withTimezone: true }),
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    publishedAt: timestamp("published_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("carrier_notices_published_idx").on(t.publishedAt.desc())],
 );
 
 export const subscriptions = pgTable("subscriptions", {
