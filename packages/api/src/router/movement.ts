@@ -47,6 +47,7 @@ import {
   applyCustomsDecision,
   applyTransition,
   loadFull,
+  markShipmentsArrived,
   requireMovement,
   validationFor,
 } from "../services/movements";
@@ -775,6 +776,7 @@ export const movementRouter = router({
       ctx.rls(async (tx) => {
         const m = await requireMovement(tx, ctx.orgId, input.id);
         const row = await applyTransition(tx, actorOf(ctx), m, "arrived", "user");
+        await markShipmentsArrived(tx, m.id);
         await writeAudit(
           tx,
           ctx.orgId,

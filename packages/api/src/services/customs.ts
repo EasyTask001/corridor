@@ -28,6 +28,7 @@ import {
   applyTransition,
   loadFull,
   loadOrganization,
+  markShipmentsSent,
   requireMovement,
   validationFor,
   type Actor,
@@ -390,6 +391,9 @@ export async function transmitMovement(tx: RlsTransaction, actor: Actor, movemen
         warnings: issues.map((i) => i.code),
       },
     );
+    // The movement itself is now `sent`; put its shipments in the one state
+    // from which a customs decision can actually cascade to them.
+    await markShipmentsSent(tx, movementId);
     await scheduleDecision(
       tx,
       actor.orgId,

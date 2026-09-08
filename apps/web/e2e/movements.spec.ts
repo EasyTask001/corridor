@@ -195,11 +195,15 @@ test.describe("movement builder", () => {
     await expect(timeline(page).getByText(/^Entry on file · .* · entry 300\d{8} @ 3801/)).toBeVisible();
     // The driver sheet renders from the manifest as filed (0024).
     expect(await downloadDriverSheet(page)).toMatch(/driver_sheet-.*\.pdf/);
-    // …and the entry number lands on the shipment row.
+    // …and the entry number lands on the shipment row, whose own status
+    // (separate from the movement's) has followed the decision to released.
     await page.getByRole("button", { name: /^Shipments/ }).click();
     await expect(page.getByText(/^entry 300\d{8} @ 3801/)).toBeVisible();
+    await expect(page.getByRole("cell", { name: "released" })).toBeVisible();
     await page.getByRole("button", { name: "Mark arrived" }).click();
     await expect(heading(page).getByText("arrived")).toBeVisible();
+    await page.getByRole("button", { name: /^Shipments/ }).click();
+    await expect(page.getByRole("cell", { name: "arrived" })).toBeVisible();
 
     // Timeline attribution
     const tl = timeline(page);

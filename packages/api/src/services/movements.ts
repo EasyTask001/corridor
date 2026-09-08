@@ -213,6 +213,29 @@ async function applyShipmentOutcomes(
   return { entriesJustCompleted: allEntries && !hadAllEntries };
 }
 
+/**
+ * Every shipment's own state machine starts at `draft`, whose only legal
+ * transition is to `sent` (or `cancelled`) — a customs decision cascading
+ * straight from `draft` (e.g. `cascadedShipmentStatus("draft", "accepted")`)
+ * is therefore always rejected by `canTransitionShipment` and silently no-ops.
+ * Call this once the movement itself has gone `sent`, so the shipments riding
+ * it are in a state `applyShipmentOutcomes` can actually cascade from.
+ */
+export async function markShipmentsSent(tx: Tx, movementId: string) {
+  await tx
+    .update(shipments)
+    .set({ status: "sent" })
+    .where(and(eq(shipments.movementId, movementId), inArray(shipments.status, ["draft", "rejected"])));
+}
+
+/** Mirrors the movement's own `released → arrived` (`movement.markArrived`). */
+export async function markShipmentsArrived(tx: Tx, movementId: string) {
+  await tx
+    .update(shipments)
+    .set({ status: "arrived", arrivedAt: new Date() })
+    .where(and(eq(shipments.movementId, movementId), eq(shipments.status, "released")));
+}
+
 export async function applyTransition(
   tx: Tx,
   actor: Actor,
