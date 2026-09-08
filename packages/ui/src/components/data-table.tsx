@@ -172,7 +172,7 @@ export function DataTable<TData extends RowData>({
                       <button
                         type="button"
                         onClick={header.column.getToggleSortingHandler()}
-                        className="inline-flex items-center gap-1 uppercase tracking-wide transition-colors hover:text-ink-950"
+                        className="inline-flex items-center gap-1 uppercase tracking-wide transition-colors hover:text-fg-primary"
                       >
                         <table.FlexRender header={header} />
                         <SortIcon
@@ -192,14 +192,14 @@ export function DataTable<TData extends RowData>({
         <TableBody>
           {isLoading && (
             <TableRow>
-              <TableCell className="py-6 text-ink-500" colSpan={columnCount}>
+              <TableCell className="py-6 text-fg-secondary" colSpan={columnCount}>
                 {loadingMessage}
               </TableCell>
             </TableRow>
           )}
           {!isLoading && rows.length === 0 && (
             <TableRow>
-              <TableCell className="py-6 text-ink-500" colSpan={columnCount}>
+              <TableCell className="py-6 text-fg-secondary" colSpan={columnCount}>
                 {emptyMessage}
               </TableCell>
             </TableRow>
@@ -232,7 +232,7 @@ export function DataTable<TData extends RowData>({
       </Table>
 
       {showPagination && (
-        <div className="flex items-center justify-between gap-3 border-t border-ink-100 px-4 py-3 text-xs text-ink-500">
+        <div className="flex items-center justify-between gap-3 border-t border-border-default px-4 py-3 text-xs text-fg-secondary">
           <span>
             Page {pageIndex + 1} of {pageCount} · {total} total
           </span>
