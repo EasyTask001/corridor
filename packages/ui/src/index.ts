@@ -69,5 +69,7 @@ export { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/tabs";
 export { Textarea } from "./components/textarea";
 export type { TextareaProps } from "./components/textarea";
 export { Switch } from "./components/switch";
+export { NavGroup, NavItemContent, navItemVariants } from "./components/nav";
+export type { NavGroupProps, NavItemVariantProps } from "./components/nav";
 export { ThemeToggle } from "./components/theme-toggle";
 export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./components/tooltip";
