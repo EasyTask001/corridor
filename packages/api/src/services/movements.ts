@@ -6,14 +6,18 @@
  */
 import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, inArray, schema, type RlsTransaction } from "@corridor/db";
+import type { CustomsEventMessage, CustomsShipmentMessage } from "@corridor/integrations";
 import { platesFor, trailersForMovement } from "./equipment";
 import { shipmentsForMovement } from "./shipments";
 import {
   actorMayTransition,
+  cascadedShipmentStatus,
   transition,
   validateForTransmit,
   type ActorType,
+  type CustomsEventPayload,
   type MovementStatus,
+  type ShipmentStatus,
 } from "@corridor/domain";
 
 const {
@@ -22,6 +26,7 @@ const {
   movementEvents,
   movementAmendments,
   seals,
+  shipments,
   drivers,
   driverDocuments,
   trucks,
@@ -53,8 +58,16 @@ export async function addEvent(
   actor: Actor,
   movementId: string,
   e: {
-    eventType: "status_change" | "amendment" | "note" | "customs_response" | "ai_flag";
+    eventType:
+      | "status_change"
+      | "amendment"
+      | "note"
+      | "customs_response"
+      | "ai_flag"
+      | "customs_event";
     fromStatus?: MovementStatus | null;
+    /** Defaults to now; a gateway message carries its own time. */
+    occurredAt?: Date;
     toStatus?: MovementStatus | null;
     payload?: Record<string, unknown>;
     actorType: ActorType;
@@ -72,7 +85,100 @@ export async function addEvent(
     payload: e.payload ?? null,
     actorType: e.actorType,
     actorId: e.actorType === "user" ? actor.userId : null,
+    ...(e.occurredAt && { occurredAt: e.occurredAt }),
   });
+}
+
+/** The lifecycle timestamp a shipment status carries, if any. */
+const SHIPMENT_STAMP: Partial<Record<ShipmentStatus, "entryOnFileAt" | "releasedAt" | "arrivedAt" | "cancelledAt">> = {
+  entry_on_file: "entryOnFileAt",
+  released: "releasedAt",
+  arrived: "arrivedAt",
+  cancelled: "cancelledAt",
+};
+
+/**
+ * Fan a customs decision out to the shipments riding the movement (0022):
+ * every gateway message becomes a `customs_event` timeline row (linked to its
+ * shipment when it names one), entry numbers land on the shipment, and each
+ * shipment's status follows the decision as far as its own state machine
+ * allows. Shipments the gateway did not mention still cascade.
+ */
+async function applyShipmentOutcomes(
+  tx: Tx,
+  actor: Actor,
+  m: typeof movements.$inferSelect,
+  decision: "accepted" | "rejected" | "released" | "held",
+  events: CustomsEventMessage[],
+  outcomes: CustomsShipmentMessage[],
+) {
+  const attached = await tx
+    .select({
+      id: shipments.id,
+      controlNumber: shipments.controlNumber,
+      status: shipments.status,
+    })
+    .from(shipments)
+    .where(eq(shipments.movementId, m.id));
+  const byControl = new Map(attached.map((s) => [s.controlNumber, s]));
+
+  const portIdFor = async (code: string | null | undefined) => {
+    if (!code) return null;
+    const [port] = await tx
+      .select({ id: ports.id })
+      .from(ports)
+      .where(and(eq(ports.regime, m.regime), eq(ports.code, code)))
+      .limit(1);
+    return port?.id ?? null;
+  };
+
+  for (const e of events) {
+    const target = e.shipmentControlNumber ? byControl.get(e.shipmentControlNumber) : undefined;
+    const payload: CustomsEventPayload = {
+      code: e.code,
+      label: e.label,
+      referenceNumber: e.referenceNumber ?? null,
+      entryNumber: e.entryNumber ?? null,
+      entryPortCode: e.entryPortCode ?? null,
+      shipmentControlNumber: e.shipmentControlNumber ?? null,
+      occurredAt: e.occurredAt,
+      ...(e.raw && { raw: e.raw }),
+    };
+    await addEvent(tx, actor, m.id, {
+      eventType: "customs_event",
+      actorType: "customs_api",
+      shipmentId: target?.id ?? null,
+      payload,
+      occurredAt: new Date(e.occurredAt),
+    });
+  }
+
+  const mentioned = new Map(outcomes.map((o) => [o.controlNumber, o]));
+  for (const s of attached) {
+    const o = mentioned.get(s.controlNumber);
+    // A shipment the gateway placed on entry first, then released, passes
+    // through entry_on_file so that timestamp is stamped too.
+    const steps: ShipmentStatus[] = [];
+    if (o?.entryNumber && s.status === "accepted" && o.status !== "held")
+      steps.push("entry_on_file");
+    steps.push(o?.status ?? decision);
+    const set: Partial<typeof shipments.$inferInsert> = {};
+    let current = s.status;
+    for (const step of steps) {
+      const next = cascadedShipmentStatus(current, step);
+      if (!next) continue;
+      current = next;
+      set.status = next;
+      const stamp = SHIPMENT_STAMP[next];
+      if (stamp) set[stamp] = new Date();
+    }
+    if (o?.entryNumber) {
+      set.entryNumber = o.entryNumber;
+      set.entryPortId = (await portIdFor(o.entryPortCode)) ?? undefined;
+    }
+    if (Object.keys(set).length > 0)
+      await tx.update(shipments).set(set).where(eq(shipments.id, s.id));
+  }
 }
 
 export async function applyTransition(
@@ -125,6 +231,10 @@ export async function applyCustomsDecision(
     message?: string | null;
     simulated?: boolean;
     raw?: Record<string, unknown>;
+    /** Gateway messages behind the decision (0022); each becomes a timeline row. */
+    events?: CustomsEventMessage[];
+    /** Per-shipment outcomes; unmentioned shipments cascade the decision. */
+    shipments?: CustomsShipmentMessage[];
   },
 ) {
   const ref = input.referenceNumber ?? m.customsReferenceNumber ?? null;
@@ -156,6 +266,14 @@ export async function applyCustomsDecision(
         and(eq(movementAmendments.movementId, m.id), eq(movementAmendments.status, "submitted")),
       );
   }
+  await applyShipmentOutcomes(
+    tx,
+    actor,
+    m,
+    input.decision,
+    input.events ?? [],
+    input.shipments ?? [],
+  );
 
   // Dynamic import: notifications.ts -> customs.ts -> movements.ts would otherwise cycle.
   const { notifyOrganization } = await import("./notifications");
@@ -317,6 +435,7 @@ export function validationFor(full: FullMovement) {
         }
       : null,
     isEmpty: full.isEmpty,
+    aciInTransit: full.aciInTransit,
     trailers: full.trailers.map((t) => ({
       unitNumber: t.unitNumber,
       registrationExpiry: t.registrationExpiry,
@@ -333,6 +452,7 @@ export function validationFor(full: FullMovement) {
       entryNumber: s.entryNumber,
       inBondEntryType: s.inBondEntryType,
       inBondDestinationPortId: s.inBondDestinationPortId,
+      destinationPortId: s.destinationPortId,
       commodities: s.commodities.map((c) => ({
         commodityDescription: c.commodityDescription,
         hsCode: c.hsCode,

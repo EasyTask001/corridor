@@ -390,6 +390,54 @@ describe("movement.crew.add", () => {
   });
 });
 
+describe("movement.customsResponse", () => {
+  it("writes one customs_event per gateway message and lands the entry on the shipment", async () => {
+    const sent = movementRow({ status: "accepted", customsReferenceNumber: "ACE-REF1" });
+    const rows = transmittableRows(sent);
+    rows.shipments![0]!.status = "accepted";
+    const { caller: api, db } = caller({ rows });
+    const row = await api.customsResponse({ movementId: MOVEMENT_ID, decision: "released" });
+    expect(row.status).toBe("released");
+
+    const events = db.table("movementEvents").filter((e) => e.eventType === "customs_event");
+    expect(events.map((e) => (e.payload as { code: string }).code)).toEqual([
+      "entry_on_file",
+      "arrival_recorded",
+      "released",
+    ]);
+    // The entry-on-file row is about the shipment it names.
+    expect(events[0]?.shipmentId).toBe(SHIPMENT_ID);
+    expect(events[0]?.actorType).toBe("customs_api");
+    const entry = (events[0]?.payload as { entryNumber: string }).entryNumber;
+    expect(entry).toMatch(/^300\d{8}$/);
+
+    const shipment = db.table("shipments")[0]!;
+    expect(shipment.status).toBe("released");
+    expect(shipment.entryNumber).toBe(entry);
+    expect(shipment.entryOnFileAt).toBeInstanceOf(Date);
+    expect(shipment.releasedAt).toBeInstanceOf(Date);
+  });
+
+  it("cascades a rejection to the shipments and refuses when nothing is pending", async () => {
+    const rows = transmittableRows(movementRow({ status: "sent" }));
+    rows.shipments![0]!.status = "sent";
+    const { caller: api, db } = caller({ rows });
+    await api.customsResponse({ movementId: MOVEMENT_ID, decision: "rejected" });
+    expect(db.table("shipments")[0]?.status).toBe("rejected");
+    expect(
+      db
+        .table("movementEvents")
+        .filter((e) => e.eventType === "customs_event")
+        .map((e) => (e.payload as { code: string }).code),
+    ).toEqual(["sending", "rejected"]);
+
+    const draft = caller({ rows: transmittableRows(movementRow()) });
+    await expect(
+      draft.caller.customsResponse({ movementId: MOVEMENT_ID, decision: "accepted" }),
+    ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+  });
+});
+
 describe("movement.submit", () => {
   it("refuses to transmit a manifest that fails validation, and leaves it editable", async () => {
     const rows = transmittableRows();

@@ -20,6 +20,7 @@ import type {
   TransmitAck,
 } from "./types";
 import { CustomsTransportError, hasCustomsCredentials } from "./types";
+import { simulateCustomsEvents } from "./simulate";
 
 export interface MockCustomsOptions extends CustomsClientSettings {
   provider: "cbp_ace" | "cbsa_aci";
@@ -113,10 +114,21 @@ export function createMockCustomsClient(opts: MockCustomsOptions): CustomsClient
         decision = "released";
         message = "Released after secondary (simulated).";
       }
+      const { events, shipments } = simulateCustomsEvents({
+        regime: manifest.regime,
+        decision,
+        currentStatus: ctx.currentStatus,
+        referenceNumber,
+        portOfEntry: manifest.trip.portOfEntry,
+        shipments: manifest.shipments,
+        now,
+      });
       return {
         referenceNumber,
         decision,
         message,
+        events,
+        shipments,
         raw: { mock: true, credentialsPresent, decidedAt: now().toISOString() },
       };
     },

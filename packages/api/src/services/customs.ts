@@ -152,6 +152,12 @@ export function manifestFor(
       port: full.port ? { code: full.port.code, name: full.port.name } : null,
       scheduledCrossingAt: full.scheduledCrossingAt,
       isEmpty: full.isEmpty,
+      iitIndicator: full.iitIndicator,
+      aciLvs: full.aciLvs,
+      aciPostal: full.aciPostal,
+      aciFlyingTruck: full.aciFlyingTruck,
+      aciInTransit: full.aciInTransit,
+      aciIit: full.aciIit,
     },
     crew: full.crew,
     truck: full.truck

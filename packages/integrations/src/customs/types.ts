@@ -1,4 +1,11 @@
-import type { CrewRole, DriverDocumentType, Gender, Regime } from "@corridor/domain";
+import type {
+  CrewRole,
+  CustomsEventCode,
+  DriverDocumentType,
+  Gender,
+  Regime,
+  ShipmentStatus,
+} from "@corridor/domain";
 
 /** A shipper/consignee as it is printed on the manifest. */
 export interface ManifestParty {
@@ -31,6 +38,10 @@ export interface ManifestPayload {
     estimatedArrival: string;
     /** "Empty Trailer" (ACE) / "Empty Trip" (ACI): filed with no shipments. */
     isEmpty: boolean;
+    /** Instruments of International Traffic indicator (0022). */
+    iitIndicator: "none" | "iit_carrier_bond" | "iit_importer_bond";
+    /** CBSA trip flags; all false on ACE. */
+    aci: { lvs: boolean; postal: boolean; flyingTruck: boolean; inTransit: boolean; iit: boolean };
   };
   crew: Array<{
     role: CrewRole;
@@ -114,10 +125,35 @@ export interface TransmitAck {
   raw: Record<string, unknown>;
 }
 
+/** One message the gateway sent back (0022) — becomes a `customs_event` row. */
+export interface CustomsEventMessage {
+  code: CustomsEventCode;
+  label: string;
+  occurredAt: string;
+  referenceNumber?: string | null;
+  entryNumber?: string | null;
+  entryPortCode?: string | null;
+  /** Set when the message is about one shipment (entry on file, …). */
+  shipmentControlNumber?: string | null;
+  raw?: Record<string, unknown>;
+}
+
+/** Per-shipment outcome carried with a decision. */
+export interface CustomsShipmentMessage {
+  controlNumber: string;
+  status: ShipmentStatus;
+  entryNumber?: string | null;
+  entryPortCode?: string | null;
+}
+
 export interface CustomsDecisionMessage {
   referenceNumber: string;
   decision: CustomsDecision;
   message: string | null;
+  /** The messages behind the decision, oldest first. */
+  events: CustomsEventMessage[];
+  /** What happened to each shipment on the manifest. */
+  shipments: CustomsShipmentMessage[];
   raw: Record<string, unknown>;
 }
 

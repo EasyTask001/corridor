@@ -24,6 +24,7 @@ import {
   trailerRemoveInput,
   trailerReorderInput,
   uuid,
+  type MovementPatch,
   type MovementStatus,
 } from "@corridor/domain";
 import {
@@ -33,6 +34,7 @@ import {
   router,
   type OrgContext,
 } from "../trpc";
+import { simulateCustomsEvents } from "@corridor/integrations";
 import { transmitMovement } from "../services/customs";
 import { enqueueJob } from "../services/jobs";
 import {
@@ -100,6 +102,30 @@ const demotePersonInCharge = (
         ...(except ? [ne(movementCrew.driverId, except)] : []),
       ),
     );
+
+/**
+ * The manifest flags a patch may set (0022). The ACI booleans are only
+ * meaningful on an ACI movement — movements_aci_flags_check refuses them on
+ * ACE — so they are dropped, not rejected, for ACE.
+ */
+function flagsFrom(
+  regime: "ACE" | "ACI",
+  p: Pick<
+    MovementPatch,
+    "iitIndicator" | "aciLvs" | "aciPostal" | "aciFlyingTruck" | "aciInTransit" | "aciIit"
+  >,
+): Partial<typeof movements.$inferInsert> {
+  return {
+    ...(p.iitIndicator !== undefined && { iitIndicator: p.iitIndicator }),
+    ...(regime === "ACI" && {
+      ...(p.aciLvs !== undefined && { aciLvs: p.aciLvs }),
+      ...(p.aciPostal !== undefined && { aciPostal: p.aciPostal }),
+      ...(p.aciFlyingTruck !== undefined && { aciFlyingTruck: p.aciFlyingTruck }),
+      ...(p.aciInTransit !== undefined && { aciInTransit: p.aciInTransit }),
+      ...(p.aciIit !== undefined && { aciIit: p.aciIit }),
+    }),
+  };
+}
 
 const customsSimulationEnabled = () =>
   process.env.CORRIDOR_ALLOW_CUSTOMS_SIMULATION === "true" || process.env.NODE_ENV !== "production";
@@ -270,6 +296,7 @@ export const movementRouter = router({
             }),
             ...(patch.truckId !== undefined && { truckId: patch.truckId }),
             ...(patch.isEmpty !== undefined && { isEmpty: patch.isEmpty }),
+            ...flagsFrom(m.regime, patch),
             ...(patch.notes !== undefined && { notes: patch.notes }),
           })
           .where(eq(movements.id, id))
@@ -786,8 +813,19 @@ export const movementRouter = router({
         }
         consider("truckId", m.truckId, p.truckId);
         consider("isEmpty", m.isEmpty, p.isEmpty);
+        const flags = flagsFrom(m.regime, p);
+        for (const [key, after] of Object.entries(flags))
+          consider(key as keyof typeof set, m[key as keyof typeof m], after);
         if (Object.keys(diff).length === 0) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Amendment contains no changes" });
+        }
+        // CBSA wants a reason code with every amendment; the DB trigger
+        // (movement_amendments_reason_guard) is the backstop.
+        if (m.regime === "ACI" && !input.reasonCode) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "An ACI amendment needs a CBSA reason code",
+          });
         }
 
         const nextRows = await tx
@@ -804,15 +842,29 @@ export const movementRouter = router({
             organizationId: ctx.orgId,
             amendmentNumber: next,
             reason: input.reason,
+            reasonCode: input.reasonCode ?? null,
+            shipmentId: input.shipmentId ?? null,
             diff,
             status: "submitted",
             createdBy: ctx.session.user.id,
           })
-          .returning();
+          .returning()
+          .catch((e: unknown) => {
+            const cause = (e as { cause?: { code?: string; message?: string } })?.cause;
+            if (cause?.code === "P0001")
+              throw new TRPCError({ code: "BAD_REQUEST", message: cause.message ?? "Invalid amendment" });
+            throw e;
+          });
         await addEvent(tx, actorOf(ctx), m.id, {
           eventType: "amendment",
           actorType: "user",
-          payload: { amendmentNumber: next, reason: input.reason, diff },
+          shipmentId: input.shipmentId ?? null,
+          payload: {
+            amendmentNumber: next,
+            reason: input.reason,
+            reasonCode: input.reasonCode ?? null,
+            diff,
+          },
         });
         // One UPDATE: status change + patched fields (the guard permits edits alongside a transition).
         const updated = await applyTransition(tx, actorOf(ctx), m, "sent", "user", set, {
@@ -829,6 +881,7 @@ export const movementRouter = router({
             status: updated.status,
             amendmentNumber: next,
             reason: input.reason,
+            reasonCode: input.reasonCode ?? null,
             diff,
           },
         );
@@ -849,14 +902,34 @@ export const movementRouter = router({
           throw new TRPCError({ code: "FORBIDDEN", message: "Customs simulation is disabled" });
         }
         const m = await requireMovement(tx, ctx.orgId, input.movementId);
+        if (m.status !== "sent" && m.status !== "accepted" && m.status !== "held") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `No customs decision is pending while ${m.status}`,
+          });
+        }
+        const referenceNumber =
+          input.referenceNumber ??
+          m.customsReferenceNumber ??
+          `${m.regime}-SIM-${Date.now().toString(36).toUpperCase()}`;
+        // Same message sequence the mock gateway would send, so the timeline
+        // and the shipments' entry numbers look the same either way.
+        const full = await loadFull(tx, ctx.orgId, m.id);
+        const simulated = simulateCustomsEvents({
+          regime: m.regime,
+          decision: input.decision,
+          currentStatus: m.status,
+          referenceNumber,
+          portOfEntry: full.port?.code ?? null,
+          shipments: full.shipments.map((s) => ({ controlNumber: s.controlNumber })),
+        });
         const row = await applyCustomsDecision(tx, actorOf(ctx), m, {
           decision: input.decision,
-          referenceNumber:
-            input.referenceNumber ??
-            m.customsReferenceNumber ??
-            `${m.regime}-SIM-${Date.now().toString(36).toUpperCase()}`,
+          referenceNumber,
           message: input.message ?? null,
           simulated: true,
+          events: simulated.events,
+          shipments: simulated.shipments,
         });
         await writeAudit(
           tx,

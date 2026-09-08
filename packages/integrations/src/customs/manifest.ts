@@ -16,6 +16,12 @@ export interface ManifestSource {
     port: { code: string; name?: string } | null;
     scheduledCrossingAt: Date | string | null;
     isEmpty: boolean;
+    iitIndicator: "none" | "iit_carrier_bond" | "iit_importer_bond";
+    aciLvs: boolean;
+    aciPostal: boolean;
+    aciFlyingTruck: boolean;
+    aciInTransit: boolean;
+    aciIit: boolean;
   };
   crew: Array<{
     role: CrewRole;
@@ -149,6 +155,14 @@ export function buildManifest(src: ManifestSource): ManifestPayload {
       portOfEntry: src.movement.port.code,
       estimatedArrival: eta,
       isEmpty: src.movement.isEmpty,
+      iitIndicator: src.movement.iitIndicator,
+      aci: {
+        lvs: src.movement.aciLvs,
+        postal: src.movement.aciPostal,
+        flyingTruck: src.movement.aciFlyingTruck,
+        inTransit: src.movement.aciInTransit,
+        iit: src.movement.aciIit,
+      },
     },
     crew: src.crew.map((c) => ({
       role: c.role,

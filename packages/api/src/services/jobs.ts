@@ -123,6 +123,8 @@ export const jobHandlers: Partial<Record<JobType, Handler>> = {
       message: decision.message,
       simulated: client.environment === "sandbox",
       raw: decision.raw,
+      events: decision.events,
+      shipments: decision.shipments,
     });
     // Chain the next stage of the crossing.
     if (updated.status === "accepted" || updated.status === "held") {

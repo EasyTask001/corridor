@@ -18,6 +18,12 @@ const src: ManifestSource = {
     port: { code: "3801", name: "Detroit" },
     scheduledCrossingAt: "2026-09-08T14:00:00.000Z",
     isEmpty: false,
+    iitIndicator: "none",
+    aciLvs: false,
+    aciPostal: false,
+    aciFlyingTruck: false,
+    aciInTransit: false,
+    aciIit: false,
   },
   crew: [
     {
@@ -229,6 +235,51 @@ describe("mock customs client", () => {
       random: () => 0.9,
     });
     await expect(lucky.transmit(withTrip("OK"))).resolves.toBeTruthy();
+  });
+
+  it("emits the Avaal message sequence behind each decision", async () => {
+    const c = createMockCustomsClient({ provider: "cbp_ace", now: fixedNow });
+    const ok = withTrip("TRIP-OK");
+    const accepted = await c.fetchDecision("R", ok, { currentStatus: "sent" });
+    expect(accepted.events.map((e) => e.code)).toEqual([
+      "sending",
+      "preliminary_check_passed",
+      "accepted",
+    ]);
+    expect(accepted.events[2]?.label).toBe("Accepted");
+    expect(accepted.shipments).toEqual([{ controlNumber: "PFTRPAPS0001", status: "accepted" }]);
+
+    const released = await c.fetchDecision("R", ok, { currentStatus: "accepted" });
+    expect(released.events.map((e) => e.code)).toEqual([
+      "entry_on_file",
+      "arrival_recorded",
+      "released",
+    ]);
+    expect(released.events[0]).toMatchObject({
+      shipmentControlNumber: "PFTRPAPS0001",
+      entryPortCode: "3801",
+      entryNumber: expect.stringMatching(/^300\d{8}$/),
+    });
+    expect(released.shipments[0]).toMatchObject({
+      controlNumber: "PFTRPAPS0001",
+      status: "released",
+      entryNumber: released.events[0]?.entryNumber,
+    });
+    // Deterministic: the same control number always gets the same entry number.
+    const again = await c.fetchDecision("R", ok, { currentStatus: "accepted" });
+    expect(again.shipments[0]?.entryNumber).toBe(released.shipments[0]?.entryNumber);
+
+    const held = await c.fetchDecision("R", withTrip("TRIP-HOLD"), { currentStatus: "accepted" });
+    expect(held.events.map((e) => e.code)).toEqual(["entry_on_file", "held"]);
+    expect(held.shipments[0]?.status).toBe("held");
+    const rejected = await c.fetchDecision("R", withTrip("TRIP-REJECT"), {
+      currentStatus: "sent",
+    });
+    expect(rejected.events.map((e) => e.code)).toEqual(["sending", "rejected"]);
+
+    const aci = createMockCustomsClient({ provider: "cbsa_aci", now: fixedNow });
+    const rns = await aci.fetchDecision("R", { ...ok, regime: "ACI" }, { currentStatus: "accepted" });
+    expect(rns.events.map((e) => e.code)).toEqual(["entered_and_released", "released"]);
   });
 
   it("decisions follow the trip hooks through the lifecycle", async () => {

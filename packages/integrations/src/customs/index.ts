@@ -27,3 +27,4 @@ export function createCustomsClient(input: {
     credentials: input.credentials,
   });
 }
+export { simulateCustomsEvents, simulatedEntryNumber } from "./simulate";
