@@ -9,6 +9,7 @@ import { createDb } from "./client";
 import { withRls } from "./rls";
 import {
   complianceAlerts,
+  driverDocuments,
   drivers,
   organizationMembers,
   partners,
@@ -175,6 +176,131 @@ describe("registries RLS", () => {
         .returning({ id: drivers.id }),
     );
     expect(updated).toHaveLength(0);
+  });
+});
+
+describe("driver_documents RLS", () => {
+  /** A throwaway travel document on one of Org A's seeded drivers. */
+  async function withDocument(run: (ids: { driverId: string; id: string }) => Promise<void>) {
+    const [driver] = await db
+      .select({ id: drivers.id })
+      .from(drivers)
+      .where(eq(drivers.organizationId, ownerA.orgId))
+      .limit(1);
+    const [doc] = await db
+      .insert(driverDocuments)
+      .values({
+        organizationId: ownerA.orgId,
+        driverId: driver!.id,
+        documentType: "nexus",
+        documentNumber: `NX-${Date.now()}`,
+      })
+      .returning({ id: driverDocuments.id });
+    try {
+      await run({ driverId: driver!.id, id: doc!.id });
+    } finally {
+      await db.delete(driverDocuments).where(eq(driverDocuments.id, doc!.id));
+    }
+  }
+
+  it("read-only (driver.read) can read travel documents but not write them", async () => {
+    await withDocument(async ({ driverId, id }) => {
+      const rows = await withRls(db, as(readOnlyA), (tx) =>
+        tx.select().from(driverDocuments).where(eq(driverDocuments.id, id)),
+      );
+      expect(rows).toHaveLength(1);
+      await expectRlsDenied(
+        withRls(db, as(readOnlyA), (tx) =>
+          tx
+            .insert(driverDocuments)
+            .values({
+              organizationId: readOnlyA.orgId,
+              driverId,
+              documentType: "passport",
+              documentNumber: "NOPE",
+            })
+            .returning(),
+        ),
+      );
+    });
+  });
+
+  it("cross-tenant: Org B sees nothing and cannot attach a document to an Org A driver", async () => {
+    await withDocument(async ({ driverId, id }) => {
+      const seen = await withRls(db, as(ownerB), (tx) =>
+        tx.select().from(driverDocuments).where(eq(driverDocuments.id, id)),
+      );
+      expect(seen).toHaveLength(0);
+      // Claiming the row for Org B is what RLS would otherwise allow; the
+      // composite (driver_id, organization_id) key is what stops it.
+      let err: unknown;
+      try {
+        await withRls(db, as(ownerB), (tx) =>
+          tx.insert(driverDocuments).values({
+            organizationId: ownerB.orgId,
+            driverId,
+            documentType: "passport",
+            documentNumber: "SNEAKY",
+          }),
+        );
+      } catch (e) {
+        err = e;
+      }
+      const messages: string[] = [];
+      for (let e = err; e instanceof Error; e = e.cause) messages.push(e.message);
+      expect(messages.join(" | ")).toMatch(/violates foreign key/i);
+    });
+  });
+
+  it("the same document number cannot be recorded twice for one person and type", async () => {
+    await withDocument(async ({ driverId, id }) => {
+      const [existing] = await db
+        .select({ documentNumber: driverDocuments.documentNumber })
+        .from(driverDocuments)
+        .where(eq(driverDocuments.id, id));
+      let err: unknown;
+      try {
+        await withRls(db, as(dispatcherA), (tx) =>
+          tx.insert(driverDocuments).values({
+            organizationId: ownerA.orgId,
+            driverId,
+            documentType: "nexus",
+            documentNumber: existing!.documentNumber,
+          }),
+        );
+      } catch (e) {
+        err = e;
+      }
+      const messages: string[] = [];
+      for (let e = err; e instanceof Error; e = e.cause) messages.push(e.message);
+      expect(messages.join(" | ")).toMatch(/duplicate key/i);
+    });
+  });
+
+  it("a person without a licence must be a passenger", async () => {
+    let err: unknown;
+    try {
+      await db
+        .insert(drivers)
+        .values({ organizationId: ownerA.orgId, firstName: "No", lastName: "Licence" });
+    } catch (e) {
+      err = e;
+    }
+    const messages: string[] = [];
+    for (let e = err; e instanceof Error; e = e.cause) messages.push(e.message);
+    expect(messages.join(" | ")).toMatch(/drivers_license_required_check/);
+
+    const [passenger] = await db
+      .insert(drivers)
+      .values({
+        organizationId: ownerA.orgId,
+        firstName: "Rider",
+        lastName: `Only-${Date.now()}`,
+        personType: "passenger",
+      })
+      .returning({ id: drivers.id });
+    expect(passenger).toBeDefined();
+    await db.delete(drivers).where(eq(drivers.id, passenger!.id));
   });
 });
 

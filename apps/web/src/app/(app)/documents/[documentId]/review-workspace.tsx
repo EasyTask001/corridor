@@ -6,7 +6,11 @@ import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@corridor/api";
-import { LOW_CONFIDENCE_THRESHOLD, type ExtractedCargoLine } from "@corridor/domain";
+import {
+  CBP_QUANTITY_UNITS,
+  LOW_CONFIDENCE_THRESHOLD,
+  type ExtractedCargoLine,
+} from "@corridor/domain";
 import { useTRPC } from "@/lib/trpc/client";
 import { StatusChip } from "../documents-panel";
 
@@ -17,7 +21,8 @@ type LineDraft = {
   commodityDescription: string;
   hsCode: string;
   weightKg: string;
-  pieceCount: string;
+  quantity: string;
+  quantityUnit: string;
   packagingType: string;
   valueAmount: string;
   valueCurrency: "" | "USD" | "CAD";
@@ -29,7 +34,8 @@ const toDraft = (l: ExtractedCargoLine): LineDraft => ({
   commodityDescription: l.commodityDescription,
   hsCode: l.hsCode ?? "",
   weightKg: l.weightKg?.toString() ?? "",
-  pieceCount: l.pieceCount?.toString() ?? "",
+  quantity: l.pieceCount?.toString() ?? "",
+  quantityUnit: "",
   packagingType: l.packagingType ?? "",
   valueAmount: l.valueAmount?.toString() ?? "",
   valueCurrency: l.valueCurrency ?? "",
@@ -131,13 +137,13 @@ function ReviewForm({
   const [consigneeId, setConsigneeId] = useState(() =>
     matchPartner(extracted?.consignee.name, partners, ["consignee"]),
   );
-  const [mode, setMode] = useState<"append" | "replace">("append");
+  const [controlReference, setControlReference] = useState("");
   const [error, setError] = useState<string | null>(null);
   const apply = useMutation(
     trpc.documents.applyExtraction.mutationOptions({
       onSuccess: (r) => {
         invalidate();
-        router.push(`/movements/${r.movementId}`);
+        router.push(`/shipments/${r.shipmentId}`);
       },
       onError: (e) => setError(e.message),
     }),
@@ -151,17 +157,20 @@ function ReviewForm({
   const submit = () => {
     setError(null);
     if (!movementId) return setError("Choose a movement to apply the lines to.");
+    if (!controlReference.trim())
+      return setError("Enter the control reference (PAPS/PARS) for the new shipment.");
     apply.mutate({
       documentId: doc.id,
       movementId,
+      controlReference: controlReference.trim().toUpperCase(),
       shipperId: shipperId || null,
       consigneeId: consigneeId || null,
-      mode,
       lines: lines.map((l) => ({
         commodityDescription: l.commodityDescription.trim(),
         hsCode: l.hsCode.trim() || null,
         weightKg: num(l.weightKg),
-        pieceCount: num(l.pieceCount),
+        quantity: num(l.quantity),
+        quantityUnit: (l.quantityUnit || null) as (typeof CBP_QUANTITY_UNITS)[number] | null,
         packagingType: l.packagingType.trim() || null,
         valueAmount: num(l.valueAmount),
         valueCurrency: l.valueCurrency || null,
@@ -349,7 +358,8 @@ function ReviewForm({
                   <th className="px-3 py-2 font-medium">Commodity</th>
                   <th className="px-3 py-2 font-medium">HS</th>
                   <th className="px-3 py-2 font-medium">kg</th>
-                  <th className="px-3 py-2 font-medium">Pcs</th>
+                  <th className="px-3 py-2 font-medium">Qty</th>
+                  <th className="px-3 py-2 font-medium">Unit</th>
                   <th className="px-3 py-2 font-medium">Pkg</th>
                   <th className="px-3 py-2 font-medium">Value</th>
                   <th className="px-3 py-2 font-medium">Ccy</th>
@@ -394,12 +404,28 @@ function ReviewForm({
                       </td>
                       <td className="px-3 py-1.5">
                         <input
-                          aria-label={`Line ${i + 1} pieces`}
-                          value={l.pieceCount}
+                          aria-label={`Line ${i + 1} quantity`}
+                          value={l.quantity}
                           disabled={!canReview}
-                          onChange={(e) => update(i, { pieceCount: e.target.value })}
+                          onChange={(e) => update(i, { quantity: e.target.value })}
                           className={`${cls} w-16`}
                         />
+                      </td>
+                      <td className="px-3 py-1.5">
+                        <select
+                          aria-label={`Line ${i + 1} quantity unit`}
+                          value={l.quantityUnit}
+                          disabled={!canReview}
+                          onChange={(e) => update(i, { quantityUnit: e.target.value })}
+                          className={`${cls} w-24`}
+                        >
+                          <option value="">—</option>
+                          {CBP_QUANTITY_UNITS.map((u) => (
+                            <option key={u} value={u}>
+                              {u}
+                            </option>
+                          ))}
+                        </select>
                       </td>
                       <td className="px-3 py-1.5">
                         <input
@@ -475,7 +501,8 @@ function ReviewForm({
                         commodityDescription: "",
                         hsCode: "",
                         weightKg: "",
-                        pieceCount: "",
+                        quantity: "",
+                        quantityUnit: "",
                         packagingType: "",
                         valueAmount: "",
                         valueCurrency: "",
@@ -512,18 +539,16 @@ function ReviewForm({
                 </select>
               </div>
               <div>
-                <label className="label" htmlFor="applyMode">
-                  Existing lines
+                <label className="label" htmlFor="controlReference">
+                  Control reference
                 </label>
-                <select
-                  id="applyMode"
-                  value={mode}
-                  onChange={(e) => setMode(e.target.value as "append" | "replace")}
-                  className="input"
-                >
-                  <option value="append">Keep and append</option>
-                  <option value="replace">Replace</option>
-                </select>
+                <input
+                  id="controlReference"
+                  value={controlReference}
+                  onChange={(e) => setControlReference(e.target.value.toUpperCase())}
+                  placeholder="PAPS0001"
+                  className="input font-mono uppercase"
+                />
               </div>
               <button
                 className="btn-signal"
@@ -532,7 +557,7 @@ function ReviewForm({
               >
                 {apply.isPending
                   ? "Applying…"
-                  : `Confirm & apply ${lines.length} line${lines.length === 1 ? "" : "s"}`}
+                  : `Confirm & create a shipment with ${lines.length} line${lines.length === 1 ? "" : "s"}`}
               </button>
               {error && (
                 <p role="alert" className="w-full text-sm text-danger-500">

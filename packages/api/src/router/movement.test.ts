@@ -53,6 +53,9 @@ const DRIVER_ID = "55555555-5555-4555-8555-555555555555";
 const TRUCK_ID = "66666666-6666-4666-8666-666666666666";
 const TRAILER_ID = "77777777-7777-4777-8777-777777777777";
 const PARTNER_ID = "88888888-8888-4888-8888-888888888888";
+const PORT_ID = "99999999-9999-4999-8999-999999999998";
+const SHIPMENT_ID = "12121212-1212-4212-8212-121212121212";
+const SLOT_ID = "13131313-1313-4313-8313-131313131313";
 
 const inDays = (days: number) => {
   const d = new Date();
@@ -69,11 +72,11 @@ function movementRow(over: Row = {}): Row {
     movementNumber: "ACE-26-00042",
     tripNumber: "TRIP-1042",
     status: "draft",
-    crossingPoint: { code: "3801", name: "Detroit" },
+    portId: PORT_ID,
+    carrierCode: "PFTR",
     scheduledCrossingAt: inDays(1),
-    driverId: DRIVER_ID,
     truckId: TRUCK_ID,
-    trailerId: TRAILER_ID,
+    isEmpty: false,
     customsReferenceNumber: null,
     notes: null,
     createdBy: TEST_USER_ID,
@@ -83,7 +86,7 @@ function movementRow(over: Row = {}): Row {
   };
 }
 
-/** Registries + one clean cargo line: everything `validateForTransmit` demands. */
+/** Registries + one clean shipment: everything `validateForTransmit` demands. */
 function transmittableRows(movement: Row = movementRow()): Record<string, Row[]> {
   return {
     organizations: [
@@ -93,23 +96,46 @@ function transmittableRows(movement: Row = movementRow()): Record<string, Row[]>
         scacCode: "CTCX",
         canadianCarrierCode: "CTC1",
         usDotNumber: "7654321",
+        filerCode: "F01",
       },
     ],
     movements: [movement],
-    drivers: [
+    ports: [
       {
-        id: DRIVER_ID,
+        id: PORT_ID,
+        regime: "ACE",
+        kind: "port_of_entry",
+        code: "3801",
+        name: "Detroit",
+        country: "US",
+      },
+    ],
+    // crewForMovement() joins movement_crew to drivers; the fake DB ignores
+    // joins and projects from the driving table, so the person's fields sit on
+    // the crew row here.
+    movementCrew: [
+      {
+        id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         organizationId: TEST_ORG_ID,
+        movementId: MOVEMENT_ID,
+        driverId: DRIVER_ID,
+        role: "person_in_charge",
+        position: 1,
         firstName: "Gurpreet",
         lastName: "Singh",
         status: "active",
+        personType: "driver",
+        gender: "M",
         licenseNumber: "S1234-56789-01234",
+        licenseJurisdiction: "ON",
         licenseExpiry: isoDay(400),
-        fastCardNumber: null,
-        fastCardExpiry: null,
         citizenship: "CA",
+        hazmatEndorsement: false,
+        usAddress: {},
       },
     ],
+    drivers: [{ id: DRIVER_ID, organizationId: TEST_ORG_ID }],
+    driverDocuments: [],
     trucks: [
       {
         id: TRUCK_ID,
@@ -131,18 +157,59 @@ function transmittableRows(movement: Row = movementRow()): Record<string, Row[]>
         registrationExpiry: isoDay(180),
       },
     ],
-    cargo: [
+    // trailersForMovement() joins movement_trailers to trailers; as with the
+    // crew, the fake DB projects from the driving table, so the trailer's
+    // fields sit on the slot row.
+    movementTrailers: [
+      {
+        id: SLOT_ID,
+        organizationId: TEST_ORG_ID,
+        movementId: MOVEMENT_ID,
+        trailerId: TRAILER_ID,
+        position: 1,
+        unitNumber: "TR-501",
+        trailerType: "TF",
+        status: "active",
+        plateNumber: "TRL5011",
+        plateJurisdiction: "ON",
+        registrationExpiry: isoDay(180),
+      },
+    ],
+    equipmentPlates: [],
+    shipments: [
+      {
+        id: SHIPMENT_ID,
+        organizationId: TEST_ORG_ID,
+        regime: "ACE",
+        movementId: MOVEMENT_ID,
+        carrierCode: "CTCX",
+        shipmentType: "regular_bill",
+        cargoType: null,
+        controlReference: "PAPS90210",
+        controlNumber: "CTCXPAPS90210",
+        status: "draft",
+        entryNumber: null,
+        entryPortId: null,
+        inBondEntryType: null,
+        inBondDestinationPortId: null,
+        inBondNumber: null,
+        shipperId: PARTNER_ID,
+        consigneeId: PARTNER_ID,
+      },
+    ],
+    commodities: [
       {
         id: "99999999-9999-4999-8999-999999999999",
         organizationId: TEST_ORG_ID,
-        movementId: MOVEMENT_ID,
+        shipmentId: SHIPMENT_ID,
         lineNumber: 1,
         commodityDescription: "Hot-rolled steel coils",
         hsCode: "7208.39",
         weightKg: 18000,
-        pieceCount: 6,
-        shipperId: PARTNER_ID,
-        consigneeId: PARTNER_ID,
+        weightUnit: "KG",
+        quantity: 6,
+        quantityUnit: "Coil",
+        marksAndNumbers: null,
         valueAmount: 42000,
         valueCurrency: "USD",
         countryOfOrigin: "CA",
@@ -153,6 +220,7 @@ function transmittableRows(movement: Row = movementRow()): Record<string, Row[]>
         id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         organizationId: TEST_ORG_ID,
         movementId: MOVEMENT_ID,
+        movementTrailerId: SLOT_ID,
         sealNumber: "SL-100231",
       },
     ],
@@ -180,8 +248,25 @@ const DISPATCHER: PermissionKey[] = [
   "movement.cancel",
 ];
 
+/** shipmentsForMovement() reads the party names/addresses through correlated
+ * subqueries the fake DB cannot evaluate, so they come from `sqlValues`. */
+const SHIPMENT_SQL_VALUES = {
+  shipperName: "Maple Ridge Steel Ltd",
+  shipperCountry: "CA",
+  shipperAddress: { city: "Hamilton", country: "CA" },
+  consigneeName: "Great Lakes Fabrication Inc",
+  consigneeCountry: "US",
+  consigneeAddress: { city: "Detroit", country: "US" },
+  entryPortCode: null,
+  inBondDestinationPortCode: null,
+};
+
 const caller = (options: MockContextOptions = {}) =>
-  createMockCaller(createCaller, { permissions: DISPATCHER, ...options });
+  createMockCaller(createCaller, {
+    permissions: DISPATCHER,
+    ...options,
+    sqlValues: { ...SHIPMENT_SQL_VALUES, ...options.sqlValues },
+  });
 
 beforeEach(() => {
   writeAudit.mockReset();
@@ -190,21 +275,23 @@ beforeEach(() => {
   notifyUser.mockReset().mockResolvedValue({ notified: 1, emailed: 0, pushed: 0 });
 });
 
-describe("movement.update", () => {
+describe("movement.crew.add", () => {
   const ASSIGNMENT = {
     orgId: TEST_ORG_ID,
     userId: "driver-user",
     eventType: "movement.assigned" as const,
     title: "You are on ACE-26-00042",
   };
-  const rowsWithDriver = (driverId: string | null) => ({
-    movements: [movementRow({ driverId })],
+  const crewRows = (): Record<string, Row[]> => ({
+    movements: [movementRow()],
+    movementCrew: [],
     drivers: [{ id: DRIVER_ID, organizationId: TEST_ORG_ID, userId: "driver-user" }],
   });
+  const add = { movementId: MOVEMENT_ID, driverId: DRIVER_ID, role: "crew_member" as const };
 
-  it("resolves the assignment inside the transaction when a driver is assigned", async () => {
-    const { caller: api } = caller({ rows: rowsWithDriver(null) });
-    await api.update({ id: MOVEMENT_ID, driverId: DRIVER_ID });
+  it("resolves the assignment inside the transaction when somebody joins the crew", async () => {
+    const { caller: api } = caller({ rows: crewRows() });
+    await api.crew.add(add);
 
     expect(resolveDriverAssignment).toHaveBeenCalledTimes(1);
     expect(resolveDriverAssignment.mock.calls[0]![1]).toMatchObject({
@@ -231,34 +318,31 @@ describe("movement.update", () => {
       order.push("notify");
       return { notified: 1, emailed: 0, pushed: 0 };
     });
-    const { caller: api } = caller({
-      rows: rowsWithDriver(null),
-      onCommit: () => order.push("commit"),
-    });
+    const { caller: api } = caller({ rows: crewRows(), onCommit: () => order.push("commit") });
 
-    await api.update({ id: MOVEMENT_ID, driverId: DRIVER_ID });
+    await api.crew.add(add);
 
     expect(order).toEqual(["resolve", "commit", "notify"]);
     expect(notifyUser).toHaveBeenCalledWith(expect.anything(), ASSIGNMENT);
   });
 
   /**
-   * The update is already durably committed by the time delivery is attempted,
-   * so a notification failure must never surface as a failed mutation — the
-   * dispatcher would retry an edit that already succeeded.
+   * The assignment is already durably committed by the time delivery is
+   * attempted, so a notification failure must never surface as a failed
+   * mutation — the dispatcher would retry an edit that already succeeded.
    */
   it("still returns the committed row when delivery fails, and logs it", async () => {
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       resolveDriverAssignment.mockResolvedValue(ASSIGNMENT);
       notifyUser.mockRejectedValue(new Error("expo is down"));
-      const { caller: api, db } = caller({ rows: rowsWithDriver(null) });
+      const { caller: api, db } = caller({ rows: crewRows() });
 
-      const row = await api.update({ id: MOVEMENT_ID, driverId: DRIVER_ID });
+      const row = await api.crew.add(add);
 
-      expect(row).toMatchObject({ id: MOVEMENT_ID, driverId: DRIVER_ID });
+      expect(row).toMatchObject({ movementId: MOVEMENT_ID, driverId: DRIVER_ID });
       // The write really did land, not just the return value.
-      expect(db.table("movements")[0]).toMatchObject({ driverId: DRIVER_ID });
+      expect(db.table("movementCrew")[0]).toMatchObject({ driverId: DRIVER_ID });
       expect(logged).toHaveBeenCalledTimes(1);
       const [message, error] = logged.mock.calls[0]!;
       expect(String(message)).toContain(MOVEMENT_ID);
@@ -271,40 +355,100 @@ describe("movement.update", () => {
 
   it("sends nothing when the assignment resolves to no recipient", async () => {
     resolveDriverAssignment.mockResolvedValue(null);
-    const { caller: api } = caller({ rows: rowsWithDriver(null) });
-    await api.update({ id: MOVEMENT_ID, driverId: DRIVER_ID });
+    const { caller: api } = caller({ rows: crewRows() });
+    await api.crew.add(add);
     expect(notifyUser).not.toHaveBeenCalled();
   });
 
-  it("stays quiet when the driver did not change", async () => {
-    const { caller: api } = caller({ rows: rowsWithDriver(DRIVER_ID) });
-    await api.update({ id: MOVEMENT_ID, driverId: DRIVER_ID });
-    expect(resolveDriverAssignment).not.toHaveBeenCalled();
+  it("demotes the sitting person in charge when a new one is promoted", async () => {
+    const rows = crewRows();
+    rows.movementCrew = [
+      {
+        id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        organizationId: TEST_ORG_ID,
+        movementId: MOVEMENT_ID,
+        driverId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        role: "person_in_charge",
+        position: 1,
+      },
+    ];
+    const { caller: api, db } = caller({ rows });
+
+    await api.crew.add({ ...add, role: "person_in_charge" });
+
+    const roles = db.table("movementCrew").map((r) => r.role);
+    expect(roles.filter((r) => r === "person_in_charge")).toHaveLength(1);
   });
 
-  it("stays quiet for a patch that does not touch the driver", async () => {
-    const { caller: api } = caller({ rows: rowsWithDriver(null) });
-    await api.update({ id: MOVEMENT_ID, tripNumber: "TRIP-9" });
-    expect(resolveDriverAssignment).not.toHaveBeenCalled();
+  it("refuses to touch the crew of a transmitted movement", async () => {
+    const rows = crewRows();
+    rows.movements = [movementRow({ status: "sent" })];
+    const { caller: api, db } = caller({ rows });
+
+    await expect(api.crew.add(add)).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    expect(db.table("movementCrew")).toHaveLength(0);
+  });
+});
+
+describe("movement.customsResponse", () => {
+  it("writes one customs_event per gateway message and lands the entry on the shipment", async () => {
+    const sent = movementRow({ status: "accepted", customsReferenceNumber: "ACE-REF1" });
+    const rows = transmittableRows(sent);
+    rows.shipments![0]!.status = "accepted";
+    const { caller: api, db } = caller({ rows });
+    const row = await api.customsResponse({ movementId: MOVEMENT_ID, decision: "released" });
+    expect(row.status).toBe("released");
+
+    const events = db.table("movementEvents").filter((e) => e.eventType === "customs_event");
+    expect(events.map((e) => (e.payload as { code: string }).code)).toEqual([
+      "entry_on_file",
+      "arrival_recorded",
+      "released",
+    ]);
+    // The entry-on-file row is about the shipment it names.
+    expect(events[0]?.shipmentId).toBe(SHIPMENT_ID);
+    expect(events[0]?.actorType).toBe("customs_api");
+    const entry = (events[0]?.payload as { entryNumber: string }).entryNumber;
+    expect(entry).toMatch(/^300\d{8}$/);
+
+    const shipment = db.table("shipments")[0]!;
+    expect(shipment.status).toBe("released");
+    expect(shipment.entryNumber).toBe(entry);
+    expect(shipment.entryOnFileAt).toBeInstanceOf(Date);
+    expect(shipment.releasedAt).toBeInstanceOf(Date);
   });
 
-  it("stays quiet when the driver is unassigned", async () => {
-    const { caller: api } = caller({ rows: rowsWithDriver(DRIVER_ID) });
-    await api.update({ id: MOVEMENT_ID, driverId: null });
-    expect(resolveDriverAssignment).not.toHaveBeenCalled();
+  it("cascades a rejection to the shipments and refuses when nothing is pending", async () => {
+    const rows = transmittableRows(movementRow({ status: "sent" }));
+    rows.shipments![0]!.status = "sent";
+    const { caller: api, db } = caller({ rows });
+    await api.customsResponse({ movementId: MOVEMENT_ID, decision: "rejected" });
+    expect(db.table("shipments")[0]?.status).toBe("rejected");
+    expect(
+      db
+        .table("movementEvents")
+        .filter((e) => e.eventType === "customs_event")
+        .map((e) => (e.payload as { code: string }).code),
+    ).toEqual(["sending", "rejected"]);
+
+    const draft = caller({ rows: transmittableRows(movementRow()) });
+    await expect(
+      draft.caller.customsResponse({ movementId: MOVEMENT_ID, decision: "accepted" }),
+    ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 });
 
 describe("movement.submit", () => {
   it("refuses to transmit a manifest that fails validation, and leaves it editable", async () => {
     const rows = transmittableRows();
-    rows.cargo = [];
-    rows.drivers = [];
+    rows.shipments = [];
+    rows.commodities = [];
+    rows.movementCrew = [];
     const { caller: api, db } = caller({ rows });
 
     await expect(api.submit({ id: MOVEMENT_ID })).rejects.toMatchObject({
       code: "PRECONDITION_FAILED",
-      message: /Cannot transmit:.*Assign a driver.*shipment line/s,
+      message: /Cannot transmit:.*person in charge.*at least one shipment/s,
     });
 
     expect(db.table("movements")[0]!.status).toBe("draft");

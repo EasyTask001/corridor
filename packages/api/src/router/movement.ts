@@ -1,15 +1,16 @@
 /**
- * Movement Builder core — headers, cargo, seals, transitions, amendments and
+ * Movement Builder core — headers, seals, transitions, amendments and
  * the append-only event timeline. Lifecycle primitives live in
  * services/movements.ts so background workers share them.
  */
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, asc, desc, eq, ilike, inArray, or, schema, sql } from "@corridor/db";
+import { and, asc, desc, eq, ilike, inArray, ne, or, schema, sql } from "@corridor/db";
 import {
   amendmentInput,
-  cargoRemoveInput,
-  cargoUpsertInput,
+  crewInput,
+  crewRemoveInput,
+  crewSetRoleInput,
   customsResponseInput,
   hasBlockingIssues,
   isEditable,
@@ -19,7 +20,11 @@ import {
   regime as regimeSchema,
   sealAddInput,
   sealRemoveInput,
+  trailerAddInput,
+  trailerRemoveInput,
+  trailerReorderInput,
   uuid,
+  type MovementPatch,
   type MovementStatus,
 } from "@corridor/domain";
 import {
@@ -29,9 +34,9 @@ import {
   router,
   type OrgContext,
 } from "../trpc";
-import { transmitMovement } from "../services/customs";
+import { simulateCustomsEvents } from "@corridor/integrations";
+import { cancelAtCustoms, transmitAmendment, transmitMovement } from "../services/customs";
 import { enqueueJob } from "../services/jobs";
-import { syncMovementRiskAlerts } from "../services/risk";
 import {
   acceptMovementSuggestion,
   dismissMovementSuggestion,
@@ -42,6 +47,7 @@ import {
   applyCustomsDecision,
   applyTransition,
   loadFull,
+  markShipmentsArrived,
   requireMovement,
   validationFor,
 } from "../services/movements";
@@ -51,14 +57,18 @@ import { recordUsage } from "../services/usage";
 
 const {
   movements,
+  movementCrew,
+  movementTrailers,
   movementAmendments,
   movementSuggestions,
-  cargo,
   seals,
   drivers,
   trucks,
   trailers,
+  equipmentTypes,
   partners,
+  ports,
+  organizationCarrierCodes,
 } = schema;
 
 function requireEditable(status: MovementStatus) {
@@ -72,6 +82,52 @@ function requireEditable(status: MovementStatus) {
 
 const actorOf = (ctx: OrgContext) => ({ orgId: ctx.orgId, userId: ctx.session.user.id });
 
+/**
+ * Step whoever currently holds the person-in-charge role down to crew member,
+ * so the caller can hand it to somebody else. `movement_crew_pic_unique` is the
+ * backstop; doing it here means promoting reads as a swap, not a constraint
+ * violation the dispatcher has to unpick.
+ */
+const demotePersonInCharge = (
+  tx: Parameters<typeof requireMovement>[0],
+  movementId: string,
+  except?: string,
+) =>
+  tx
+    .update(movementCrew)
+    .set({ role: "crew_member" })
+    .where(
+      and(
+        eq(movementCrew.movementId, movementId),
+        eq(movementCrew.role, "person_in_charge"),
+        ...(except ? [ne(movementCrew.driverId, except)] : []),
+      ),
+    );
+
+/**
+ * The manifest flags a patch may set (0022). The ACI booleans are only
+ * meaningful on an ACI movement — movements_aci_flags_check refuses them on
+ * ACE — so they are dropped, not rejected, for ACE.
+ */
+function flagsFrom(
+  regime: "ACE" | "ACI",
+  p: Pick<
+    MovementPatch,
+    "iitIndicator" | "aciLvs" | "aciPostal" | "aciFlyingTruck" | "aciInTransit" | "aciIit"
+  >,
+): Partial<typeof movements.$inferInsert> {
+  return {
+    ...(p.iitIndicator !== undefined && { iitIndicator: p.iitIndicator }),
+    ...(regime === "ACI" && {
+      ...(p.aciLvs !== undefined && { aciLvs: p.aciLvs }),
+      ...(p.aciPostal !== undefined && { aciPostal: p.aciPostal }),
+      ...(p.aciFlyingTruck !== undefined && { aciFlyingTruck: p.aciFlyingTruck }),
+      ...(p.aciInTransit !== undefined && { aciInTransit: p.aciInTransit }),
+      ...(p.aciIit !== undefined && { aciIit: p.aciIit }),
+    }),
+  };
+}
+
 const customsSimulationEnabled = () =>
   process.env.CORRIDOR_ALLOW_CUSTOMS_SIMULATION === "true" || process.env.NODE_ENV !== "production";
 
@@ -83,19 +139,32 @@ export const movementRouter = router({
         const conds = [eq(movements.organizationId, ctx.orgId)];
         if (input.status?.length) conds.push(inArray(movements.status, input.status));
         if (input.regime) conds.push(eq(movements.regime, input.regime));
-        if (input.driverId) conds.push(eq(movements.driverId, input.driverId));
+        if (input.driverId)
+          conds.push(
+            sql`exists (select 1 from public.movement_crew mc
+                        where mc.movement_id = ${movements.id} and mc.driver_id = ${input.driverId})`,
+          );
+        if (input.portId) conds.push(eq(movements.portId, input.portId));
         if (input.search) {
           const like = `%${input.search.replace(/[%_\\]/g, "\\$&")}%`;
+          // Search-by-column (Task 14): one column when named, else the three references.
+          const byColumn = {
+            movementNumber: ilike(movements.movementNumber, like),
+            tripNumber: ilike(movements.tripNumber, like),
+            customsReferenceNumber: ilike(movements.customsReferenceNumber, like),
+            driver: sql`exists (select 1 from public.movement_crew mc join public.drivers d on d.id = mc.driver_id
+                        where mc.movement_id = ${movements.id} and (d.first_name || ' ' || d.last_name) ilike ${like})`,
+            truckUnit: sql`exists (select 1 from public.trucks t where t.id = ${movements.truckId} and t.unit_number ilike ${like})`,
+            controlNumber: sql`exists (select 1 from public.shipments s where s.movement_id = ${movements.id} and s.control_number ilike ${like})`,
+          };
           conds.push(
-            or(
-              ilike(movements.movementNumber, like),
-              ilike(movements.tripNumber, like),
-              ilike(movements.customsReferenceNumber, like),
-            )!,
+            input.searchColumn
+              ? byColumn[input.searchColumn]
+              : or(byColumn.movementNumber, byColumn.tripNumber, byColumn.customsReferenceNumber)!,
           );
         }
         const where = and(...conds);
-        const [rows, counts] = await Promise.all([
+        const [rawRows, counts] = await Promise.all([
           tx
             .select({
               id: movements.id,
@@ -103,29 +172,43 @@ export const movementRouter = router({
               movementNumber: movements.movementNumber,
               tripNumber: movements.tripNumber,
               status: movements.status,
-              crossingPoint: movements.crossingPoint,
+              portId: movements.portId,
+              portCode: ports.code,
+              portName: ports.name,
+              carrierCode: movements.carrierCode,
               scheduledCrossingAt: movements.scheduledCrossingAt,
               customsReferenceNumber: movements.customsReferenceNumber,
-              driverName: sql<string | null>`${drivers.firstName} || ' ' || ${drivers.lastName}`,
+              driverName: sql<string | null>`(select d.first_name || ' ' || d.last_name
+                from public.movement_crew mc
+                join public.drivers d on d.id = mc.driver_id
+                where mc.movement_id = ${movements.id} and mc.role = 'person_in_charge'
+                limit 1)`,
               truckUnit: trucks.unitNumber,
-              trailerUnit: trailers.unitNumber,
-              cargoCount: sql<number>`(select count(*)::int from public.cargo c where c.movement_id = ${movements.id})`,
+              /** Every trailer in tow order, "TR-501 + TR-502" (0021). */
+              trailerUnit: sql<string | null>`(select string_agg(t.unit_number, ' + ' order by mt.position)
+                from public.movement_trailers mt
+                join public.trailers t on t.id = mt.trailer_id
+                where mt.movement_id = ${movements.id})`,
+              shipmentCount: sql<number>`(select count(*)::int from public.shipments s where s.movement_id = ${movements.id})`,
               updatedAt: movements.updatedAt,
               createdAt: movements.createdAt,
             })
             .from(movements)
-            .leftJoin(drivers, eq(drivers.id, movements.driverId))
             .leftJoin(trucks, eq(trucks.id, movements.truckId))
-            .leftJoin(trailers, eq(trailers.id, movements.trailerId))
+            .leftJoin(ports, eq(ports.id, movements.portId))
             .where(where)
             .orderBy(desc(movements.updatedAt))
-            .limit(input.limit)
+            .limit(input.pageSize ?? input.limit)
             .offset(input.offset),
           tx
             .select({ count: sql<number>`count(*)::int` })
             .from(movements)
             .where(where),
         ]);
+        const rows = rawRows.map(({ portCode, portName, ...row }) => ({
+          ...row,
+          port: portCode ? { code: portCode, name: portName! } : null,
+        }));
         return { rows, total: counts[0]?.count ?? 0 };
       }),
     ),
@@ -166,6 +249,19 @@ export const movementRouter = router({
           sql`select public.next_movement_number(${ctx.orgId}::uuid, ${input.regime}) as n`,
         );
         const movementNumber = numRes[0]!.n;
+        // New movements start on the regime's default filing code; the trip
+        // step can change it before transmit.
+        const [defaultCode] = await tx
+          .select({ code: organizationCarrierCodes.code })
+          .from(organizationCarrierCodes)
+          .where(
+            and(
+              eq(organizationCarrierCodes.organizationId, ctx.orgId),
+              eq(organizationCarrierCodes.regime, input.regime),
+              eq(organizationCarrierCodes.isDefault, true),
+            ),
+          )
+          .limit(1);
         const [m] = await tx
           .insert(movements)
           .values({
@@ -173,6 +269,7 @@ export const movementRouter = router({
             regime: input.regime,
             movementNumber,
             tripNumber: input.tripNumber ?? null,
+            carrierCode: defaultCode?.code ?? null,
             createdBy: ctx.session.user.id,
           })
           .returning();
@@ -190,14 +287,8 @@ export const movementRouter = router({
 
   update: permissionProcedure("movement.write")
     .input(movementPatch.extend({ id: uuid }))
-    .mutation(async ({ ctx, input }) => {
-      // Assigning (or reassigning) a driver is the one patch a driver needs to
-      // hear about. It is *resolved* inside the transaction (so `drivers` is
-      // read under the caller's RLS) but *delivered* after it commits: delivery
-      // needs the service role, and taking that connection while this one is
-      // still open would hold two from the same pool per request.
-      let pending: Awaited<ReturnType<typeof resolveDriverAssignment>> = null;
-      const row = await ctx.rls(async (tx) => {
+    .mutation(({ ctx, input }) =>
+      ctx.rls(async (tx) => {
         const { id, ...patch } = input;
         const m = await requireMovement(tx, ctx.orgId, id);
         requireEditable(m.status);
@@ -205,117 +296,288 @@ export const movementRouter = router({
           .update(movements)
           .set({
             ...(patch.tripNumber !== undefined && { tripNumber: patch.tripNumber }),
-            ...(patch.crossingPoint !== undefined && { crossingPoint: patch.crossingPoint }),
+            ...(patch.portId !== undefined && { portId: patch.portId }),
+            ...(patch.carrierCode !== undefined && { carrierCode: patch.carrierCode }),
             ...(patch.scheduledCrossingAt !== undefined && {
               scheduledCrossingAt: patch.scheduledCrossingAt
                 ? new Date(patch.scheduledCrossingAt)
                 : null,
             }),
-            ...(patch.driverId !== undefined && { driverId: patch.driverId }),
             ...(patch.truckId !== undefined && { truckId: patch.truckId }),
-            ...(patch.trailerId !== undefined && { trailerId: patch.trailerId }),
+            ...(patch.isEmpty !== undefined && { isEmpty: patch.isEmpty }),
+            ...flagsFrom(m.regime, patch),
             ...(patch.notes !== undefined && { notes: patch.notes }),
           })
           .where(eq(movements.id, id))
           .returning();
         await writeAudit(tx, ctx.orgId, "movement.update", "movement", id, m, row!);
-        if (patch.driverId && patch.driverId !== m.driverId) {
+        return row!;
+      }),
+    ),
+
+  crew: router({
+    /**
+     * Put a person on the crossing. Promoting someone to person in charge
+     * demotes whoever held it (movement_crew_pic_unique allows exactly one).
+     *
+     * Being put on a load is the one change a crew member needs to hear about.
+     * It is *resolved* inside the transaction (so `drivers` is read under the
+     * caller's RLS) but *delivered* after it commits: delivery needs the
+     * service role, and taking that connection while this one is still open
+     * would hold two from the same pool per request.
+     */
+    add: permissionProcedure("movement.write")
+      .input(crewInput)
+      .mutation(async ({ ctx, input }) => {
+        let pending: Awaited<ReturnType<typeof resolveDriverAssignment>> = null;
+        const row = await ctx.rls(async (tx) => {
+          const m = await requireMovement(tx, ctx.orgId, input.movementId);
+          requireEditable(m.status);
+          if (input.role === "person_in_charge") await demotePersonInCharge(tx, input.movementId);
+          const nextRows = await tx
+            .select({ next: sql<number>`coalesce(max(${movementCrew.position}), 0) + 1` })
+            .from(movementCrew)
+            .where(eq(movementCrew.movementId, input.movementId));
+          const [crew] = await tx
+            .insert(movementCrew)
+            .values({
+              organizationId: ctx.orgId,
+              movementId: input.movementId,
+              driverId: input.driverId,
+              role: input.role,
+              position: nextRows[0]?.next ?? 1,
+            })
+            .returning()
+            .catch((e: unknown) => {
+              if ((e as { cause?: { code?: string } })?.cause?.code === "23505")
+                throw new TRPCError({
+                  code: "CONFLICT",
+                  message: "That person is already on this crossing",
+                });
+              throw e;
+            });
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "movement.crew_add",
+            "movement_crew",
+            crew!.id,
+            null,
+            crew!,
+          );
           pending = await resolveDriverAssignment(tx, {
             orgId: ctx.orgId,
-            driverId: patch.driverId,
-            movementId: id,
-            movementNumber: row!.movementNumber,
+            driverId: input.driverId,
+            movementId: input.movementId,
+            movementNumber: m.movementNumber,
             actorUserId: ctx.session.user.id,
           });
-        }
-        return row!;
-      });
-      // Post-commit: no transaction of ours is open, so notifyUser's
-      // service-role transaction is the only connection in play.
-      //
-      // Never rethrow. The assignment is already durably committed, and a
-      // notification that could not be delivered is not a reason to hand the
-      // dispatcher a failed mutation — they would retry an edit that already
-      // succeeded. Log it instead and return the row.
-      if (pending) {
-        try {
-          await notifyUser(ctx.db, pending);
-        } catch (error) {
-          console.error(
-            `[notifications] movement.assigned dispatch failed for movement ${input.id} / driver ${input.driverId ?? "unknown"} (the update itself is committed)`,
-            error,
-          );
-        }
-      }
-      return row;
-    }),
-
-  cargo: router({
-    upsert: permissionProcedure("movement.write")
-      .input(cargoUpsertInput)
-      .mutation(({ ctx, input }) =>
-        ctx.rls(async (tx) => {
-          const { id, movementId, ...fields } = input;
-          const m = await requireMovement(tx, ctx.orgId, movementId);
-          requireEditable(m.status);
-          if (id) {
-            const [before] = await tx
-              .select()
-              .from(cargo)
-              .where(and(eq(cargo.id, id), eq(cargo.movementId, movementId)))
-              .limit(1);
-            const [row] = await tx
-              .update(cargo)
-              .set(fields)
-              .where(and(eq(cargo.id, id), eq(cargo.movementId, movementId)))
-              .returning();
-            if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-            await syncMovementRiskAlerts(tx, ctx.orgId, movementId);
-            await writeAudit(
-              tx,
-              ctx.orgId,
-              "movement.cargo_upsert",
-              "cargo",
-              row.id,
-              before ?? null,
-              row,
+          return crew!;
+        });
+        // Post-commit: no transaction of ours is open, so notifyUser's
+        // service-role transaction is the only connection in play.
+        //
+        // Never rethrow. The assignment is already durably committed, and a
+        // notification that could not be delivered is not a reason to hand the
+        // dispatcher a failed mutation — they would retry an edit that already
+        // succeeded. Log it instead and return the row.
+        if (pending) {
+          try {
+            await notifyUser(ctx.db, pending);
+          } catch (error) {
+            console.error(
+              `[notifications] movement.assigned dispatch failed for movement ${input.movementId} / driver ${input.driverId} (the assignment itself is committed)`,
+              error,
             );
-            return row;
           }
-          const nextRows = await tx
-            .select({ next: sql<number>`coalesce(max(${cargo.lineNumber}), 0) + 1` })
-            .from(cargo)
-            .where(eq(cargo.movementId, movementId));
-          const next = nextRows[0]?.next ?? 1;
-          const [row] = await tx
-            .insert(cargo)
-            .values({ ...fields, movementId, organizationId: ctx.orgId, lineNumber: next })
-            .returning();
-          await syncMovementRiskAlerts(tx, ctx.orgId, movementId);
-          await writeAudit(tx, ctx.orgId, "movement.cargo_upsert", "cargo", row!.id, null, row!);
-          return row!;
-        }),
-      ),
+        }
+        return row;
+      }),
+
     remove: permissionProcedure("movement.write")
-      .input(cargoRemoveInput)
+      .input(crewRemoveInput)
       .mutation(({ ctx, input }) =>
         ctx.rls(async (tx) => {
           const m = await requireMovement(tx, ctx.orgId, input.movementId);
           requireEditable(m.status);
           const [removed] = await tx
-            .delete(cargo)
-            .where(and(eq(cargo.id, input.id), eq(cargo.movementId, input.movementId)))
+            .delete(movementCrew)
+            .where(
+              and(
+                eq(movementCrew.movementId, input.movementId),
+                eq(movementCrew.driverId, input.driverId),
+              ),
+            )
             .returning();
+          if (!removed) throw new TRPCError({ code: "NOT_FOUND", message: "Not on this crossing" });
           await writeAudit(
             tx,
             ctx.orgId,
-            "movement.cargo_remove",
-            "cargo",
-            input.id,
-            removed ?? { movementId: input.movementId },
+            "movement.crew_remove",
+            "movement_crew",
+            removed.id,
+            removed,
             null,
           );
-          return { id: input.id };
+          return { id: removed.id };
+        }),
+      ),
+
+    setRole: permissionProcedure("movement.write")
+      .input(crewSetRoleInput)
+      .mutation(({ ctx, input }) =>
+        ctx.rls(async (tx) => {
+          const m = await requireMovement(tx, ctx.orgId, input.movementId);
+          requireEditable(m.status);
+          if (input.role === "person_in_charge")
+            await demotePersonInCharge(tx, input.movementId, input.driverId);
+          const [row] = await tx
+            .update(movementCrew)
+            .set({ role: input.role })
+            .where(
+              and(
+                eq(movementCrew.movementId, input.movementId),
+                eq(movementCrew.driverId, input.driverId),
+              ),
+            )
+            .returning();
+          if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Not on this crossing" });
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "movement.crew_set_role",
+            "movement_crew",
+            row.id,
+            null,
+            { driverId: input.driverId, role: input.role },
+          );
+          return row;
+        }),
+      ),
+  }),
+
+  trailers: router({
+    /** Hitch a trailer; it goes to the back of the tow. */
+    add: permissionProcedure("movement.write")
+      .input(trailerAddInput)
+      .mutation(({ ctx, input }) =>
+        ctx.rls(async (tx) => {
+          const m = await requireMovement(tx, ctx.orgId, input.movementId);
+          requireEditable(m.status);
+          const [unit] = await tx
+            .select({ id: trailers.id })
+            .from(trailers)
+            .where(and(eq(trailers.id, input.trailerId), eq(trailers.organizationId, ctx.orgId)))
+            .limit(1);
+          if (!unit) throw new TRPCError({ code: "NOT_FOUND", message: "Trailer not found" });
+          const nextRows = await tx
+            .select({ next: sql<number>`coalesce(max(${movementTrailers.position}), 0) + 1` })
+            .from(movementTrailers)
+            .where(eq(movementTrailers.movementId, input.movementId));
+          const [row] = await tx
+            .insert(movementTrailers)
+            .values({
+              organizationId: ctx.orgId,
+              movementId: input.movementId,
+              trailerId: input.trailerId,
+              position: nextRows[0]?.next ?? 1,
+            })
+            .returning()
+            .catch((e: unknown) => {
+              if ((e as { cause?: { code?: string } })?.cause?.code === "23505")
+                throw new TRPCError({
+                  code: "CONFLICT",
+                  message: "That trailer is already on this movement",
+                });
+              throw e;
+            });
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "movement.trailer_add",
+            "movement_trailer",
+            row!.id,
+            null,
+            row!,
+          );
+          return row!;
+        }),
+      ),
+
+    /** Drop a trailer; its seals go with it (on delete cascade). */
+    remove: permissionProcedure("movement.write")
+      .input(trailerRemoveInput)
+      .mutation(({ ctx, input }) =>
+        ctx.rls(async (tx) => {
+          const m = await requireMovement(tx, ctx.orgId, input.movementId);
+          requireEditable(m.status);
+          const [removed] = await tx
+            .delete(movementTrailers)
+            .where(
+              and(
+                eq(movementTrailers.movementId, input.movementId),
+                eq(movementTrailers.trailerId, input.trailerId),
+              ),
+            )
+            .returning();
+          if (!removed)
+            throw new TRPCError({ code: "NOT_FOUND", message: "Not on this movement" });
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "movement.trailer_remove",
+            "movement_trailer",
+            removed.id,
+            removed,
+            null,
+          );
+          return { id: removed.id };
+        }),
+      ),
+
+    /** Set the tow order; `trailerIds` must be exactly the trailers on the movement. */
+    reorder: permissionProcedure("movement.write")
+      .input(trailerReorderInput)
+      .mutation(({ ctx, input }) =>
+        ctx.rls(async (tx) => {
+          const m = await requireMovement(tx, ctx.orgId, input.movementId);
+          requireEditable(m.status);
+          const current = await tx
+            .select({ id: movementTrailers.id, trailerId: movementTrailers.trailerId })
+            .from(movementTrailers)
+            .where(eq(movementTrailers.movementId, input.movementId));
+          const wanted = new Set(input.trailerIds);
+          if (
+            wanted.size !== input.trailerIds.length ||
+            current.length !== wanted.size ||
+            current.some((c) => !wanted.has(c.trailerId))
+          ) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Tow order must list every trailer on the movement exactly once",
+            });
+          }
+          for (const [i, trailerId] of input.trailerIds.entries()) {
+            await tx
+              .update(movementTrailers)
+              .set({ position: i + 1 })
+              .where(
+                and(
+                  eq(movementTrailers.movementId, input.movementId),
+                  eq(movementTrailers.trailerId, trailerId),
+                ),
+              );
+          }
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "movement.trailer_reorder",
+            "movement",
+            input.movementId,
+            null,
+            { trailerIds: input.trailerIds },
+          );
+          return { ok: true };
         }),
       ),
   }),
@@ -328,12 +590,32 @@ export const movementRouter = router({
           const { movementId, ...fields } = input;
           const m = await requireMovement(tx, ctx.orgId, movementId);
           requireEditable(m.status);
+          // A seal goes on one of this movement's trailer slots, or on the
+          // truck (null). seals_limit() is the backstop for both the slot
+          // ownership and the 4-per-trailer / 1-per-truck cap.
+          if (fields.movementTrailerId) {
+            const [slot] = await tx
+              .select({ id: movementTrailers.id })
+              .from(movementTrailers)
+              .where(
+                and(
+                  eq(movementTrailers.id, fields.movementTrailerId),
+                  eq(movementTrailers.movementId, movementId),
+                ),
+              )
+              .limit(1);
+            if (!slot)
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "That trailer is not on this movement",
+              });
+          }
           const [row] = await tx
             .insert(seals)
             .values({
               movementId,
               organizationId: ctx.orgId,
-              trailerId: fields.trailerId ?? m.trailerId,
+              movementTrailerId: fields.movementTrailerId ?? null,
               sealNumber: fields.sealNumber,
               sealType: fields.sealType ?? null,
               appliedBy: fields.appliedBy ?? null,
@@ -341,12 +623,14 @@ export const movementRouter = router({
             })
             .returning()
             .catch((e: unknown) => {
-              const code = (e as { cause?: { code?: string } })?.cause?.code;
-              if (code === "23505")
+              const cause = (e as { cause?: { code?: string; message?: string } })?.cause;
+              if (cause?.code === "23505")
                 throw new TRPCError({
                   code: "CONFLICT",
                   message: "Seal already recorded on this movement",
                 });
+              if (cause?.code === "P0001" && cause.message?.includes("seal limit"))
+                throw new TRPCError({ code: "PRECONDITION_FAILED", message: cause.message });
               throw e;
             });
           await writeAudit(tx, ctx.orgId, "movement.seal_add", "seal", row!.id, null, row!);
@@ -460,6 +744,9 @@ export const movementRouter = router({
     .mutation(({ ctx, input }) =>
       ctx.rls(async (tx) => {
         const m = await requireMovement(tx, ctx.orgId, input.id);
+        // A filed manifest is withdrawn at the gateway first; a transport
+        // failure throws and nothing below is committed.
+        const ack = await cancelAtCustoms(tx, actorOf(ctx), m, input.reason ?? null);
         const row = await applyTransition(
           tx,
           actorOf(ctx),
@@ -467,7 +754,7 @@ export const movementRouter = router({
           "cancelled",
           "user",
           {},
-          { reason: input.reason ?? null },
+          { reason: input.reason ?? null, ...(ack && { customsAcknowledged: ack.receivedAt }) },
         );
         await writeAudit(
           tx,
@@ -489,6 +776,7 @@ export const movementRouter = router({
       ctx.rls(async (tx) => {
         const m = await requireMovement(tx, ctx.orgId, input.id);
         const row = await applyTransition(tx, actorOf(ctx), m, "arrived", "user");
+        await markShipmentsArrived(tx, m.id);
         await writeAudit(
           tx,
           ctx.orgId,
@@ -524,7 +812,8 @@ export const movementRouter = router({
           (set as Record<string, unknown>)[key as string] = after;
         };
         consider("tripNumber", m.tripNumber, p.tripNumber);
-        consider("crossingPoint", m.crossingPoint, p.crossingPoint);
+        consider("portId", m.portId, p.portId);
+        consider("carrierCode", m.carrierCode, p.carrierCode);
         consider(
           "scheduledCrossingAt",
           m.scheduledCrossingAt?.toISOString() ?? null,
@@ -535,11 +824,21 @@ export const movementRouter = router({
             ? new Date(set.scheduledCrossingAt as unknown as string)
             : null;
         }
-        consider("driverId", m.driverId, p.driverId);
         consider("truckId", m.truckId, p.truckId);
-        consider("trailerId", m.trailerId, p.trailerId);
+        consider("isEmpty", m.isEmpty, p.isEmpty);
+        const flags = flagsFrom(m.regime, p);
+        for (const [key, after] of Object.entries(flags))
+          consider(key as keyof typeof set, m[key as keyof typeof m], after);
         if (Object.keys(diff).length === 0) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Amendment contains no changes" });
+        }
+        // CBSA wants a reason code with every amendment; the DB trigger
+        // (movement_amendments_reason_guard) is the backstop.
+        if (m.regime === "ACI" && !input.reasonCode) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "An ACI amendment needs a CBSA reason code",
+          });
         }
 
         const nextRows = await tx
@@ -556,20 +855,37 @@ export const movementRouter = router({
             organizationId: ctx.orgId,
             amendmentNumber: next,
             reason: input.reason,
+            reasonCode: input.reasonCode ?? null,
+            shipmentId: input.shipmentId ?? null,
             diff,
             status: "submitted",
             createdBy: ctx.session.user.id,
           })
-          .returning();
+          .returning()
+          .catch((e: unknown) => {
+            const cause = (e as { cause?: { code?: string; message?: string } })?.cause;
+            if (cause?.code === "P0001")
+              throw new TRPCError({ code: "BAD_REQUEST", message: cause.message ?? "Invalid amendment" });
+            throw e;
+          });
         await addEvent(tx, actorOf(ctx), m.id, {
           eventType: "amendment",
           actorType: "user",
-          payload: { amendmentNumber: next, reason: input.reason, diff },
+          shipmentId: input.shipmentId ?? null,
+          payload: {
+            amendmentNumber: next,
+            reason: input.reason,
+            reasonCode: input.reasonCode ?? null,
+            diff,
+          },
         });
         // One UPDATE: status change + patched fields (the guard permits edits alongside a transition).
         const updated = await applyTransition(tx, actorOf(ctx), m, "sent", "user", set, {
           amendmentNumber: next,
         });
+        // Re-file with the gateway (0023). Throws on transport failure, which
+        // rolls the amendment and the transition back.
+        await transmitAmendment(tx, actorOf(ctx), m.id, next);
         await writeAudit(
           tx,
           ctx.orgId,
@@ -581,6 +897,7 @@ export const movementRouter = router({
             status: updated.status,
             amendmentNumber: next,
             reason: input.reason,
+            reasonCode: input.reasonCode ?? null,
             diff,
           },
         );
@@ -601,14 +918,34 @@ export const movementRouter = router({
           throw new TRPCError({ code: "FORBIDDEN", message: "Customs simulation is disabled" });
         }
         const m = await requireMovement(tx, ctx.orgId, input.movementId);
+        if (m.status !== "sent" && m.status !== "accepted" && m.status !== "held") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: `No customs decision is pending while ${m.status}`,
+          });
+        }
+        const referenceNumber =
+          input.referenceNumber ??
+          m.customsReferenceNumber ??
+          `${m.regime}-SIM-${Date.now().toString(36).toUpperCase()}`;
+        // Same message sequence the mock gateway would send, so the timeline
+        // and the shipments' entry numbers look the same either way.
+        const full = await loadFull(tx, ctx.orgId, m.id);
+        const simulated = simulateCustomsEvents({
+          regime: m.regime,
+          decision: input.decision,
+          currentStatus: m.status,
+          referenceNumber,
+          portOfEntry: full.port?.code ?? null,
+          shipments: full.shipments.map((s) => ({ controlNumber: s.controlNumber })),
+        });
         const row = await applyCustomsDecision(tx, actorOf(ctx), m, {
           decision: input.decision,
-          referenceNumber:
-            input.referenceNumber ??
-            m.customsReferenceNumber ??
-            `${m.regime}-SIM-${Date.now().toString(36).toUpperCase()}`,
+          referenceNumber,
           message: input.message ?? null,
           simulated: true,
+          events: simulated.events,
+          shipments: simulated.shipments,
         });
         await writeAudit(
           tx,
@@ -718,12 +1055,13 @@ export const movementRouter = router({
   /** Lookup data for the wizard dropdowns in one round-trip. */
   options: permissionProcedure("movement.read").query(({ ctx }) =>
     ctx.rls(async (tx) => {
-      const [d, t, tr, p] = await Promise.all([
+      const [d, t, tr, p, cc] = await Promise.all([
         tx
           .select({
             id: drivers.id,
             label: sql<string>`${drivers.lastName} || ', ' || ${drivers.firstName}`,
             licenseExpiry: drivers.licenseExpiry,
+            personType: drivers.personType,
           })
           .from(drivers)
           .where(and(eq(drivers.organizationId, ctx.orgId), eq(drivers.status, "active")))
@@ -734,17 +1072,44 @@ export const movementRouter = router({
           .where(and(eq(trucks.organizationId, ctx.orgId), eq(trucks.status, "active")))
           .orderBy(asc(trucks.unitNumber)),
         tx
-          .select({ id: trailers.id, label: trailers.unitNumber, type: trailers.trailerType })
+          .select({
+            id: trailers.id,
+            label: trailers.unitNumber,
+            type: trailers.trailerType,
+            typeLabel: equipmentTypes.label,
+          })
           .from(trailers)
+          .leftJoin(equipmentTypes, eq(equipmentTypes.code, trailers.trailerType))
           .where(and(eq(trailers.organizationId, ctx.orgId), eq(trailers.status, "active")))
           .orderBy(asc(trailers.unitNumber)),
         tx
-          .select({ id: partners.id, label: partners.name, type: partners.type })
+          .select({
+            id: partners.id,
+            label: partners.name,
+            type: partners.type,
+            country: sql<string | null>`${partners.address}->>'country'`,
+          })
           .from(partners)
           .where(and(eq(partners.organizationId, ctx.orgId), eq(partners.status, "active")))
           .orderBy(asc(partners.name)),
+        tx
+          .select({
+            id: organizationCarrierCodes.id,
+            regime: organizationCarrierCodes.regime,
+            code: organizationCarrierCodes.code,
+            label: organizationCarrierCodes.label,
+            isDefault: organizationCarrierCodes.isDefault,
+          })
+          .from(organizationCarrierCodes)
+          .where(
+            and(
+              eq(organizationCarrierCodes.organizationId, ctx.orgId),
+              eq(organizationCarrierCodes.status, "active"),
+            ),
+          )
+          .orderBy(organizationCarrierCodes.regime, desc(organizationCarrierCodes.isDefault)),
       ]);
-      return { drivers: d, trucks: t, trailers: tr, partners: p };
+      return { drivers: d, trucks: t, trailers: tr, partners: p, carrierCodes: cc };
     }),
   ),
 });

@@ -207,11 +207,24 @@ reachable from a browser bundle:
 The RLS-bypassing **database** path is `withServiceRole()` (`packages/db/src/rls.ts:56`),
 whose contract is that callers must filter by `organization_id` themselves. Its
 call sites are the job worker and cron routes (`api/jobs/process`,
-`api/jobs/expiry-scan`), `packages/api/src/services/jobs.ts`,
-`packages/api/src/services/audit.ts` (audit rows for actorless events) and
-`packages/api/src/router/billing.ts`. Each is a place where there is genuinely no
-caller to derive claims from. Cross-tenant-leak coverage lives in
+`api/jobs/expiry-scan`, `api/jobs/notices-sync`), `packages/api/src/services/jobs.ts`,
+`packages/api/src/services/audit.ts` (audit rows for actorless events),
+`packages/api/src/router/billing.ts`, and — since migration 0023 — the customs
+webhook (`api/webhooks/customs` → `applyInboundCustomsMessage`, which resolves the
+gateway's reference number to one organization through `customs_submissions`
+before touching anything, and is idempotent per `eventId`). Each is a place where
+there is genuinely no caller to derive claims from. Cross-tenant-leak coverage lives in
 `packages/db/src/rls.integration.test.ts`.
+
+One caller is the deliberate exception to "filters `organization_id` itself":
+`packages/api/src/services/tracking.ts` (public `/track` lookup, migration 0027)
+calls `withServiceRole()` to invoke `lookup_shipment_status()`, which matches
+across every tenant on carrier code + control number rather than one
+organization — there is no session to scope to. The function itself is the
+guard: `SECURITY DEFINER`, `search_path` pinned, `EXECUTE` revoked from `anon`
+and `authenticated` and granted only to `service_role`, and it returns only
+status/port/entry timestamps. The route is additionally IP-rate-limited
+(`services/tracking.ts` → `checkPublicRateLimit`) before the lookup runs.
 
 ## 9. SECURITY DEFINER functions pin `search_path`
 

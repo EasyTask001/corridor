@@ -24,6 +24,11 @@ vi.mock("@/lib/supabase/server", () => ({
   createSupabaseServerClient: async () => ({ auth: { signInWithPassword, signUp } }),
 }));
 vi.mock("next/navigation", () => ({ redirect: (to: string) => redirect(to) }));
+const cookieSet = vi.fn();
+const cookieDelete = vi.fn();
+vi.mock("next/headers", () => ({
+  cookies: async () => ({ set: cookieSet, delete: cookieDelete, get: () => undefined, getAll: () => [] }),
+}));
 
 process.env.NEXT_PUBLIC_SUPABASE_URL ??= "http://127.0.0.1:55321";
 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??= "anon-key";
@@ -45,6 +50,8 @@ beforeEach(() => {
   signInWithPassword.mockReset().mockResolvedValue({ error: null });
   signUp.mockReset().mockResolvedValue({ data: { session: null }, error: null });
   redirect.mockClear();
+  cookieSet.mockClear();
+  cookieDelete.mockClear();
 });
 
 describe("signIn", () => {
@@ -88,6 +95,16 @@ describe("signIn", () => {
       error: expect.any(String),
     });
     expect(passwordSignInBlockedFor).not.toHaveBeenCalled();
+  });
+
+  it("remembers the session only when 'Stay signed in' is ticked", async () => {
+    passwordSignInBlockedFor.mockResolvedValue(null);
+    await expect(signIn(null, form({ ...CREDENTIALS, remember: "on" }))).rejects.toThrow("REDIRECT:/dashboard");
+    expect(cookieSet).toHaveBeenCalledWith("corridor-persist", "1", expect.objectContaining({ httpOnly: true, maxAge: 31536000 }));
+    cookieSet.mockClear();
+    await expect(signIn(null, form(CREDENTIALS))).rejects.toThrow("REDIRECT:/dashboard");
+    expect(cookieSet).not.toHaveBeenCalled();
+    expect(cookieDelete).toHaveBeenCalledWith("corridor-persist");
   });
 });
 

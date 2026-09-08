@@ -26,10 +26,31 @@ export const NOTIFICATION_EVENT_TYPES = {
     defaultChannel: ["in_app"],
     targeted: false,
   },
+  "customs.notice": {
+    label: "Customs service notice",
+    description: "CBP or CBSA published a service notice (outage, cut-over, port closure).",
+    permission: "movement.read",
+    defaultChannel: ["in_app"],
+    targeted: false,
+  },
   "document.review_needed": {
     label: "Document needs review",
     description: "AI extraction finished with low confidence and needs a human check.",
     permission: "document.review_extraction",
+    defaultChannel: ["in_app"],
+    targeted: false,
+  },
+  "movement.accepted": {
+    label: "Manifest accepted",
+    description: "CBP/CBSA accepted a manifest — the driver sheet is on its way to dispatch.",
+    permission: "movement.read",
+    defaultChannel: ["in_app"],
+    targeted: false,
+  },
+  "shipment.entry_on_file": {
+    label: "Entry on file",
+    description: "Every shipment on a manifest has its entry number.",
+    permission: "movement.read",
     defaultChannel: ["in_app"],
     targeted: false,
   },
@@ -51,9 +72,10 @@ export const notificationEventType = z.enum(
 /**
  * Delivery channels. `push` reaches the Expo driver app through the devices a
  * user registered with `notifications.registerDevice` — a member with no
- * registered device simply receives nothing on that channel.
+ * registered device simply receives nothing on that channel. `sms` (0025) goes
+ * to `user_profiles.phone`; a member with no phone receives nothing on it.
  */
-export const notificationChannel = z.enum(["in_app", "email", "push"]);
+export const notificationChannel = z.enum(["in_app", "email", "push", "sms"]);
 export type NotificationChannel = z.infer<typeof notificationChannel>;
 
 /** The channels an event type uses when the member has no rule row of their own. */

@@ -1,8 +1,9 @@
 /**
  * `documents.applyExtraction` — the human-in-the-loop step that turns a
- * reviewed AI extraction into cargo lines. What matters here is that AI output
- * only reaches `cargo` through a reviewer, that the document and movement
- * guards hold, and that applying resolves the low-confidence alert.
+ * reviewed AI extraction into a draft shipment with commodity lines. What
+ * matters here is that AI output only reaches `commodities` through a
+ * reviewer, that the document and movement guards hold, and that applying
+ * resolves the low-confidence alert.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PermissionKey } from "@corridor/domain";
@@ -43,9 +44,15 @@ const movementRow = (over: Row = {}): Row => ({
   organizationId: TEST_ORG_ID,
   regime: "ACE",
   movementNumber: "ACE-26-00042",
+  carrierCode: "PFTR",
   status: "draft",
   ...over,
 });
+
+const partnerRows = (): Row[] => [
+  { id: SHIPPER_ID, organizationId: TEST_ORG_ID, name: "Maple Ridge Steel Ltd" },
+  { id: CONSIGNEE_ID, organizationId: TEST_ORG_ID, name: "Great Lakes Fabrication Inc" },
+];
 
 /** Two reviewer-confirmed lines, in the same shape the review UI submits. */
 const LINES = [
@@ -53,7 +60,8 @@ const LINES = [
     commodityDescription: "Hot-rolled steel coils",
     hsCode: "7208.39",
     weightKg: 18000,
-    pieceCount: 6,
+    quantity: 6,
+    quantityUnit: "Coil" as const,
     valueAmount: 42000,
     valueCurrency: "USD" as const,
     countryOfOrigin: "CA",
@@ -63,7 +71,7 @@ const LINES = [
     commodityDescription: "Galvanized sheet, coils",
     hsCode: "7210.49",
     weightKg: 4000,
-    pieceCount: 3,
+    quantity: 3,
   },
 ];
 
@@ -82,9 +90,7 @@ function caller(
   over: {
     documents?: Row[];
     movements?: Row[];
-    cargo?: Row[];
     alerts?: Row[];
-    nextLine?: number;
     permissions?: PermissionKey[];
   } = {},
 ) {
@@ -93,54 +99,72 @@ function caller(
     rows: {
       sourceDocuments: over.documents ?? [documentRow()],
       movements: over.movements ?? [movementRow()],
-      cargo: over.cargo ?? [],
+      partners: partnerRows(),
+      shipments: [],
+      commodities: [],
       complianceAlerts: over.alerts ?? [lowConfidenceAlert()],
       movementEvents: [],
     },
-    sqlValues: { next: over.nextLine ?? 1 },
   });
 }
 
 const applyInput = (over: Record<string, unknown> = {}) => ({
   documentId: DOCUMENT_ID,
   movementId: MOVEMENT_ID,
+  controlReference: "PAPS90210",
   shipperId: SHIPPER_ID,
   consigneeId: CONSIGNEE_ID,
   lines: LINES,
-  mode: "append" as const,
   ...over,
 });
 
 beforeEach(() => writeAudit.mockReset());
 
 describe("documents.applyExtraction", () => {
-  it("creates one cargo line per reviewed line, numbered after the existing ones", async () => {
-    const { caller: api, db } = caller({ nextLine: 3 });
+  it("creates one draft shipment carrying a commodity line per reviewed line", async () => {
+    const { caller: api, db } = caller();
 
     const result = await api.applyExtraction(applyInput());
 
-    expect(result).toEqual({ movementId: MOVEMENT_ID, inserted: 2 });
-    const cargo = db.table("cargo");
-    expect(cargo).toHaveLength(2);
-    expect(cargo[0]).toMatchObject({
+    const shipment = db.table("shipments")[0]!;
+    expect(result).toEqual({
       movementId: MOVEMENT_ID,
+      shipmentId: shipment.id,
+      inserted: 2,
+    });
+    expect(shipment).toMatchObject({
       organizationId: TEST_ORG_ID,
-      lineNumber: 3,
-      commodityDescription: "Hot-rolled steel coils",
-      hsCode: "7208.39",
-      weightKg: 18000,
-      pieceCount: 6,
+      regime: "ACE",
+      movementId: MOVEMENT_ID,
+      carrierCode: "PFTR",
+      shipmentType: "regular_bill",
+      cargoType: null,
+      controlReference: "PAPS90210",
       shipperId: SHIPPER_ID,
       consigneeId: CONSIGNEE_ID,
       sourceDocumentId: DOCUMENT_ID,
+    });
+
+    const lines = db.table("commodities");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatchObject({
+      shipmentId: shipment.id,
+      organizationId: TEST_ORG_ID,
+      lineNumber: 1,
+      commodityDescription: "Hot-rolled steel coils",
+      hsCode: "7208.39",
+      weightKg: 18000,
+      quantity: 6,
+      quantityUnit: "Coil",
+      sourceDocumentId: DOCUMENT_ID,
       extractionConfidence: 0.91,
     });
-    expect(cargo[1]).toMatchObject({
-      lineNumber: 4,
+    expect(lines[1]).toMatchObject({
+      lineNumber: 2,
       commodityDescription: "Galvanized sheet, coils",
     });
     // Fields the reviewer left blank are stored as null, never undefined.
-    expect(cargo[1]!.valueCurrency).toBeNull();
+    expect(lines[1]!.valueCurrency).toBeNull();
   });
 
   it("marks the document applied, notes it on the timeline and audits the apply", async () => {
@@ -158,7 +182,7 @@ describe("documents.applyExtraction", () => {
       eventType: "note",
       actorType: "user",
       payload: {
-        body: expect.stringContaining("Applied 2 shipment line(s) from bol-steel-coils.pdf"),
+        body: expect.stringContaining("Applied 2 commodity line(s) from bol-steel-coils.pdf"),
         documentId: DOCUMENT_ID,
       },
     });
@@ -169,7 +193,12 @@ describe("documents.applyExtraction", () => {
       "source_document",
       DOCUMENT_ID,
       { status: "extracted", movementId: null },
-      { status: "applied", movementId: MOVEMENT_ID, insertedLines: 2, mode: "append" },
+      {
+        status: "applied",
+        movementId: MOVEMENT_ID,
+        shipmentId: expect.any(String),
+        insertedLines: 2,
+      },
     );
   });
 
@@ -184,18 +213,6 @@ describe("documents.applyExtraction", () => {
     });
   });
 
-  it("replaces the existing lines when the reviewer chose replace", async () => {
-    const { caller: api, db } = caller({
-      cargo: [{ id: "old", movementId: MOVEMENT_ID, lineNumber: 1, commodityDescription: "Stale" }],
-    });
-
-    await api.applyExtraction(applyInput({ mode: "replace" }));
-
-    const cargo = db.table("cargo");
-    expect(cargo).toHaveLength(2);
-    expect(cargo.map((c) => c.commodityDescription)).not.toContain("Stale");
-  });
-
   it("refuses a document that has not been extracted yet", async () => {
     const { caller: api, db } = caller({ documents: [documentRow({ uploadStatus: "failed" })] });
 
@@ -203,18 +220,18 @@ describe("documents.applyExtraction", () => {
       code: "PRECONDITION_FAILED",
       message: "Document has not been extracted yet",
     });
-    expect(db.table("cargo")).toHaveLength(0);
+    expect(db.table("commodities")).toHaveLength(0);
     expect(writeAudit).not.toHaveBeenCalled();
   });
 
-  it("refuses to write cargo onto a manifest that is no longer editable", async () => {
+  it("refuses to write commodities onto a manifest that is no longer editable", async () => {
     const { caller: api, db } = caller({ movements: [movementRow({ status: "sent" })] });
 
     await expect(api.applyExtraction(applyInput())).rejects.toMatchObject({
       code: "PRECONDITION_FAILED",
       message: "Movement cannot be edited while sent",
     });
-    expect(db.table("cargo")).toHaveLength(0);
+    expect(db.table("commodities")).toHaveLength(0);
     expect(db.table("sourceDocuments")[0]!.uploadStatus).toBe("extracted");
   });
 
@@ -234,7 +251,7 @@ describe("documents.applyExtraction", () => {
       code: "FORBIDDEN",
       message: "Missing permission: document.review_extraction",
     });
-    expect(db.table("cargo")).toHaveLength(0);
+    expect(db.table("commodities")).toHaveLength(0);
     expect(writeAudit).not.toHaveBeenCalled();
   });
 });

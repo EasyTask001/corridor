@@ -31,7 +31,7 @@ export default function MovementScreen() {
     );
   }
 
-  const { driver, truck, trailer, events, cargo } = data;
+  const { crew, truck, trailers, events, shipments } = data;
   const movement = data;
 
   return (
@@ -52,16 +52,20 @@ export default function MovementScreen() {
           {movement.tripNumber ? ` · Trip ${movement.tripNumber}` : ""}
         </Text>
         <Text style={styles.body}>
-          Crossing: {movement.crossingPoint?.name ?? movement.crossingPoint?.code ?? "not set"}
+          Crossing: {movement.port?.name ?? movement.port?.code ?? "not set"}
         </Text>
         <Text style={styles.body}>Scheduled: {when(movement.scheduledCrossingAt)}</Text>
         {movement.customsReferenceNumber ? (
           <Text style={styles.body}>Customs ref: {movement.customsReferenceNumber}</Text>
         ) : null}
         <Text style={styles.muted}>
-          {driver ? `${driver.firstName} ${driver.lastName}` : "No driver"}
+          {crew.length > 0
+            ? crew.map((c) => `${c.firstName} ${c.lastName}`).join(", ")
+            : "No crew"}
           {truck ? ` · Truck ${truck.unitNumber}` : ""}
-          {trailer ? ` · Trailer ${trailer.unitNumber}` : ""}
+          {trailers.length > 0
+            ? ` · Trailer ${trailers.map((t) => t.unitNumber).join(" + ")}`
+            : ""}
         </Text>
       </View>
 
@@ -82,14 +86,19 @@ export default function MovementScreen() {
       </View>
 
       <View style={styles.panel}>
-        <Text style={styles.h2}>Cargo ({cargo.length})</Text>
-        {cargo.length === 0 ? (
-          <Text style={styles.muted}>No cargo lines on this movement.</Text>
+        <Text style={styles.h2}>Shipments ({shipments.length})</Text>
+        {shipments.length === 0 ? (
+          <Text style={styles.muted}>No shipments on this movement.</Text>
         ) : (
-          cargo.map((line) => (
-            <Text key={line.id} style={styles.body}>
-              {line.lineNumber}. {line.commodityDescription}
-            </Text>
+          shipments.map((shipment) => (
+            <View key={shipment.id} style={{ gap: 2, paddingVertical: 4 }}>
+              <Text style={styles.body}>{shipment.controlNumber}</Text>
+              {shipment.commodities.map((line) => (
+                <Text key={line.id} style={styles.muted}>
+                  {line.lineNumber}. {line.commodityDescription}
+                </Text>
+              ))}
+            </View>
           ))
         )}
       </View>

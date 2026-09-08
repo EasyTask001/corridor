@@ -337,6 +337,7 @@ export function createMockContext(options: MockContextOptions = {}): MockContext
     session,
     supabase: (options.supabase ?? {}) as SupabaseClient,
     db: {} as Context["db"],
+    headers: new Headers(),
     // Modelled as a real transaction boundary: `onCommit` fires when the
     // callback resolves, which is what lets a test assert that post-commit work
     // (notification delivery, cache invalidation) really happens afterwards.

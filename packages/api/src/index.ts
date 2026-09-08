@@ -15,6 +15,9 @@ export {
 export { getKv, getRedis, MemoryKv, resetKvForTests, type KvStore } from "./infra/redis";
 export { invalidatePermissionCache } from "./infra/permission-cache";
 export { scanOrganization } from "./services/compliance";
+export { applyInboundCustomsMessage, pollCustomsStatus } from "./services/customs";
+export { syncCarrierNotices } from "./services/notices";
+export { generateTableReport, signedUrlFor } from "./services/pdf";
 export {
   enqueueJob,
   processDueJobs,

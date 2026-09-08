@@ -20,17 +20,20 @@
     "@corridor/db": "workspace:*",
     "@corridor/domain": "workspace:*",
     "@corridor/integrations": "workspace:*",
+    "@corridor/pdf": "workspace:*",
     "@supabase/supabase-js": "^2.57.4",
     "@trpc/server": "^11.18.0",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.4",
     "ai": "^7.0.93",
+    "papaparse": "5.7.0",
     "superjson": "^2.2.6",
     "zod": "^4.1.5"
   },
   "devDependencies": {
     "@corridor/config": "workspace:*",
     "@types/node": "^22.18.0",
+    "@types/papaparse": "5.5.2",
     "eslint": "^9.35.0",
     "typescript": "^5.9.2",
     "vitest": "^5.0.0"

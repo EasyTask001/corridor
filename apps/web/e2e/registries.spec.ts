@@ -75,6 +75,35 @@ test.describe("registries", () => {
     await expect(page.getByText(`Driver's license expires in 7 days — Ada ${last}`)).toBeVisible();
   });
 
+  test("a driver's travel documents are recorded on their own tab", async ({ page }) => {
+    await login(page, "dispatch@pathfinder.demo");
+    await page.goto("/parties/drivers");
+    await page.getByLabel("Search").fill("Reyes");
+    await page.getByRole("button", { name: "Edit" }).first().click();
+
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("button", { name: "Travel documents" }).click();
+    // Seeded: Marcus Reyes travels on a passport (primary) plus a FAST card.
+    await expect(dialog.getByText("US8871220")).toBeVisible();
+    await expect(dialog.getByText("FAST-77014")).toBeVisible();
+
+    const number = `NX-${unique().toUpperCase()}`;
+    await dialog.getByRole("button", { name: "Add document" }).click();
+    await dialog.getByLabel("Document type").selectOption("nexus");
+    await dialog.getByLabel("Document number").fill(number);
+    await dialog.getByLabel("Issuing country").fill("us");
+    await dialog.getByLabel("Expires on").fill(isoDaysFromNow(700));
+    await dialog.getByRole("button", { name: "Save document" }).click();
+
+    await expect(dialog.getByText("NEXUS card")).toBeVisible();
+    await expect(dialog.getByText(number)).toBeVisible();
+
+    // …and it can be taken off again.
+    const row = dialog.locator("tr", { hasText: number });
+    await row.getByRole("button", { name: "Remove" }).click();
+    await expect(dialog.getByText(number)).toHaveCount(0);
+  });
+
   test("duplicate unit number is rejected with a friendly message", async ({ page }) => {
     await login(page, "dispatch@pathfinder.demo");
     await page.goto("/parties/trucks");
@@ -123,5 +152,31 @@ test.describe("registries", () => {
     await row.getByRole("button", { name: "Acknowledge" }).click();
     await expect(row.getByText("acknowledged", { exact: true })).toBeVisible();
     await expect(row.getByRole("button", { name: "Acknowledge" })).toHaveCount(0);
+  });
+
+  test("bulk-deactivates two drivers from the list toolbar", async ({ page }) => {
+    await login(page, "dispatch@pathfinder.demo");
+    const suffix = Date.now().toString(36).toUpperCase();
+    const last = `Bulk${suffix}`;
+    await page.goto("/parties/drivers");
+    for (const first of ["One", "Two"]) {
+      await page.getByRole("button", { name: "New driver" }).click();
+      const dialog = page.getByRole("dialog");
+      await dialog.getByLabel("First name").fill(first);
+      await dialog.getByLabel("Last name").fill(last);
+      await dialog.getByLabel("License number").fill(`LIC-${suffix}-${first}`);
+      await dialog.getByLabel("License province/state").fill("ON");
+      await dialog.getByLabel("License expiry").fill(isoDaysFromNow(400));
+      await dialog.getByRole("button", { name: "Save" }).click();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+    }
+    await page.getByLabel("Search").fill(last);
+    await expect(page.getByText(`One ${last}`)).toBeVisible();
+    await expect(page.getByText(`Two ${last}`)).toBeVisible();
+    await page.getByLabel("Select all on this page").check();
+    await expect(page.getByRole("group", { name: "Selected rows" })).toContainText("2 selected");
+    await page.getByRole("button", { name: "Deactivate selected" }).click();
+    await expect(page.getByRole("group", { name: "Selected rows" })).toHaveCount(0);
+    await expect(page.getByText("inactive")).toHaveCount(2);
   });
 });

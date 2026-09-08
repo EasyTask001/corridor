@@ -1,0 +1,4 @@
+control_number,line_number,description,hs_code,quantity,quantity_unit,weight,weight_unit,country_of_origin,marks_and_numbers,hazmat_code_1,hazmat_description_1,hazmat_contact_1,hazmat_phone_1,hazmat_code_2,hazmat_description_2,hazmat_contact_2,hazmat_phone_2,hazmat_code_3,hazmat_description_3,hazmat_contact_3,hazmat_phone_3,value_amount,value_currency,is_consolidated
+PFTRPAPS90101,1,Hot-rolled steel coils,7208.39,6,Coil,18000,KG,CA,Coils 1-6,,,,,,,,,,,,,42000,USD,false
+PFTRPAPS90101,2,Galvanized sheet,7210.49,3,Coil,4000,KG,CA,,,,,,,,,,,,,,9000,USD,false
+PFTRPAPS90102,1,Fresh strawberries,0810.10,400,Case,2200,LB,US,Lot 44,,,,,,,,,,,,,6500,USD,false

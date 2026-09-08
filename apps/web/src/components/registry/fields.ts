@@ -3,7 +3,18 @@
  * RegistryPage renders forms and tables from this; validation is the
  * domain Zod schema on the server (surfaced via tRPC zodError).
  */
-export type FieldType = "text" | "email" | "tel" | "date" | "number" | "select" | "textarea";
+export type FieldType =
+  | "text"
+  | "email"
+  | "tel"
+  | "date"
+  | "number"
+  | "select"
+  /** rendered as a Yes/No select, submitted as a real boolean */
+  | "boolean"
+  | "textarea"
+  /** a small ordered list of sub-rows (extra plates), submitted as an array */
+  | "repeater";
 
 export interface FieldDef {
   name: string;
@@ -11,18 +22,25 @@ export interface FieldDef {
   type?: FieldType;
   required?: boolean;
   options?: { value: string; label: string }[];
+  /** Options fetched at runtime instead of listed here. */
+  optionsFrom?: "equipmentTypes";
   placeholder?: string;
   /** grid columns (of 2) */
   span?: 1 | 2;
   mono?: boolean;
   uppercase?: boolean;
+  /** repeater: the sub-row fields and the row cap */
+  fields?: FieldDef[];
+  max?: number;
+  /** repeater: label of the "add row" button */
+  addLabel?: string;
 }
 
 export interface ColumnDef {
   key: string;
   label: string;
-  /** "expiry" renders a colour-coded date chip */
-  kind?: "text" | "expiry" | "status" | "mono";
+  /** "expiry" renders a colour-coded date chip; "equipmentType" a code + label */
+  kind?: "text" | "expiry" | "status" | "mono" | "equipmentType";
 }
 
 export type RegistryKind = "drivers" | "trucks" | "trailers" | "partners";
@@ -37,6 +55,19 @@ const STATUS: FieldDef = {
   ],
 };
 const NOTES: FieldDef = { name: "notes", label: "Notes", type: "textarea", span: 2 };
+/** Extra plates beyond the primary one (equipment_plates, migration 0021). */
+const EXTRA_PLATES: FieldDef = {
+  name: "extraPlates",
+  label: "Additional plates",
+  type: "repeater",
+  span: 2,
+  max: 3,
+  addLabel: "Add plate",
+  fields: [
+    { name: "plateNumber", label: "Plate", required: true, mono: true, uppercase: true },
+    { name: "jurisdiction", label: "Province/state", required: true, placeholder: "MI", uppercase: true },
+  ],
+};
 
 export interface RegistryConfig {
   kind: RegistryKind;
@@ -58,35 +89,88 @@ export const REGISTRIES: Record<RegistryKind, RegistryConfig> = {
     singular: "Driver",
     readPermission: "driver.read",
     writePermission: "driver.write",
-    searchPlaceholder: "Search name, license, FAST card…",
+    searchPlaceholder: "Search name or license…",
     displayName: (r) => `${r.firstName} ${r.lastName}`,
     fields: [
       { name: "firstName", label: "First name", required: true },
       { name: "lastName", label: "Last name", required: true },
-      { name: "licenseNumber", label: "License number", required: true, mono: true },
+      {
+        name: "personType",
+        label: "Person type",
+        type: "select",
+        options: [
+          { value: "driver", label: "Driver" },
+          { value: "passenger", label: "Passenger" },
+        ],
+      },
+      {
+        name: "gender",
+        label: "Gender",
+        type: "select",
+        options: [
+          { value: "", label: "—" },
+          { value: "M", label: "Male" },
+          { value: "F", label: "Female" },
+          { value: "X", label: "Unspecified" },
+        ],
+      },
+      // Licence fields are blank for a passenger; the DB check enforces the rule.
+      { name: "licenseNumber", label: "License number", mono: true },
       {
         name: "licenseJurisdiction",
         label: "License province/state",
-        required: true,
         placeholder: "ON",
         uppercase: true,
       },
       { name: "licenseExpiry", label: "License expiry", type: "date" },
       { name: "medicalCertExpiry", label: "Medical certificate expiry", type: "date" },
-      { name: "fastCardNumber", label: "FAST card number", mono: true },
-      { name: "fastCardExpiry", label: "FAST card expiry", type: "date" },
+      {
+        name: "hazmatEndorsement",
+        label: "Hazmat endorsement",
+        type: "boolean",
+        options: [
+          { value: "false", label: "No" },
+          { value: "true", label: "Yes" },
+        ],
+      },
       { name: "citizenship", label: "Citizenship", placeholder: "CA", uppercase: true },
       { name: "dateOfBirth", label: "Date of birth", type: "date" },
       { name: "phone", label: "Phone", type: "tel" },
       { name: "email", label: "Email", type: "email" },
+      // 0025 — entry numbers by SMS, one phone per regime; the sheet by e-mail.
+      {
+        name: "smsOptIn",
+        label: "SMS entry numbers",
+        type: "boolean",
+        options: [
+          { value: "false", label: "No" },
+          { value: "true", label: "Yes" },
+        ],
+      },
+      {
+        name: "emailDriverSheet",
+        label: "E-mail driver sheet",
+        type: "boolean",
+        options: [
+          { value: "true", label: "Yes" },
+          { value: "false", label: "No" },
+        ],
+      },
+      { name: "smsPhoneAce", label: "SMS phone (ACE / US trips)", type: "tel" },
+      { name: "smsPhoneAci", label: "SMS phone (ACI / Canada trips)", type: "tel" },
+      { name: "usAddress.line1", label: "US address line 1", span: 2 },
+      { name: "usAddress.city", label: "US city" },
+      { name: "usAddress.region", label: "US state", uppercase: true },
+      { name: "usAddress.postalCode", label: "US ZIP", uppercase: true },
+      { name: "usAddress.country", label: "US address country", placeholder: "US", uppercase: true },
       STATUS,
       NOTES,
     ],
     columns: [
       { key: "__name", label: "Driver" },
+      { key: "personType", label: "Type" },
       { key: "licenseNumber", label: "License", kind: "mono" },
       { key: "licenseExpiry", label: "License exp.", kind: "expiry" },
-      { key: "fastCardExpiry", label: "FAST exp.", kind: "expiry" },
       { key: "medicalCertExpiry", label: "Medical exp.", kind: "expiry" },
       { key: "status", label: "Status", kind: "status" },
     ],
@@ -114,9 +198,23 @@ export const REGISTRIES: Record<RegistryKind, RegistryConfig> = {
         placeholder: "ON",
         uppercase: true,
       },
+      EXTRA_PLATES,
+      { name: "dotNumber", label: "US DOT number", mono: true },
+      {
+        name: "hazmatCapable",
+        label: "Hazmat capable",
+        type: "boolean",
+        options: [
+          { value: "false", label: "No" },
+          { value: "true", label: "Yes" },
+        ],
+      },
       { name: "registrationExpiry", label: "Registration expiry", type: "date" },
       { name: "annualInspectionExpiry", label: "Annual inspection expiry", type: "date" },
+      { name: "insuranceCompany", label: "Insurance company" },
       { name: "insurancePolicyNumber", label: "Insurance policy #", mono: true },
+      { name: "insuranceAmount", label: "Insurance amount", type: "number" },
+      { name: "insuranceYear", label: "Insurance year", type: "number" },
       { name: "insuranceExpiry", label: "Insurance expiry", type: "date" },
       STATUS,
       NOTES,
@@ -141,20 +239,8 @@ export const REGISTRIES: Record<RegistryKind, RegistryConfig> = {
     displayName: (r) => `Trailer ${r.unitNumber}`,
     fields: [
       { name: "unitNumber", label: "Unit number", required: true, mono: true },
-      {
-        name: "trailerType",
-        label: "Type",
-        type: "select",
-        options: [
-          { value: "dry_van", label: "Dry van" },
-          { value: "reefer", label: "Reefer" },
-          { value: "flatbed", label: "Flatbed" },
-          { value: "tanker", label: "Tanker" },
-          { value: "container_chassis", label: "Container chassis" },
-          { value: "step_deck", label: "Step deck" },
-          { value: "other", label: "Other" },
-        ],
-      },
+      // CBP equipment description codes, read from public.equipment_types.
+      { name: "trailerType", label: "Equipment type", type: "select", optionsFrom: "equipmentTypes" },
       { name: "vin", label: "VIN", mono: true, uppercase: true },
       { name: "lengthFt", label: "Length (ft)", type: "number" },
       { name: "plateNumber", label: "Plate", required: true, mono: true, uppercase: true },
@@ -165,6 +251,7 @@ export const REGISTRIES: Record<RegistryKind, RegistryConfig> = {
         placeholder: "ON",
         uppercase: true,
       },
+      EXTRA_PLATES,
       { name: "registrationExpiry", label: "Registration expiry", type: "date" },
       { name: "insuranceExpiry", label: "Insurance expiry", type: "date" },
       { name: "annualInspectionExpiry", label: "Annual inspection expiry", type: "date" },
@@ -173,7 +260,7 @@ export const REGISTRIES: Record<RegistryKind, RegistryConfig> = {
     ],
     columns: [
       { key: "unitNumber", label: "Unit", kind: "mono" },
-      { key: "trailerType", label: "Type" },
+      { key: "trailerType", label: "Type", kind: "equipmentType" },
       { key: "plateNumber", label: "Plate", kind: "mono" },
       { key: "registrationExpiry", label: "Registration", kind: "expiry" },
       { key: "insuranceExpiry", label: "Insurance", kind: "expiry" },
@@ -209,7 +296,7 @@ export const REGISTRIES: Record<RegistryKind, RegistryConfig> = {
       { name: "address.city", label: "City" },
       { name: "address.region", label: "Province/state", uppercase: true },
       { name: "address.postalCode", label: "Postal / ZIP", uppercase: true },
-      { name: "address.country", label: "Country", placeholder: "CA", uppercase: true },
+      { name: "address.country", label: "Country", placeholder: "CA", uppercase: true, required: true },
       { name: "contactName", label: "Contact name" },
       { name: "contactEmail", label: "Contact email", type: "email" },
       { name: "contactPhone", label: "Contact phone", type: "tel" },

@@ -5,19 +5,24 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient } from "@supabase/supabase-js";
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { MOVEMENT_TRANSITIONS, movementStatus } from "@corridor/domain";
 import { createDb } from "./client";
 import { withRls } from "./rls";
 import {
-  cargo,
+  commodities,
   drivers,
   movementAmendments,
+  movementCrew,
   movementEvents,
   movementSuggestions,
   movements,
   organizationMembers,
+  permissions,
+  rolePermissions,
+  roles,
   seals,
+  shipments,
 } from "./schema";
 
 const DB_URL =
@@ -99,6 +104,24 @@ async function createDraft(actor: Actor) {
   });
 }
 
+/** A draft shipment on `movementId`, so commodity lines have somewhere to live. */
+async function createShipment(actor: Actor, movementId: string | null) {
+  return withRls(db, as(actor), async (tx) => {
+    const [s] = await tx
+      .insert(shipments)
+      .values({
+        organizationId: actor.orgId,
+        regime: "ACE",
+        movementId,
+        carrierCode: "PFTR",
+        shipmentType: "regular_bill",
+        controlReference: `T${Date.now().toString(36).toUpperCase()}${Math.floor(Math.random() * 1000)}`,
+      })
+      .returning();
+    return s!;
+  });
+}
+
 describe("state machine parity (SQL vs domain)", () => {
   it("movement_can_transition agrees with MOVEMENT_TRANSITIONS for every pair", async () => {
     const statuses = movementStatus.options;
@@ -138,11 +161,12 @@ describe("movement triggers", () => {
     expect(msg).toMatch(/invalid movement transition draft -> released/);
   });
 
-  it("freezes header + cargo once sent; stamps submitted_at", async () => {
+  it("freezes header + commodities once sent; stamps submitted_at", async () => {
     const m = await createDraft(dispatcherA);
+    const shipment = await createShipment(dispatcherA, m.id);
     await withRls(db, as(dispatcherA), (tx) =>
-      tx.insert(cargo).values({
-        movementId: m.id,
+      tx.insert(commodities).values({
+        shipmentId: shipment.id,
         organizationId: dispatcherA.orgId,
         commodityDescription: "Lumber",
       }),
@@ -159,16 +183,47 @@ describe("movement triggers", () => {
     );
     expect(headerMsg).toMatch(/not editable in status sent/);
 
-    const cargoMsg = await rejection(
+    const commodityMsg = await rejection(
       withRls(db, as(dispatcherA), (tx) =>
-        tx.insert(cargo).values({
-          movementId: m.id,
+        tx.insert(commodities).values({
+          shipmentId: shipment.id,
           organizationId: dispatcherA.orgId,
           commodityDescription: "Sneaky extra line",
         }),
       ),
     );
-    expect(cargoMsg).toMatch(/not editable in status sent/);
+    expect(commodityMsg).toMatch(/not editable in status sent/);
+
+    // …and the shipment header itself is frozen too (shipments_guard). Since
+    // 0022 the entry number is customs-assigned and stays writable, so the
+    // probe uses a content column.
+    const shipmentMsg = await rejection(
+      withRls(db, as(dispatcherA), (tx) =>
+        tx.update(shipments).set({ notes: "SNEAK" }).where(eq(shipments.id, shipment.id)),
+      ),
+    );
+    expect(shipmentMsg).toMatch(/not editable in status sent/);
+  });
+
+  it("lifecycle timestamps come from the trigger, never from the client", async () => {
+    // 0008 added this anti-spoof block and 0020 rebuilt movements_guard() on top
+    // of it; if a rebuild ever drops it, a client could backdate a manifest.
+    const m = await createDraft(dispatcherA);
+    const spoofed = new Date("2000-01-01T00:00:00Z");
+
+    const [sent] = await withRls(db, as(dispatcherA), (tx) =>
+      tx
+        .update(movements)
+        .set({ status: "sent", submittedAt: spoofed })
+        .where(eq(movements.id, m.id))
+        .returning(),
+    );
+    expect(sent!.submittedAt!.getTime()).toBeGreaterThan(spoofed.getTime());
+
+    const [planted] = await withRls(db, as(dispatcherA), (tx) =>
+      tx.update(movements).set({ arrivedAt: spoofed }).where(eq(movements.id, m.id)).returning(),
+    );
+    expect(planted!.arrivedAt).toBeNull();
   });
 
   it("movement_events is append-only", async () => {
@@ -213,19 +268,40 @@ describe("movements RLS", () => {
     expect(msg).toMatch(/row-level security/);
   });
 
-  it("Driver-Portal sees only its assigned movements and their manifest details", async () => {
+  it("Driver-Portal sees only the movements it is crew on, and their manifest details", async () => {
     const [linkedDriver] = await db
       .select({ id: drivers.id })
       .from(drivers)
       .where(eq(drivers.userId, driverA.userId));
     expect(linkedDriver).toBeDefined();
 
+    const crewedMovementIds = new Set(
+      (
+        await db
+          .select({ movementId: movementCrew.movementId })
+          .from(movementCrew)
+          .where(eq(movementCrew.driverId, linkedDriver!.id))
+      ).map((r) => r.movementId),
+    );
+    expect(crewedMovementIds.size).toBeGreaterThan(0);
+
     const assigned = await withRls(db, as(driverA), (tx) => tx.select().from(movements));
     expect(assigned.length).toBeGreaterThan(0);
-    expect(assigned.every((movement) => movement.driverId === linkedDriver!.id)).toBe(true);
+    expect(assigned.every((movement) => crewedMovementIds.has(movement.id))).toBe(true);
+    // Being crew is what grants it: a movement they are not on stays invisible.
+    const notCrewed = await db
+      .select({ id: movements.id })
+      .from(movements)
+      .where(eq(movements.organizationId, driverA.orgId));
+    expect(notCrewed.some((m) => !crewedMovementIds.has(m.id))).toBe(true);
+    expect(assigned.length).toBeLessThan(notCrewed.length);
 
+    const assignedShipments = await withRls(db, as(driverA), (tx) =>
+      tx.select().from(shipments).where(eq(shipments.movementId, assigned[0]!.id)),
+    );
+    expect(assignedShipments.length).toBeGreaterThan(0);
     const lines = await withRls(db, as(driverA), (tx) =>
-      tx.select().from(cargo).where(eq(cargo.movementId, assigned[0]!.id)),
+      tx.select().from(commodities).where(eq(commodities.shipmentId, assignedShipments[0]!.id)),
     );
     const events = await withRls(db, as(driverA), (tx) =>
       tx.select().from(movementEvents).where(eq(movementEvents.movementId, assigned[0]!.id)),
@@ -305,9 +381,10 @@ describe("movements RLS", () => {
 
     // A draft with lines and a timeline deletes too — the child guards let the
     // cascade through even though both tables reject ordinary deletes.
+    const draftShipment = await createShipment(dispatcherA, draft.id);
     await withRls(db, as(dispatcherA), (tx) =>
-      tx.insert(cargo).values({
-        movementId: draft.id,
+      tx.insert(commodities).values({
+        shipmentId: draftShipment.id,
         organizationId: dispatcherA.orgId,
         commodityDescription: "Line on a deletable draft",
       }),
@@ -326,13 +403,20 @@ describe("movements RLS", () => {
       tx.delete(movements).where(eq(movements.id, draft.id)).returning({ id: movements.id }),
     );
     expect(draftDeleted).toHaveLength(1);
-    const orphanCargo = await db.select().from(cargo).where(eq(cargo.movementId, draft.id));
     const orphanEvents = await db
       .select()
       .from(movementEvents)
       .where(eq(movementEvents.movementId, draft.id));
-    expect(orphanCargo).toHaveLength(0);
     expect(orphanEvents).toHaveLength(0);
+    // `on delete set null`: the shipment survives the movement, unassigned.
+    const [survivor] = await db.select().from(shipments).where(eq(shipments.id, draftShipment.id));
+    expect(survivor!.movementId).toBeNull();
+    const survivingLines = await db
+      .select()
+      .from(commodities)
+      .where(eq(commodities.shipmentId, draftShipment.id));
+    expect(survivingLines).toHaveLength(1);
+    await db.delete(shipments).where(eq(shipments.id, draftShipment.id));
   });
 
   it("only draft amendments are deletable (0011)", async () => {
@@ -375,7 +459,7 @@ describe("movements RLS", () => {
     await db.delete(movements).where(eq(movements.id, m.id));
   });
 
-  it("cross-tenant: Org A sees zero Org B cargo, seals and movement_amendments rows", async () => {
+  it("cross-tenant: Org A sees zero Org B seals and movement_amendments rows", async () => {
     // Built with the owning connection (not RLS) so Org B needs no fixtures.
     const [foreign] = await db
       .insert(movements)
@@ -386,14 +470,6 @@ describe("movements RLS", () => {
       })
       .returning({ id: movements.id });
     try {
-      const [line] = await db
-        .insert(cargo)
-        .values({
-          movementId: foreign!.id,
-          organizationId: ownerB.orgId,
-          commodityDescription: "Cross-tenant probe cargo",
-        })
-        .returning({ id: cargo.id });
       const [seal] = await db
         .insert(seals)
         .values({
@@ -409,34 +485,258 @@ describe("movements RLS", () => {
           organizationId: ownerB.orgId,
           amendmentNumber: 1,
           reason: "Cross-tenant probe",
+          // An ACI amendment needs a CBSA reason code (0022).
+          reasonCode: "60",
         })
         .returning({ id: movementAmendments.id });
 
-      const seenCargo = await withRls(db, as(dispatcherA), (tx) =>
-        tx.select().from(cargo).where(eq(cargo.id, line!.id)),
-      );
       const seenSeals = await withRls(db, as(dispatcherA), (tx) =>
         tx.select().from(seals).where(eq(seals.id, seal!.id)),
       );
       const seenAmendments = await withRls(db, as(dispatcherA), (tx) =>
         tx.select().from(movementAmendments).where(eq(movementAmendments.id, amendment!.id)),
       );
-      expect(seenCargo).toHaveLength(0);
       expect(seenSeals).toHaveLength(0);
       expect(seenAmendments).toHaveLength(0);
 
-      const allCargo = await withRls(db, as(dispatcherA), (tx) => tx.select().from(cargo));
       const allSeals = await withRls(db, as(dispatcherA), (tx) => tx.select().from(seals));
       const allAmendments = await withRls(db, as(dispatcherA), (tx) =>
         tx.select().from(movementAmendments),
       );
-      expect(allCargo.every((r) => r.organizationId === dispatcherA.orgId)).toBe(true);
       expect(allSeals.every((r) => r.organizationId === dispatcherA.orgId)).toBe(true);
       expect(allAmendments.every((r) => r.organizationId === dispatcherA.orgId)).toBe(true);
     } finally {
-      // cascades to cargo / seals / amendments
+      // cascades to seals / amendments
       await db.delete(movements).where(eq(movements.id, foreign!.id));
     }
+  });
+});
+
+/**
+ * movements_guard()'s trigger-level checks (0008_security_hardening.sql:43-133,
+ * carried forward by 0018 with only the manifest-changed expression touched
+ * for port_id/carrier_code). These specifically catch a body-level regression
+ * that the RLS policies alone would not: the movements_update policy's USING
+ * clause is a single OR across movement.write/transmit_to_customs/amend/cancel,
+ * so a caller holding only movement.write reaches the trigger for a
+ * transition it has no business making, and the "movement identity fields are
+ * immutable" check runs on every UPDATE a full-write caller can otherwise make.
+ */
+describe("movements_guard() permission + identity checks (0008)", () => {
+  it("a caller holding only movement.write (and movement.read) cannot flip status to sent — that transition needs movement.transmit_to_customs", async () => {
+    const roleName = `Write-only test role ${Date.now()}`;
+    const [tempRole] = await db
+      .insert(roles)
+      .values({ organizationId: dispatcherA.orgId, name: roleName, isSystem: false })
+      .returning({ id: roles.id });
+    // movement.read too — createDraft()'s `.returning()` needs the movements
+    // select policy to pass for the just-inserted row, same as any real
+    // custom role that can create movements would also be able to read them.
+    const grantedPermissions = await db
+      .select({ id: permissions.id })
+      .from(permissions)
+      .where(inArray(permissions.key, ["movement.write", "movement.read"]));
+    expect(grantedPermissions).toHaveLength(2);
+    await db
+      .insert(rolePermissions)
+      .values(grantedPermissions.map((p) => ({ roleId: tempRole!.id, permissionId: p.id })));
+
+    const [membership] = await db
+      .select({ id: organizationMembers.id, roleId: organizationMembers.roleId })
+      .from(organizationMembers)
+      .where(eq(organizationMembers.userId, dispatcherA.userId));
+
+    try {
+      await db
+        .update(organizationMembers)
+        .set({ roleId: tempRole!.id })
+        .where(eq(organizationMembers.id, membership!.id));
+
+      const m = await createDraft(dispatcherA);
+      const msg = await rejection(
+        withRls(db, as(dispatcherA), (tx) =>
+          tx.update(movements).set({ status: "sent" }).where(eq(movements.id, m.id)).returning(),
+        ),
+      );
+      expect(msg).toMatch(/permission denied: movement\.transmit_to_customs required/);
+
+      // Read-only (no write permission at all) is refused earlier, by the
+      // movements_update RLS policy itself — 0 rows, not an exception. Both
+      // layers have to hold for the transition to be genuinely blocked.
+      const readOnlyAttempt = await withRls(db, as(readOnlyA), (tx) =>
+        tx
+          .update(movements)
+          .set({ status: "sent" })
+          .where(eq(movements.id, m.id))
+          .returning({ id: movements.id }),
+      );
+      expect(readOnlyAttempt).toHaveLength(0);
+    } finally {
+      await db
+        .update(organizationMembers)
+        .set({ roleId: membership!.roleId })
+        .where(eq(organizationMembers.id, membership!.id));
+      await db.delete(rolePermissions).where(eq(rolePermissions.roleId, tempRole!.id));
+      await db.delete(roles).where(eq(roles.id, tempRole!.id));
+    }
+  });
+
+  it("movement_number (and the rest of a movement's identity) is immutable even for a full-write caller", async () => {
+    const m = await createDraft(dispatcherA);
+    const msg = await rejection(
+      withRls(db, as(dispatcherA), (tx) =>
+        tx
+          .update(movements)
+          .set({ movementNumber: `${m.movementNumber}-TAMPERED` })
+          .where(eq(movements.id, m.id))
+          .returning(),
+      ),
+    );
+    expect(msg).toMatch(/movement identity fields are immutable/);
+
+    // Unchanged in the DB — the statement was rejected, not silently ignored.
+    const [unchanged] = await db.select().from(movements).where(eq(movements.id, m.id));
+    expect(unchanged!.movementNumber).toBe(m.movementNumber);
+  });
+});
+
+describe("movement_crew", () => {
+  it("allows exactly one person in charge per crossing", async () => {
+    const m = await createDraft(dispatcherA);
+    const roster = await db
+      .select({ id: drivers.id })
+      .from(drivers)
+      .where(eq(drivers.organizationId, dispatcherA.orgId))
+      .limit(2);
+    expect(roster).toHaveLength(2);
+
+    await withRls(db, as(dispatcherA), (tx) =>
+      tx.insert(movementCrew).values({
+        organizationId: dispatcherA.orgId,
+        movementId: m.id,
+        driverId: roster[0]!.id,
+        role: "person_in_charge",
+      }),
+    );
+    const second = await rejection(
+      withRls(db, as(dispatcherA), (tx) =>
+        tx.insert(movementCrew).values({
+          organizationId: dispatcherA.orgId,
+          movementId: m.id,
+          driverId: roster[1]!.id,
+          role: "person_in_charge",
+        }),
+      ),
+    );
+    expect(second).toMatch(/movement_crew_pic_unique|duplicate key/i);
+
+    // The same person cannot be listed twice on one crossing either.
+    const duplicate = await rejection(
+      withRls(db, as(dispatcherA), (tx) =>
+        tx.insert(movementCrew).values({
+          organizationId: dispatcherA.orgId,
+          movementId: m.id,
+          driverId: roster[0]!.id,
+          role: "crew_member",
+        }),
+      ),
+    );
+    expect(duplicate).toMatch(/duplicate key/i);
+  });
+
+  it("is frozen once the movement has been transmitted", async () => {
+    const m = await createDraft(dispatcherA);
+    const [driver] = await db
+      .select({ id: drivers.id })
+      .from(drivers)
+      .where(eq(drivers.organizationId, dispatcherA.orgId))
+      .limit(1);
+    await withRls(db, as(dispatcherA), (tx) =>
+      tx.insert(movementCrew).values({
+        organizationId: dispatcherA.orgId,
+        movementId: m.id,
+        driverId: driver!.id,
+        role: "person_in_charge",
+      }),
+    );
+    await db.update(movements).set({ status: "sent" }).where(eq(movements.id, m.id));
+
+    const msg = await rejection(
+      withRls(db, as(dispatcherA), (tx) =>
+        tx.delete(movementCrew).where(eq(movementCrew.movementId, m.id)),
+      ),
+    );
+    expect(msg).toMatch(/not editable in status sent/);
+  });
+
+  it("read-only cannot put anybody on a crossing", async () => {
+    const m = await createDraft(dispatcherA);
+    const [driver] = await db
+      .select({ id: drivers.id })
+      .from(drivers)
+      .where(eq(drivers.organizationId, dispatcherA.orgId))
+      .limit(1);
+    const msg = await rejection(
+      withRls(db, as(readOnlyA), (tx) =>
+        tx.insert(movementCrew).values({
+          organizationId: readOnlyA.orgId,
+          movementId: m.id,
+          driverId: driver!.id,
+          role: "crew_member",
+        }),
+      ),
+    );
+    expect(msg).toMatch(/row-level security/);
+  });
+
+  it("cross-tenant: Org B cannot see or add crew on an Org A crossing", async () => {
+    const m = await createDraft(dispatcherA);
+    const [driver] = await db
+      .select({ id: drivers.id })
+      .from(drivers)
+      .where(eq(drivers.organizationId, dispatcherA.orgId))
+      .limit(1);
+    await withRls(db, as(dispatcherA), (tx) =>
+      tx.insert(movementCrew).values({
+        organizationId: dispatcherA.orgId,
+        movementId: m.id,
+        driverId: driver!.id,
+        role: "person_in_charge",
+      }),
+    );
+    const seen = await withRls(db, as(ownerB), (tx) =>
+      tx.select().from(movementCrew).where(eq(movementCrew.movementId, m.id)),
+    );
+    expect(seen).toHaveLength(0);
+    // …and Org A cannot put one of Org B's people in its own cab either
+    // (movement_crew_driver_id_fkey is composite on (id, organization_id)).
+    const [foreignDriver] = await db
+      .select({ id: drivers.id })
+      .from(drivers)
+      .where(eq(drivers.organizationId, ownerB.orgId))
+      .limit(1);
+    const foreignPerson = await rejection(
+      withRls(db, as(dispatcherA), (tx) =>
+        tx.insert(movementCrew).values({
+          organizationId: dispatcherA.orgId,
+          movementId: m.id,
+          driverId: foreignDriver!.id,
+          role: "crew_member",
+        }),
+      ),
+    );
+    expect(foreignPerson).toMatch(/violates foreign key/i);
+    const msg = await rejection(
+      withRls(db, as(ownerB), (tx) =>
+        tx.insert(movementCrew).values({
+          organizationId: ownerB.orgId,
+          movementId: m.id,
+          driverId: driver!.id,
+          role: "crew_member",
+        }),
+      ),
+    );
+    expect(msg).toMatch(/row-level security|violates foreign key|movement .* not found/i);
   });
 });
 
@@ -460,11 +760,11 @@ describe("predictive movement suggestions", () => {
       sourceMovementId: own[1]!.id,
       sourceMovementNumber: own[1]!.movementNumber,
       targetUpdatedAt: own[0]!.updatedAt.toISOString(),
-      crossingPoint: null,
-      driverId: null,
+      port: null,
+      carrierCode: null,
+      crew: [],
       truckId: null,
-      trailerId: null,
-      cargo: [],
+      trailerIds: [],
     };
 
     try {

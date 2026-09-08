@@ -28,10 +28,18 @@ function CitationList({
   orgKnowledge: OrgCitation[];
 }) {
   if (regulations.length === 0 && orgKnowledge.length === 0) return null;
+  // Two chunks of the same regulation can both clear the similarity bar; show
+  // the document once, keeping whichever chunk matched best.
+  const byDocument = new Map<string, RegulationCitation>();
+  for (const r of regulations) {
+    const existing = byDocument.get(r.regulationDocumentId);
+    if (!existing || r.similarity > existing.similarity) byDocument.set(r.regulationDocumentId, r);
+  }
+  const dedupedRegulations = [...byDocument.values()].sort((a, b) => b.similarity - a.similarity);
   return (
     <div className="mt-2 space-y-1.5 border-t border-ink-100 pt-2">
       <div className="text-[11px] font-medium uppercase tracking-wide text-ink-500">Sources</div>
-      {regulations.map((r) => (
+      {dedupedRegulations.map((r) => (
         <div
           key={`${r.regulationDocumentId}-${r.content.slice(0, 20)}`}
           className="text-xs text-ink-500"

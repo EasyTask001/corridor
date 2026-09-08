@@ -1,7 +1,7 @@
 /**
  * Document intelligence service: storage paths, the `document.extract` job,
  * and the human-confirmed "apply to movement" step. AI output is never
- * written to `cargo` without a reviewer submitting the (re-validated) lines.
+ * written to `commodities` without a reviewer submitting the (re-validated) lines.
  */
 import { createClient } from "@supabase/supabase-js";
 import { TRPCError } from "@trpc/server";
@@ -9,10 +9,11 @@ import { and, eq, schema, sql, type RlsTransaction } from "@corridor/db";
 import { LOW_CONFIDENCE_THRESHOLD, isEditable, type ApplyExtractionInput } from "@corridor/domain";
 import { runExtractionPipeline } from "@corridor/ai";
 import { addEvent, requireMovement, type Actor } from "./movements";
+import { assertPartnersExist, defaultCarrierCode } from "./shipments";
 import { notifyOrganization } from "./notifications";
 import { writeAudit } from "./audit";
 
-const { sourceDocuments, cargo, complianceAlerts } = schema;
+const { sourceDocuments, shipments, commodities, complianceAlerts } = schema;
 
 export const DOCUMENTS_BUCKET = "documents";
 
@@ -177,31 +178,52 @@ export async function applyExtraction(
     });
   }
 
-  if (input.mode === "replace") {
-    await tx.delete(cargo).where(eq(cargo.movementId, m.id));
-  }
-  const startRows = await tx
-    .select({ next: sql<number>`coalesce(max(${cargo.lineNumber}), 0) + 1` })
-    .from(cargo)
-    .where(eq(cargo.movementId, m.id));
-  let line = startRows[0]?.next ?? 1;
+  await assertPartnersExist(tx, actor.orgId, [input.shipperId ?? null, input.consigneeId ?? null]);
 
+  // One document is one bill of lading, so the reviewed lines land on one new
+  // draft shipment. A plain regular_bill / regular filing is the right default
+  // for an extracted BOL; the dispatcher refines it on the shipment page.
+  const [shipment] = await tx
+    .insert(shipments)
+    .values({
+      organizationId: actor.orgId,
+      regime: m.regime,
+      movementId: m.id,
+      carrierCode: m.carrierCode ?? (await defaultCarrierCode(tx, actor.orgId, m.regime)),
+      shipmentType: m.regime === "ACE" ? "regular_bill" : null,
+      cargoType: m.regime === "ACI" ? "regular" : null,
+      controlReference: input.controlReference,
+      shipperId: input.shipperId ?? null,
+      consigneeId: input.consigneeId ?? null,
+      sourceDocumentId: doc.id,
+    })
+    .returning()
+    .catch((e: unknown) => {
+      if ((e as { cause?: { code?: string } })?.cause?.code === "23505")
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "A shipment with that control number already exists",
+        });
+      throw e;
+    });
+
+  let line = 1;
   const inserted = await tx
-    .insert(cargo)
+    .insert(commodities)
     .values(
       input.lines.map((l) => ({
-        movementId: m.id,
+        shipmentId: shipment!.id,
         organizationId: actor.orgId,
         lineNumber: line++,
-        shipperId: input.shipperId ?? null,
-        consigneeId: input.consigneeId ?? null,
         commodityDescription: l.commodityDescription,
         hsCode: l.hsCode ?? null,
         weightKg: l.weightKg ?? null,
-        pieceCount: l.pieceCount ?? null,
+        weightUnit: l.weightUnit,
+        quantity: l.quantity ?? null,
+        quantityUnit: l.quantityUnit ?? null,
         packagingType: l.packagingType ?? null,
-        entryNumber: l.entryNumber ?? null,
-        inBondNumber: l.inBondNumber ?? null,
+        marksAndNumbers: l.marksAndNumbers ?? null,
+        isConsolidated: l.isConsolidated,
         valueAmount: l.valueAmount ?? null,
         valueCurrency: l.valueCurrency ?? null,
         countryOfOrigin: l.countryOfOrigin ?? null,
@@ -209,7 +231,7 @@ export async function applyExtraction(
         extractionConfidence: l.extractionConfidence ?? null,
       })),
     )
-    .returning({ id: cargo.id });
+    .returning({ id: commodities.id });
 
   await tx
     .update(sourceDocuments)
@@ -225,8 +247,9 @@ export async function applyExtraction(
   await addEvent(tx, actor, m.id, {
     eventType: "note",
     actorType: "user",
+    shipmentId: shipment!.id,
     payload: {
-      body: `Applied ${inserted.length} shipment line(s) from ${doc.originalFilename} (reviewed AI extraction, ${input.mode}).`,
+      body: `Applied ${inserted.length} commodity line(s) from ${doc.originalFilename} to shipment ${shipment!.controlNumber} (reviewed AI extraction).`,
       documentId: doc.id,
     },
   });
@@ -238,7 +261,12 @@ export async function applyExtraction(
     "source_document",
     doc.id,
     { status: doc.uploadStatus, movementId: doc.movementId },
-    { status: "applied", movementId: m.id, insertedLines: inserted.length, mode: input.mode },
+    {
+      status: "applied",
+      movementId: m.id,
+      shipmentId: shipment!.id,
+      insertedLines: inserted.length,
+    },
   );
 
   // Reviewer confirmed the data → resolve the AI low-confidence alert.
@@ -253,5 +281,5 @@ export async function applyExtraction(
       ),
     );
 
-  return { movementId: m.id, inserted: inserted.length };
+  return { movementId: m.id, shipmentId: shipment!.id, inserted: inserted.length };
 }

@@ -9,7 +9,7 @@
 import { and, eq, inArray, isNull, sql, type RlsTransaction } from "@corridor/db";
 import { schema } from "@corridor/db";
 import {
-  driverDocuments,
+  driverDocuments as driverExpiryDocuments,
   evaluateExpiries,
   todayIso,
   trailerDocuments,
@@ -18,19 +18,36 @@ import {
   type ExpiryFinding,
 } from "@corridor/domain";
 
-const { complianceAlerts, drivers, trucks, trailers, movements } = schema;
+const { complianceAlerts, drivers, driverDocuments, trucks, trailers, movements } = schema;
 
 type DriverRow = typeof drivers.$inferSelect;
+type DriverDocumentRow = typeof driverDocuments.$inferSelect;
 type TruckRow = typeof trucks.$inferSelect;
 type TrailerRow = typeof trailers.$inferSelect;
 
-export function findingsForDriver(d: DriverRow, today = todayIso()): ExpiryFinding[] {
+/**
+ * `travel` are this person's driver_documents rows — since 0020 the FAST card
+ * (and passports, NEXUS cards, visas) live there rather than on `drivers`.
+ */
+export function findingsForDriver(
+  d: DriverRow,
+  travel: DriverDocumentRow[] = [],
+  today = todayIso(),
+): ExpiryFinding[] {
   if (d.status === "archived") return [];
   return evaluateExpiries(
     { type: "driver", id: d.id, displayName: `${d.firstName} ${d.lastName}` },
-    driverDocuments(d),
+    driverExpiryDocuments(d, travel),
     today,
   );
+}
+
+/** This person's travel documents, for the expiry rules above. */
+export async function travelDocumentsFor(
+  tx: RlsTransaction,
+  driverId: string,
+): Promise<DriverDocumentRow[]> {
+  return tx.select().from(driverDocuments).where(eq(driverDocuments.driverId, driverId));
 }
 
 export function findingsForTruck(t: TruckRow, today = todayIso()): ExpiryFinding[] {
@@ -162,11 +179,15 @@ export async function scanOrganization(
     totals.entities++;
   };
 
-  const [ds, ts, trs] = await Promise.all([
+  const [ds, travel, ts, trs] = await Promise.all([
     tx
       .select()
       .from(drivers)
       .where(and(eq(drivers.organizationId, organizationId))),
+    tx
+      .select()
+      .from(driverDocuments)
+      .where(eq(driverDocuments.organizationId, organizationId)),
     tx
       .select()
       .from(trucks)
@@ -183,7 +204,11 @@ export async function scanOrganization(
         tx,
         organizationId,
         { type: "driver", id: d.id },
-        findingsForDriver(d, today),
+        findingsForDriver(
+          d,
+          travel.filter((t) => t.driverId === d.id),
+          today,
+        ),
       ),
     );
   for (const t of ts)

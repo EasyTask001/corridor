@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { movementStatus, type MovementStatus } from "@corridor/domain";
-import { Button, buttonVariants, Card, Input } from "@corridor/ui";
+import { movementStatus, uuid, type MovementStatus } from "@corridor/domain";
+import { Button, buttonVariants } from "@corridor/ui";
 import { getSession } from "@/lib/session";
 import { api } from "@/lib/trpc/server";
-import { MovementsTable, type MovementRow } from "./movements-table";
+import { BlankSheetsDialog } from "./blank-sheets-dialog";
+import { MovementsPortFilter } from "./port-filter";
+import { MovementsList } from "./movements-list";
 import { createMovement } from "./actions";
 
 export const metadata: Metadata = { title: "Movements" };
@@ -24,7 +26,7 @@ const STATUS_ORDER: MovementStatus[] = [
 export default async function MovementsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; regime?: string; q?: string }>;
+  searchParams: Promise<{ status?: string; regime?: string; q?: string; portId?: string }>;
 }) {
   const session = await getSession();
   if (!session?.permissions.has("movement.read")) redirect("/dashboard");
@@ -36,18 +38,10 @@ export default async function MovementsPage({
     : undefined;
   const regime = sp.regime === "ACE" || sp.regime === "ACI" ? sp.regime : undefined;
   const q = sp.q?.trim() || undefined;
+  const portId = uuid.safeParse(sp.portId).success ? sp.portId : undefined;
 
   const caller = await api();
-  const [board, list] = await Promise.all([
-    caller.movement.board(),
-    caller.movement.list({
-      status: status ? [status] : undefined,
-      regime,
-      search: q,
-      limit: 100,
-      offset: 0,
-    }),
-  ]);
+  const board = await caller.movement.board();
 
   const href = (patch: Partial<{ status: string; regime: string; q: string }>) => {
     const p = new URLSearchParams();
@@ -56,24 +50,6 @@ export default async function MovementsPage({
     const s = p.toString();
     return s ? `/movements?${s}` : "/movements";
   };
-
-  const fmt = (d: Date | null) =>
-    d ? d.toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "—";
-
-  // Formatted here (Server Component) so the client table stays serialisable
-  // and renders the same string before and after hydration.
-  const tableRows: MovementRow[] = list.rows.map((m) => ({
-    id: m.id,
-    movementNumber: m.movementNumber,
-    tripNumber: m.tripNumber,
-    status: m.status,
-    crossingLabel: m.crossingPoint?.name ?? m.crossingPoint?.code ?? "—",
-    etaLabel: fmt(m.scheduledCrossingAt),
-    driverLabel: m.driverName ?? "—",
-    unitsLabel: `${m.truckUnit ?? "—"} / ${m.trailerUnit ?? "—"}`,
-    cargoCount: m.cargoCount,
-    customsReferenceLabel: m.customsReferenceNumber ?? "—",
-  }));
 
   return (
     <div className="space-y-4">
@@ -95,6 +71,7 @@ export default async function MovementsPage({
             <Link href="/movements/new" className={buttonVariants({ variant: "secondary" })}>
               New movement…
             </Link>
+            <BlankSheetsDialog />
           </div>
         )}
       </header>
@@ -125,22 +102,10 @@ export default async function MovementsPage({
             {r}
           </Link>
         ))}
-        <form className="ml-auto" method="get">
-          {status && <input type="hidden" name="status" value={status} />}
-          {regime && <input type="hidden" name="regime" value={regime} />}
-          <Input
-            name="q"
-            defaultValue={q ?? ""}
-            placeholder="Search movement #, trip, customs ref…"
-            aria-label="Search movements"
-            className="w-72"
-          />
-        </form>
+        <MovementsPortFilter regime={regime} active={!!portId} />
       </div>
 
-      <Card className="overflow-x-auto">
-        <MovementsTable rows={tableRows} />
-      </Card>
+      <MovementsList status={status} regime={regime} portId={portId} initialSearch={q} />
     </div>
   );
 }

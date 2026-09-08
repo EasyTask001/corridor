@@ -1,0 +1,24 @@
+{
+  "stages": [
+    {
+      "status": "accepted",
+      "message": "Manifest accepted by CBSA (fixture).",
+      "events": [{ "code": "sending" }, { "code": "preliminary_check_passed" }, { "code": "accepted" }],
+      "shipmentStatus": "accepted"
+    },
+    {
+      "status": "held",
+      "message": "Referred for examination (fixture hold).",
+      "eventsPerShipment": [{ "code": "entry_on_file", "withEntry": true }],
+      "events": [{ "code": "held" }],
+      "shipmentStatus": "held",
+      "withEntry": true
+    },
+    {
+      "status": "released",
+      "message": "Released after examination (fixture).",
+      "events": [{ "code": "released" }],
+      "shipmentStatus": "released"
+    }
+  ]
+}

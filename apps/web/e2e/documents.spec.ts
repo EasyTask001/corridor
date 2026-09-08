@@ -68,21 +68,30 @@ test.describe("document intelligence", () => {
     await expect(page.getByLabel("Line 2 weight")).toHaveValue("4000");
 
     // reviewer corrects a value before applying, targets the draft explicitly
-    await page.getByLabel("Line 2 pieces").fill("4");
+    await page.getByLabel("Line 2 quantity", { exact: true }).fill("4");
+    await page.getByLabel("Line 1 quantity unit").selectOption("Coil");
+    await page.getByLabel("Line 2 quantity unit").selectOption("Coil");
+    const reference = `PAPS${Date.now().toString(36).toUpperCase()}`;
+    await page.getByLabel("Control reference").fill(reference);
     const target = page.getByLabel("Apply to movement");
     await expect(target).toHaveValue(opt!); // pre-selected from the attachment
 
-    await page.getByRole("button", { name: /Confirm & apply 2 lines/ }).click();
+    await page.getByRole("button", { name: /Confirm & create a shipment with 2 lines/ }).click();
 
-    await expect(page).toHaveURL(draft.url);
-    await page.getByRole("button", { name: /^Shipment/ }).click();
-    await expect(page.getByRole("cell", { name: "Hot-rolled steel coils" })).toBeVisible();
-    await expect(page.getByText("AI 9")).toHaveCount(2); // per-line AI confidence chips
+    // The reviewed lines land on a new draft shipment, on the chosen movement.
+    await expect(page).toHaveURL(/\/shipments\/[0-9a-f-]{36}/);
+    await expect(page.getByText("Hot-rolled steel coils")).toBeVisible();
+    await expect(page.getByText("Galvanized sheet, coils")).toBeVisible();
+
+    await page.goto(draft.url);
+    await page.getByRole("button", { name: /^Shipments/ }).click();
     await expect(
       page.getByText("Maple Ridge Steel Ltd → Great Lakes Fabrication Inc").first(),
     ).toBeVisible();
+    await page.getByRole("button", { name: `PFTR${reference}` }).click();
+    await expect(page.getByText("AI 9")).toHaveCount(2); // per-line AI confidence chips
     const tl = page.getByRole("list", { name: "Movement timeline" });
-    await expect(tl.getByText(/Applied 2 shipment line/)).toBeVisible();
+    await expect(tl.getByText(/Applied 2 commodity line/)).toBeVisible();
     await expect(tl.getByText(/AI flag: Extracted 2 line/)).toBeVisible();
 
     await page.goto("/documents");

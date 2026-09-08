@@ -129,6 +129,7 @@ function caller(
     session,
     supabase: {} as never,
     db: {} as never,
+    headers: new Headers(),
     rls: state
       ? ((<T>(fn: (tx: RlsTransaction) => Promise<T>) => fn(fakeTx(state))) as Context["rls"])
       : async () => {

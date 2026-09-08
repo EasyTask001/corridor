@@ -38,28 +38,38 @@ async function buildReady(page: Page, tripNumber: string) {
   await page.getByRole("button", { name: "New ACE movement" }).click();
   await expect(page).toHaveURL(/\/movements\/[0-9a-f-]{36}/);
   await page.getByLabel("Trip number").fill(tripNumber);
-  await page
-    .getByLabel("Port of entry")
-    .selectOption({ label: "3801 · Detroit — Ambassador Bridge, MI" });
+  await page.getByLabel("Port of entry").fill("3801");
+  await page.getByRole("button", { name: /^3801 — DETROIT/ }).click();
   await page.getByLabel("Estimated crossing").fill(localDateTime(2));
   await page.getByRole("button", { name: "Save trip" }).click();
-  await expect(page.getByText("Detroit — Ambassador Bridge, MI · ETA")).toBeVisible();
+  await expect(page.getByText(/DETROIT · ETA/)).toBeVisible();
   await page.getByRole("button", { name: /^Truck/ }).click();
   await page.getByLabel("Truck", { exact: true }).selectOption({ label: "T-101 · AB12345" });
   await page.getByRole("button", { name: /^Crew/ }).click();
-  await selectByText(page.getByLabel("Driver", { exact: true }), "Singh, Gurpreet");
-  await page.getByRole("button", { name: /^Trailer/ }).click();
-  await page.getByLabel("Trailer", { exact: true }).selectOption({ label: "TR-501 · dry van" });
-  await page.getByRole("button", { name: /^Shipment/ }).click();
-  await page.getByRole("button", { name: "Add shipment line" }).click();
-  const form = page.getByRole("form", { name: "New shipment line" });
-  await form.getByLabel("Commodity description").fill("Steel coils");
-  await form.getByLabel("Shipper").selectOption({ label: "Maple Ridge Steel Ltd" });
-  await form.getByLabel("Consignee").selectOption({ label: "Great Lakes Fabrication Inc" });
-  await form.getByLabel("Weight (kg)").fill("1000");
-  await form.getByLabel("Pieces").fill("1");
-  await form.getByRole("button", { name: "Save line" }).click();
-  await expect(page.getByRole("cell", { name: "Steel coils" })).toBeVisible();
+  await selectByText(page.getByLabel("Add to crew", { exact: true }), "Singh, Gurpreet");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByRole("button", { name: /^Trailers/ }).click();
+  await page
+    .getByLabel("Hitch trailer", { exact: true })
+    .selectOption({ label: "TR-501 · Trailer, dry freight" });
+  await page.getByRole("button", { name: "Hitch", exact: true }).click();
+  const reference = `PAPS${Date.now().toString(36).toUpperCase()}`;
+  await page.getByRole("button", { name: /^Shipments/ }).click();
+  await page.getByRole("button", { name: "Add shipment", exact: true }).click();
+  const shipment = page.getByRole("form", { name: "New shipment" });
+  await shipment.getByLabel("Control reference").fill(reference);
+  await shipment.getByLabel("Shipper").selectOption({ label: "Maple Ridge Steel Ltd" });
+  await shipment.getByLabel("Consignee").selectOption({ label: "Great Lakes Fabrication Inc" });
+  await shipment.getByRole("button", { name: "Save shipment" }).click();
+  await page.getByRole("button", { name: `PFTR${reference}` }).click();
+  await page.getByRole("button", { name: "+ Add commodity line" }).click();
+  const line = page.getByRole("form", { name: "New commodity line" });
+  await line.getByLabel("Commodity description").fill("Steel coils");
+  await line.getByLabel("Weight", { exact: true }).fill("1000");
+  await line.getByLabel("Quantity", { exact: true }).fill("1");
+  await line.getByLabel("Quantity unit").selectOption("Coil");
+  await line.getByRole("button", { name: "Save line" }).click();
+  await expect(page.getByText("Steel coils")).toBeVisible();
   await page.getByRole("button", { name: /^Seals/ }).click();
   await page.getByLabel("Seal number").fill("SL-INT-1");
   await page.getByRole("button", { name: "Add seal" }).click();

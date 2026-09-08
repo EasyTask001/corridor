@@ -24,8 +24,10 @@ function describe(e: Event): string {
       return `${e.fromStatus} → ${e.toStatus}${p.reason ? ` — ${p.reason}` : ""}`;
     case "customs_response":
       return `Customs ${String(p.decision)}${p.referenceNumber ? ` · ref ${p.referenceNumber}` : ""}${p.message ? ` — ${p.message}` : ""}${p.simulated ? " (simulated)" : ""}`;
+    case "customs_event":
+      return `${String(p.label ?? p.code)}${p.shipmentControlNumber ? ` · ${p.shipmentControlNumber}` : ""}${p.entryNumber ? ` · entry ${p.entryNumber}${p.entryPortCode ? ` @ ${p.entryPortCode}` : ""}` : ""}`;
     case "amendment":
-      return `Amendment #${p.amendmentNumber}: ${p.reason}`;
+      return `Amendment #${p.amendmentNumber}${p.reasonCode ? ` (${p.reasonCode})` : ""}: ${p.reason}`;
     case "note":
       return String(p.body ?? "");
     case "ai_flag":
@@ -95,7 +97,15 @@ export function Timeline({
             <li key={e.id} className="flex gap-3 text-sm">
               <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${a.cls}`} aria-hidden />
               <div className="min-w-0">
-                <div className={e.eventType === "note" ? "text-ink-700" : "font-medium"}>
+                <div
+                  className={
+                    e.eventType === "note"
+                      ? "text-ink-700"
+                      : e.eventType === "customs_event"
+                        ? "text-ink-950"
+                        : "font-medium"
+                  }
+                >
                   {describe(e)}
                 </div>
                 <div className="text-xs text-ink-500">

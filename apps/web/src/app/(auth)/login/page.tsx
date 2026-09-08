@@ -28,6 +28,12 @@ export default async function LoginPage({
           Create an account
         </Link>
       </p>
+      <p className="text-sm text-ink-500">
+        Driver or broker?{" "}
+        <Link href="/track" className="font-medium text-ink-950 underline">
+          Check PAPS/PARS status
+        </Link>
+      </p>
     </div>
   );
 }

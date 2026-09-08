@@ -31,6 +31,8 @@ test.describe("auth + onboarding", () => {
     await expect(page).toHaveURL(/\/dashboard/);
     await expect(page.getByText("EECX")).toBeVisible(); // SCAC upper-cased by schema + RPC
     await expect(page.getByText("All clear")).toBeVisible(); // fresh org: no alerts
+    await expect(page.getByTestId("tile-ace")).toHaveText("0"); // monthly tiles, nothing filed yet
+    await expect(page.getByLabel("Movements by month")).toBeVisible();
     await expect(page.getByRole("link", { name: "Users" })).toBeVisible(); // owner grant
   });
 });
@@ -127,6 +129,27 @@ test.describe("seeded roles", () => {
     await page.getByLabel("Search actions or entities").fill("role.delete");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.getByText("role.delete", { exact: true }).first()).toBeVisible();
+  });
+
+  test("help, resources and forgot-password pages render", async ({ page }) => {
+    await page.goto("/forgot-password");
+    await expect(page.getByRole("heading", { name: "Forgot your password?" })).toBeVisible();
+    await page.getByLabel("Email").fill("nobody@pathfinder.demo");
+    await page.getByRole("button", { name: "Send reset link" }).click();
+    await expect(page.getByRole("status")).toHaveText(/reset link is on its way/);
+
+    await login(page, "dispatch@pathfinder.demo");
+    await page.goto("/help");
+    await expect(page.getByRole("heading", { name: "Help" })).toBeVisible();
+    await page.getByRole("link", { name: "Importing from a file" }).first().click();
+    await expect(page).toHaveURL(/\/help\/07-importing/);
+    await expect(page.getByRole("article", { name: "Importing from a file" })).toContainText("Validate, then commit");
+
+    await page.goto("/resources");
+    await expect(page.getByRole("link", { name: "CBP border wait times" })).toHaveAttribute("rel", "noopener");
+
+    await page.goto("/settings/profile");
+    await expect(page.getByLabel("Display name")).toBeVisible();
   });
 
   test("read-only user is gated out of management UI", async ({ page }) => {

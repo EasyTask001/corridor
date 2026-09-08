@@ -45,6 +45,26 @@ export const PERMISSIONS = {
     description: "View movements assigned to me (driver portal)",
   },
 
+  // shipments
+  "shipment.read": { module: "shipment", description: "View shipments and commodities" },
+  "shipment.write": {
+    module: "shipment",
+    description: "Create/edit shipments, commodities and their movement assignment",
+  },
+
+  // bulk import (0028)
+  "import.run": {
+    module: "shipment",
+    description: "Validate, commit and delete CSV imports of shipments and commodities",
+  },
+
+  // in-bond (0026)
+  "inbond.read": { module: "shipment", description: "View the in-bond monitor and external shipments" },
+  "inbond.write": {
+    module: "shipment",
+    description: "Record in-bond moves, send arrival / export / cancel messages",
+  },
+
   // documents
   "document.read": { module: "document", description: "View uploaded documents" },
   "document.upload": { module: "document", description: "Upload documents" },
