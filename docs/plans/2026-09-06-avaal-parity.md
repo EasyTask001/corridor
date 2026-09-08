@@ -308,8 +308,8 @@ driver_portal sees only assigned movements); unit; Playwright `registries.spec.t
 2. `public.equipment_types` (global: `code text pk`, `label`, `regime_scope text check in
    ('ACE','ACI','both')`) seeded inline with the CBP equipment list captured from Avaal's
    trailer-type dropdown; `trailers.trailer_type` becomes `references equipment_types(code)`,
-   mapping old enum values (`dry_van→TL`, `reefer→RT`, `flatbed→FB`, `tanker→TN`,
-   `container_chassis→CH`, `step_deck→SD`, `other→OT`).
+   mapping old enum values to real X12 DE40 / ACE Appendix N codes (`dry_van→TF`, `reefer→RT`, `flatbed→FT`, `tanker→TK`,
+   `container_chassis→CH`, `step_deck→SD`, `other→TL`).
 3. New child table `public.equipment_plates` (`id`, `organization_id`, `truck_id null`,
    `trailer_id null` (check exactly one), `plate_number`, `jurisdiction`, `position int check
    (position between 1 and 4)`, `unique (truck_id, position)`, `unique (trailer_id, position)`);
@@ -327,7 +327,7 @@ driver_portal sees only assigned movements); unit; Playwright `registries.spec.t
 6. UI: `trailers-step.tsx` (multi-assign, ordered), `seals-step.tsx` (grouped by trailer +
    truck, 4-slot rows). Registry: add `FieldType "repeater"` to `FieldDef` for extra plates;
    insurance group; equipment type select from `reference.equipmentTypes.list`.
-7. Seed: one movement with two trailers, seals on each; TR-503 → `RT`.
+7. Seed: one movement with two trailers, seals on each (plus a truck seal); TR-501 `TF`, TR-502 `RT`, TR-503 `FT`; extra MI plates on T-101 and TR-501.
 
 **Acceptance:** reset+seed; `verify:mirror`; integration (seal limit trigger, movement_trailers
 RLS); unit; Playwright `movements.spec.ts`; typecheck/lint.

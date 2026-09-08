@@ -53,12 +53,18 @@ async function buildReadyMovement(page: Page) {
   await expect(page.getByRole("combobox", { name: "Role for Gurpreet Singh" })).toHaveValue(
     "person_in_charge",
   );
-  await page.getByRole("button", { name: /^Trailer/ }).click();
-  await page.getByLabel("Trailer", { exact: true }).selectOption({ label: "TR-501 · dry van" });
+  await page.getByRole("button", { name: /^Trailers/ }).click();
+  await page
+    .getByLabel("Hitch trailer", { exact: true })
+    .selectOption({ label: "TR-501 · Trailer, dry freight" });
+  await page.getByRole("button", { name: "Hitch", exact: true }).click();
+  await expect(page.getByRole("cell", { name: /^TR-501/ })).toBeVisible();
 
   await addShipmentWithLine(page, controlReference());
 
   await page.getByRole("button", { name: /^Seals/ }).click();
+  // The location defaults to the first trailer in tow.
+  await expect(page.getByLabel("Location", { exact: true })).toHaveValue(/./);
   await page.getByLabel("Seal number").fill("SL-E2E-1");
   await page.getByRole("button", { name: "Add seal" }).click();
   await expect(page.getByText("SL-E2E-1")).toBeVisible();
@@ -216,14 +222,14 @@ test.describe("movement builder", () => {
     await expect(heading(page).getByText("accepted")).toBeVisible();
 
     await page.getByRole("button", { name: "Amend" }).click();
-    await page.getByLabel("Reason").fill("Trailer swapped at yard");
-    await selectByText(page.getByLabel("Trailer"), "TR-503");
+    await page.getByLabel("Reason").fill("Tractor swapped at yard");
+    await selectByText(page.getByLabel("Truck"), "T-103");
     await page.getByRole("button", { name: "Submit amendment" }).click();
     await expect(heading(page).getByText("sent")).toBeVisible();
-    await expect(timeline(page).getByText("Amendment #1: Trailer swapped at yard")).toBeVisible();
+    await expect(timeline(page).getByText("Amendment #1: Tractor swapped at yard")).toBeVisible();
     await expect(timeline(page).getByText("accepted → sent")).toBeVisible();
     await page.getByRole("button", { name: /^Review/ }).click();
-    await expect(page.getByText(/trailerId:/)).toBeVisible();
+    await expect(page.getByText(/truckId:/)).toBeVisible();
 
     // Customs accepts the amendment → amendment row marked accepted
     await page.getByRole("button", { name: "accepted", exact: true }).click();
