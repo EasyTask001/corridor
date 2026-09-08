@@ -110,7 +110,7 @@ export function AppShell({
           <div className="mt-0.5 truncate text-xs text-fg-secondary">{organizationName}</div>
         </div>
 
-        <nav className="space-y-0.5">
+        <nav className="space-y-0.5" aria-label="Primary">
           {NAV.filter((i) => can(i.permission)).map(renderItem)}
           {partiesVisible.length > 0 && (
             <NavGroup
@@ -127,7 +127,7 @@ export function AppShell({
         </nav>
 
         {settingsVisible.length > 0 && (
-          <nav className="mt-2">
+          <nav className="mt-2" aria-label="Settings">
             <NavGroup
               icon={SettingsIcon}
               label="Settings"

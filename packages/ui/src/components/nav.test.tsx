@@ -28,7 +28,8 @@ describe("NavGroup", () => {
     expect(await screen.findByText("Drivers")).toBeInTheDocument();
   });
 
-  it("respects a controlled `open` prop", () => {
+  it("respects a controlled `open` prop and calls onOpenChange on toggle", async () => {
+    const user = userEvent.setup();
     const onOpenChange = vi.fn();
     render(
       <NavGroup icon={LayoutDashboard} label="Settings" open onOpenChange={onOpenChange}>
@@ -37,5 +38,8 @@ describe("NavGroup", () => {
     );
 
     expect(screen.getByText("Billing")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Settings/ }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });

@@ -13,7 +13,7 @@ describe("Button", () => {
     expect(screen.getByRole("button", { name: "Cancel" }).className).toContain("border-border-default");
   });
 
-  it("keeps the signal variant's amber styling", () => {
+  it("keeps the signal variant's own styling", () => {
     render(<Button variant="signal">Flag</Button>);
     expect(screen.getByRole("button", { name: "Flag" }).className).toContain("bg-signal-500");
   });

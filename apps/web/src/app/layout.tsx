@@ -31,7 +31,7 @@ const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem('corridor-
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className={plusJakartaSans.variable}>
+    <html lang="en" className={plusJakartaSans.variable} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>

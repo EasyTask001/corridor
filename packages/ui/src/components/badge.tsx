@@ -9,8 +9,8 @@ export const badgeVariants = cva(
       variant: {
         neutral: "bg-surface-sunken text-fg-secondary",
         muted: "bg-surface-sunken text-fg-secondary/70",
-        ok: "bg-ok-500/10 text-ok-500",
-        warn: "bg-warn-500/10 text-warn-500",
+        ok: "bg-ok-500/10 text-ok-700",
+        warn: "bg-warn-500/10 text-warn-700",
         danger: "bg-danger-500/10 text-danger-500",
         signal: "bg-signal-500/15 text-signal-600",
         solid: "bg-fg-primary text-fg-inverted",
