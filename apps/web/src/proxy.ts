@@ -1,7 +1,15 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/signup", "/auth/callback", "/auth/confirm", "/api/health"];
+const PUBLIC_PATHS = [
+  "/login",
+  "/signup",
+  "/auth/callback",
+  "/auth/confirm",
+  "/api/health",
+  // Public PAPS/PARS lookup (0027): gated by carrier code + control number, rate limited.
+  "/track",
+];
 
 function isPublic(pathname: string) {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));

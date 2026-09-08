@@ -17,6 +17,8 @@ const NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/movements", label: "Movements", permission: "movement.read" },
   { href: "/shipments", label: "Shipments", permission: "shipment.read" },
+  { href: "/in-bond", label: "In-bond", permission: "inbond.read" },
+  { href: "/pars-rns", label: "PARS RNS", permission: "shipment.read" },
   { href: "/documents", label: "Documents", permission: "document.read" },
   { href: "/parties/drivers", label: "Drivers", permission: "driver.read" },
   { href: "/parties/trucks", label: "Trucks", permission: "truck.read" },
