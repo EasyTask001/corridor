@@ -489,3 +489,36 @@ export const seals = pgTable(
       .where(sql`${t.movementTrailerId} is not null`),
   ],
 );
+
+/**
+ * 0027 — CBSA Release Notification System messages for PARS shipments, one
+ * per message; the PARS RNS screen reads them by PARS number and release code.
+ */
+export const parsRnsEvents = pgTable(
+  "pars_rns_events",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    shipmentId: uuid("shipment_id").references((): AnyPgColumn => shipments.id, {
+      onDelete: "set null",
+    }),
+    parsNumber: text("pars_number").notNull(),
+    releaseCode: text("release_code"),
+    releasedAt: timestamp("released_at", { withTimezone: true }),
+    officeCode: text("office_code"),
+    sublocationCode: text("sublocation_code"),
+    transactionNumber: text("transaction_number"),
+    containerNumber: text("container_number"),
+    raw: jsonb("raw").$type<Record<string, unknown>>(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("pars_rns_events_organization_id_idx").on(t.organizationId),
+    index("pars_rns_events_org_received_idx").on(t.organizationId, t.receivedAt.desc()),
+    index("pars_rns_events_pars_idx").on(t.parsNumber),
+  ],
+);

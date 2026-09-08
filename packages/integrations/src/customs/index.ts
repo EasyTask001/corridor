@@ -11,7 +11,7 @@ import type {
 export * from "./types";
 export * from "./manifest";
 export { createMockCustomsClient, MOCK_CARRIER_NOTICE } from "./mock";
-export { simulateCustomsEvents, simulatedEntryNumber } from "./simulate";
+export { rnsFields, simulateCustomsEvents, simulatedEntryNumber } from "./simulate";
 export { createGatewayCustomsClient, fixtureOutcomeFor } from "./gateway/client";
 export { parseInboundMessage, signInbound, verifyInboundSignature } from "./gateway/inbound";
 export { fromGatewayStatus, toGatewayManifest } from "./gateway/mapping";

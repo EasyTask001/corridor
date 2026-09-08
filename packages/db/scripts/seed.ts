@@ -680,6 +680,37 @@ export async function seed() {
         path: ["cancelled"],
       });
 
+      // In-bond (0026): one of our shipments moving IT to a bonded warehouse,
+      // with its monitor record, and one shipment another carrier filed.
+      const inBondShipmentId = await seedShipment({
+        regime: "ACE",
+        carrierCode: "PFTR",
+        type: "in_bond",
+        controlReference: "PAPS90010",
+        shipper: maple,
+        consignee: glf,
+        movementId: null,
+        commodities: [steelLine],
+      });
+      const [detPort] = await sql<{ id: string }[]>`
+        select id from public.ports where regime = 'ACE' and kind = 'port_of_entry' and code = ${DET} limit 1`;
+      const [chiBond] = await sql<{ id: string }[]>`
+        select id from public.ports where regime = 'ACE' and kind = 'in_bond_destination' and code = '3901' limit 1`;
+      await sql`
+        update public.shipments set in_bond_entry_type = 'IT', in_bond_number = '300112233', entry_port_id = ${detPort!.id}::uuid,
+          in_bond_destination_port_id = ${chiBond?.id ?? detPort!.id}::uuid
+        where id = ${inBondShipmentId}`;
+      const [inBondRecord] = await sql<{ id: string }[]>`
+        insert into public.in_bond_records (organization_id, shipment_id, bond_number, entry_type, arrival_port_id, export_port_id, firms_code, created_by)
+        values (${orgId}, ${inBondShipmentId}, '300112233', 'IT', ${detPort!.id}::uuid, ${chiBond?.id ?? detPort!.id}::uuid, 'G123', ${dispatcherId})
+        returning id`;
+      await sql`
+        insert into public.in_bond_events (organization_id, in_bond_record_id, kind, actor_type, payload)
+        values (${orgId}, ${inBondRecord!.id}, 'note', 'system', ${sql.json({ body: "Record opened from the in-bond shipment." })})`;
+      await sql`
+        insert into public.external_shipments (organization_id, regime, control_number, in_bond_number, originating_carrier_code, description, created_by)
+        values (${orgId}, 'ACE', 'XYZL77120045', '300998877', 'XYZL', 'Machinery crates in bond from Laredo, moving to Detroit FTZ', ${dispatcherId})`;
+
       // Unassigned shipments: keyed in from a broker's email, waiting for a trip.
       await seedShipment({
         regime: "ACE",

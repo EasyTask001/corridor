@@ -26,6 +26,21 @@ export interface SimulationInput {
   now?: () => Date;
 }
 
+/** The RNS fields the mock attaches to an ACI release, derived from the PARS number. */
+export function rnsFields(controlNumber: string, officeCode: string | null, at: number) {
+  let h = 0;
+  for (const ch of controlNumber) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return {
+    rns: true,
+    releaseCode: "1", // 1 = released, per RNS
+    officeCode,
+    sublocationCode: String(1000 + (h % 9000)),
+    transactionNumber: `${String(h % 100_000_000_000000).padStart(14, "0")}`,
+    containerNumber: null,
+    releasedAt: new Date(at).toISOString(),
+  };
+}
+
 /** Deterministic 11-digit entry number (CBP style: filer code + check digit shape). */
 export function simulatedEntryNumber(controlNumber: string): string {
   let h = 2166136261;
@@ -79,8 +94,14 @@ export function simulateCustomsEvents(input: SimulationInput): {
     for (const s of input.shipments) {
       const entry = entryFor(s.controlNumber);
       if (input.regime === "ACI" && input.decision === "released") {
+        // CBSA's Release Notification System message for a PARS: release code,
+        // office and sub-location, transaction and container numbers (0027).
         events.push(
-          event("entered_and_released", { ...entry, shipmentControlNumber: s.controlNumber }),
+          event("entered_and_released", {
+            ...entry,
+            shipmentControlNumber: s.controlNumber,
+            raw: rnsFields(s.controlNumber, input.portOfEntry, base),
+          }),
         );
       } else {
         events.push(event("entry_on_file", { ...entry, shipmentControlNumber: s.controlNumber }));
