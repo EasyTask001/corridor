@@ -13,6 +13,8 @@
  */
 import type {
   CarrierNotice,
+  InBondAck,
+  InBondStatusMessage,
   CustomsClient,
   CustomsClientSettings,
   CustomsCredentials,
@@ -59,6 +61,8 @@ function hashRef(seed: string): string {
   return h.toString(36).toUpperCase().padStart(7, "0").slice(0, 7);
 }
 
+const mockBonds = new Map<string, InBondStatusMessage["status"]>();
+
 export function createMockCustomsClient(opts: MockCustomsOptions): CustomsClient {
   const random = opts.random ?? Math.random;
   const now = opts.now ?? (() => new Date());
@@ -68,6 +72,10 @@ export function createMockCustomsClient(opts: MockCustomsOptions): CustomsClient
   const credentialsPresent = hasCustomsCredentials(opts.credentials);
 
   const hook = (m: ManifestPayload) => (m.trip.tripNumber ?? "").toUpperCase();
+
+  /** In-bond moves the mock has heard about (0026) — shared across instances,
+   * since the API builds a fresh client per request. */
+  const bonds = mockBonds;
 
   /** The mock remembers what it acknowledged, so fetchStatus can answer. */
   const filed = new Map<
@@ -238,6 +246,40 @@ export function createMockCustomsClient(opts: MockCustomsOptions): CustomsClient
     async ping() {
       return { ok: true, mode: "mock", live: false, detail: { mock: true, credentialsPresent } };
     },
+
+    // In-bond (0026): the mock acknowledges every message and answers the
+    // status of a bond with the last thing it heard about it.
+    async inBondArrival(rec) {
+      bonds.set(rec.bondNumber, "arrived");
+      return inBondAck("ARR", rec.bondNumber);
+    },
+    async inBondExport(rec) {
+      bonds.set(rec.bondNumber, "exported");
+      return inBondAck("EXP", rec.bondNumber);
+    },
+    async inBondCancel(rec, reason) {
+      bonds.set(rec.bondNumber, "cancelled");
+      return { ...inBondAck("CXL", rec.bondNumber), raw: { mock: true, reason } };
+    },
+    async inBondStatus(bondNumber) {
+      const status = bonds.get(bondNumber) ?? "open";
+      const message: InBondStatusMessage = {
+        bondNumber,
+        status,
+        message: `Bond ${bondNumber} is ${status} (simulated).`,
+        raw: { mock: true, checkedAt: now().toISOString() },
+      };
+      return message;
+    },
   };
   return client;
+
+  function inBondAck(prefix: string, bondNumber: string): InBondAck {
+    const receivedAt = now().toISOString();
+    return {
+      referenceNumber: `${prefix}-${hashRef(bondNumber + receivedAt)}`,
+      receivedAt,
+      raw: { mock: true, bondNumber, acknowledged: true },
+    };
+  }
 }

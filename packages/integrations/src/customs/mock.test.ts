@@ -298,6 +298,26 @@ describe("mock customs client", () => {
   });
 });
 
+describe("mock in-bond", () => {
+  it("acknowledges and remembers the last message per bond", async () => {
+    const c = createMockCustomsClient({ provider: "cbp_ace", now: fixedNow });
+    const rec = {
+      bondNumber: "123456789",
+      entryType: "IT" as const,
+      arrivalPortCode: "3801",
+      exportPortCode: "0901",
+      firmsCode: "A123",
+      carrierCode: "PFTR",
+      controlNumber: null,
+    };
+    expect((await c.inBondStatus("123456789")).status).toBe("open");
+    expect((await c.inBondArrival(rec)).referenceNumber).toMatch(/^ARR-/);
+    expect((await c.inBondStatus("123456789")).status).toBe("arrived");
+    expect((await c.inBondCancel(rec, "oops")).raw.reason).toBe("oops");
+    expect((await c.inBondStatus("123456789")).status).toBe("cancelled");
+  });
+});
+
 describe("vault-backed credentials", () => {
   it("hasCustomsCredentials ignores absent and blank fields", () => {
     expect(hasCustomsCredentials()).toBe(false);

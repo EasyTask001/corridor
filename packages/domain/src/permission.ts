@@ -52,6 +52,13 @@ export const PERMISSIONS = {
     description: "Create/edit shipments, commodities and their movement assignment",
   },
 
+  // in-bond (0026)
+  "inbond.read": { module: "shipment", description: "View the in-bond monitor and external shipments" },
+  "inbond.write": {
+    module: "shipment",
+    description: "Record in-bond moves, send arrival / export / cancel messages",
+  },
+
   // documents
   "document.read": { module: "document", description: "View uploaded documents" },
   "document.upload": { module: "document", description: "Upload documents" },

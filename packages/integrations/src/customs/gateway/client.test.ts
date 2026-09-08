@@ -135,6 +135,49 @@ describe("gateway customs client (fixture transport)", () => {
   });
 });
 
+describe("in-bond messages", () => {
+  const rec = {
+    bondNumber: "123456789",
+    entryType: "IT" as const,
+    arrivalPortCode: "3801",
+    exportPortCode: "0901",
+    firmsCode: "A123",
+    carrierCode: "PFTR",
+    controlNumber: "PFTRPAPS00009",
+  };
+
+  it("the fixture gateway acknowledges arrival, export and cancel, and reports the last one", async () => {
+    const c = createGatewayCustomsClient({ provider: "cbp_ace", now: fixedNow });
+    expect((await c.inBondStatus(rec.bondNumber)).status).toBe("open");
+    const arrival = await c.inBondArrival(rec);
+    expect(arrival.referenceNumber).toMatch(/^ACE-FX/);
+    expect((await c.inBondStatus(rec.bondNumber)).status).toBe("arrived");
+    await c.inBondExport(rec);
+    expect((await c.inBondStatus(rec.bondNumber)).status).toBe("exported");
+    await c.inBondCancel(rec, "Load rerouted");
+    expect((await c.inBondStatus(rec.bondNumber)).status).toBe("cancelled");
+  });
+
+  it("a live client posts the in-bond document and reads the status back", async () => {
+    const calls: Array<{ path: string; body?: unknown }> = [];
+    const transport: GatewayTransport = {
+      post: async (path, body) => {
+        calls.push({ path, body });
+        return { referenceNumber: "IB-1", receivedAt: "2026-09-06T12:00:00.000Z" };
+      },
+      get: async (path) => {
+        calls.push({ path });
+        return { bondNumber: "123456789", status: "ARRIVED", message: "At port" };
+      },
+    };
+    const c = createGatewayCustomsClient({ provider: "cbp_ace", transport });
+    expect((await c.inBondArrival(rec)).referenceNumber).toBe("IB-1");
+    expect(calls[0]).toMatchObject({ path: "/in-bond/123456789/arrival" });
+    expect((calls[0]?.body as { firmsCode: string }).firmsCode).toBe("A123");
+    expect(await c.inBondStatus("123456789")).toMatchObject({ status: "arrived", message: "At port" });
+  });
+});
+
 describe("http transport", () => {
   const fetchStub =
     (responses: Array<{ status: number; body: unknown }>) => async () => {

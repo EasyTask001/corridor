@@ -32,6 +32,8 @@ insert into public.permissions (key, description, module) values
   ('movement.read_assigned', 'View movements assigned to me (driver portal)', 'movement'),
   ('shipment.read', 'View shipments and commodities', 'shipment'),
   ('shipment.write', 'Create/edit shipments, commodities and their movement assignment', 'shipment'),
+  ('inbond.read', 'View the in-bond monitor and external shipments', 'shipment'),
+  ('inbond.write', 'Record in-bond moves, send arrival / export / cancel messages', 'shipment'),
   ('document.read', 'View uploaded documents', 'document'),
   ('document.upload', 'Upload documents', 'document'),
   ('document.review_extraction', 'Confirm or correct AI-extracted data', 'document'),
@@ -57,35 +59,35 @@ delete from public.role_permissions rp using public.roles r
 insert into public.role_permissions (role_id, permission_id)
 select r.id, p.id from public.roles r, public.permissions p
   where r.is_system and r.name = 'Owner'
-    and p.key in ('organization.read', 'organization.manage', 'organization.members.read', 'organization.members.manage', 'organization.roles.manage', 'billing.read', 'billing.manage', 'integrations.manage', 'audit_log.read', 'driver.read', 'driver.write', 'truck.read', 'truck.write', 'trailer.read', 'trailer.write', 'partner.read', 'partner.write', 'movement.read', 'movement.write', 'movement.transmit_to_customs', 'movement.amend', 'movement.cancel', 'movement.read_assigned', 'shipment.read', 'shipment.write', 'document.read', 'document.upload', 'document.review_extraction', 'alert.read', 'alert.manage', 'report.read', 'copilot.use');
+    and p.key in ('organization.read', 'organization.manage', 'organization.members.read', 'organization.members.manage', 'organization.roles.manage', 'billing.read', 'billing.manage', 'integrations.manage', 'audit_log.read', 'driver.read', 'driver.write', 'truck.read', 'truck.write', 'trailer.read', 'trailer.write', 'partner.read', 'partner.write', 'movement.read', 'movement.write', 'movement.transmit_to_customs', 'movement.amend', 'movement.cancel', 'movement.read_assigned', 'shipment.read', 'shipment.write', 'inbond.read', 'inbond.write', 'document.read', 'document.upload', 'document.review_extraction', 'alert.read', 'alert.manage', 'report.read', 'copilot.use');
 
 delete from public.role_permissions rp using public.roles r
   where rp.role_id = r.id and r.is_system and r.name = 'Admin';
 insert into public.role_permissions (role_id, permission_id)
 select r.id, p.id from public.roles r, public.permissions p
   where r.is_system and r.name = 'Admin'
-    and p.key in ('organization.read', 'organization.manage', 'organization.members.read', 'organization.members.manage', 'organization.roles.manage', 'billing.read', 'integrations.manage', 'audit_log.read', 'driver.read', 'driver.write', 'truck.read', 'truck.write', 'trailer.read', 'trailer.write', 'partner.read', 'partner.write', 'movement.read', 'movement.write', 'movement.transmit_to_customs', 'movement.amend', 'movement.cancel', 'movement.read_assigned', 'shipment.read', 'shipment.write', 'document.read', 'document.upload', 'document.review_extraction', 'alert.read', 'alert.manage', 'report.read', 'copilot.use');
+    and p.key in ('organization.read', 'organization.manage', 'organization.members.read', 'organization.members.manage', 'organization.roles.manage', 'billing.read', 'integrations.manage', 'audit_log.read', 'driver.read', 'driver.write', 'truck.read', 'truck.write', 'trailer.read', 'trailer.write', 'partner.read', 'partner.write', 'movement.read', 'movement.write', 'movement.transmit_to_customs', 'movement.amend', 'movement.cancel', 'movement.read_assigned', 'shipment.read', 'shipment.write', 'inbond.read', 'inbond.write', 'document.read', 'document.upload', 'document.review_extraction', 'alert.read', 'alert.manage', 'report.read', 'copilot.use');
 
 delete from public.role_permissions rp using public.roles r
   where rp.role_id = r.id and r.is_system and r.name = 'Dispatcher';
 insert into public.role_permissions (role_id, permission_id)
 select r.id, p.id from public.roles r, public.permissions p
   where r.is_system and r.name = 'Dispatcher'
-    and p.key in ('organization.read', 'driver.read', 'driver.write', 'truck.read', 'truck.write', 'trailer.read', 'trailer.write', 'partner.read', 'partner.write', 'movement.read', 'movement.write', 'movement.transmit_to_customs', 'movement.amend', 'movement.cancel', 'shipment.read', 'shipment.write', 'document.read', 'document.upload', 'document.review_extraction', 'alert.read', 'alert.manage', 'report.read', 'copilot.use');
+    and p.key in ('organization.read', 'driver.read', 'driver.write', 'truck.read', 'truck.write', 'trailer.read', 'trailer.write', 'partner.read', 'partner.write', 'movement.read', 'movement.write', 'movement.transmit_to_customs', 'movement.amend', 'movement.cancel', 'shipment.read', 'shipment.write', 'inbond.read', 'inbond.write', 'document.read', 'document.upload', 'document.review_extraction', 'alert.read', 'alert.manage', 'report.read', 'copilot.use');
 
 delete from public.role_permissions rp using public.roles r
   where rp.role_id = r.id and r.is_system and r.name = 'Compliance Officer';
 insert into public.role_permissions (role_id, permission_id)
 select r.id, p.id from public.roles r, public.permissions p
   where r.is_system and r.name = 'Compliance Officer'
-    and p.key in ('organization.read', 'organization.members.read', 'billing.read', 'audit_log.read', 'driver.read', 'truck.read', 'trailer.read', 'partner.read', 'movement.read', 'shipment.read', 'document.read', 'alert.read', 'report.read', 'alert.manage', 'document.review_extraction', 'copilot.use', 'movement.amend');
+    and p.key in ('organization.read', 'organization.members.read', 'billing.read', 'audit_log.read', 'driver.read', 'truck.read', 'trailer.read', 'partner.read', 'movement.read', 'shipment.read', 'inbond.read', 'document.read', 'alert.read', 'report.read', 'alert.manage', 'document.review_extraction', 'copilot.use', 'movement.amend');
 
 delete from public.role_permissions rp using public.roles r
   where rp.role_id = r.id and r.is_system and r.name = 'Read-Only';
 insert into public.role_permissions (role_id, permission_id)
 select r.id, p.id from public.roles r, public.permissions p
   where r.is_system and r.name = 'Read-Only'
-    and p.key in ('organization.read', 'organization.members.read', 'billing.read', 'audit_log.read', 'driver.read', 'truck.read', 'trailer.read', 'partner.read', 'movement.read', 'shipment.read', 'document.read', 'alert.read', 'report.read');
+    and p.key in ('organization.read', 'organization.members.read', 'billing.read', 'audit_log.read', 'driver.read', 'truck.read', 'trailer.read', 'partner.read', 'movement.read', 'shipment.read', 'inbond.read', 'document.read', 'alert.read', 'report.read');
 
 delete from public.role_permissions rp using public.roles r
   where rp.role_id = r.id and r.is_system and r.name = 'Driver-Portal';

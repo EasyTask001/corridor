@@ -7,6 +7,8 @@
  *   GET  /manifests/{ref}                 → status document (fromGatewayStatus)
  *   GET  /manifests/ping                  → { ok }
  *   GET  /notices?since=                  → { notices: [...] }
+ *   POST /in-bond/{bond}/arrival|export|cancel → { referenceNumber, receivedAt }
+ *   GET  /in-bond/{bond}                  → { bondNumber, status, message }
  *   webhook POST                          → status document + eventId
  *
  * Only this file knows the wire shapes; the client works in ManifestPayload /
@@ -19,6 +21,8 @@ import type {
   CustomsEventMessage,
   CustomsShipmentMessage,
   CustomsStatusMessage,
+  InBondMessage,
+  InBondStatusMessage,
   ManifestPayload,
 } from "../types";
 
@@ -128,4 +132,36 @@ export function fromGatewayNotices(json: unknown, provider: "cbp_ace" | "cbsa_ac
         } satisfies CarrierNotice,
       ];
     });
+}
+
+export function toGatewayInBond(rec: InBondMessage): Record<string, unknown> {
+  return {
+    bondNumber: rec.bondNumber,
+    entryType: rec.entryType,
+    arrivalPort: rec.arrivalPortCode,
+    exportPort: rec.exportPortCode,
+    firmsCode: rec.firmsCode,
+    carrierCode: rec.carrierCode,
+    controlNumber: rec.controlNumber,
+  };
+}
+
+const IN_BOND_STATUS: Record<string, InBondStatusMessage["status"]> = {
+  open: "open",
+  pending: "open",
+  arrived: "arrived",
+  exported: "exported",
+  closed: "exported",
+  cancelled: "cancelled",
+  canceled: "cancelled",
+};
+
+export function fromGatewayInBondStatus(json: unknown, bondNumber: string): InBondStatusMessage {
+  const d = obj(json);
+  return {
+    bondNumber: str(d.bondNumber) ?? bondNumber,
+    status: IN_BOND_STATUS[String(d.status ?? "").toLowerCase()] ?? "unknown",
+    message: str(d.message),
+    raw: d,
+  };
 }

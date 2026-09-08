@@ -12,6 +12,8 @@ import { CUSTOMS_EVENT_LABELS, type CustomsEventCode, type Regime } from "@corri
 import { simulatedEntryNumber } from "../simulate";
 import type {
   CarrierNotice,
+  InBondAck,
+  InBondMessage,
   CustomsClient,
   CustomsCredentials,
   CustomsDecision,
@@ -21,7 +23,13 @@ import type {
   TransmitAck,
 } from "../types";
 import { parseInboundMessage } from "./inbound";
-import { fromGatewayNotices, fromGatewayStatus, toGatewayManifest } from "./mapping";
+import {
+  fromGatewayInBondStatus,
+  fromGatewayNotices,
+  fromGatewayStatus,
+  toGatewayInBond,
+  toGatewayManifest,
+} from "./mapping";
 import { createFixtureTransport, createHttpTransport, type GatewayTransport } from "./transport";
 
 export interface GatewayClientOptions {
@@ -79,6 +87,8 @@ interface Filing {
  * unfolds like a real crossing: accepted → (held →) released, with the
  * shipments' control numbers and entry numbers filled in from the filing.
  */
+const fixtureBonds = new Map<string, "arrived" | "exported" | "cancelled">();
+
 export function createFixtureGatewayTransport(regime: Regime, now: () => Date): GatewayTransport {
   const prefix = regime.toLowerCase();
   const filings = new Map<string, Filing>();
@@ -152,16 +162,30 @@ export function createFixtureGatewayTransport(regime: Regime, now: () => Date): 
     "POST /manifests": (body) => file(body),
     "POST /manifests/*/cancel": () => ack(),
   });
+  // In-bond moves: the fixture answers a bond's status with the last message
+  // sent about it — shared across instances, like a gateway would.
+  const bonds = fixtureBonds;
 
   return {
     post: (path, body) => {
       // An amendment keeps its reference and starts the decision sequence over.
       const amend = /^\/manifests\/([^/]+)\/amendments$/.exec(path);
       if (amend) return Promise.resolve(file(body, decodeURIComponent(amend[1]!)));
+      const inBond = /^\/in-bond\/([^/]+)\/(arrival|export|cancel)$/.exec(path);
+      if (inBond) {
+        const bond = decodeURIComponent(inBond[1]!);
+        bonds.set(bond, inBond[2] === "arrival" ? "arrived" : inBond[2] === "export" ? "exported" : "cancelled");
+        return Promise.resolve({ ...ack(), bondNumber: bond, fixture: true });
+      }
       return routes.post(path, body);
     },
     get: (path) => {
       if (path === "/manifests/ping") return Promise.resolve({ ok: true, fixture: true });
+      const bond = /^\/in-bond\/([^/?]+)$/.exec(path);
+      if (bond) {
+        const number = decodeURIComponent(bond[1]!);
+        return Promise.resolve({ bondNumber: number, status: bonds.get(number) ?? "open", fixture: true });
+      }
       if (path.startsWith("/notices")) return Promise.resolve(loadFixture<unknown>("notices"));
       const m = /^\/manifests\/([^/?]+)$/.exec(path);
       if (m) {
@@ -281,5 +305,31 @@ export function createGatewayCustomsClient(opts: GatewayClientOptions): CustomsC
       const json = (await transport.get("/manifests/ping")) as Record<string, unknown> | null;
       return { ok: json?.ok === true, mode: "gateway", live, detail: json ?? null };
     },
+
+    inBondArrival: (rec) => inBond("arrival", rec),
+    inBondExport: (rec) => inBond("export", rec),
+    inBondCancel: (rec, reason) => inBond("cancel", rec, reason),
+    async inBondStatus(bondNumber) {
+      const json = await transport.get(`/in-bond/${encodeURIComponent(bondNumber)}`);
+      return fromGatewayInBondStatus(json, bondNumber);
+    },
   };
+
+  async function inBond(
+    action: "arrival" | "export" | "cancel",
+    rec: InBondMessage,
+    reason: string | null = null,
+  ): Promise<InBondAck> {
+    const json = await transport.post(`/in-bond/${encodeURIComponent(rec.bondNumber)}/${action}`, {
+      ...toGatewayInBond(rec),
+      ...(action === "cancel" && { reason }),
+    });
+    const d = (json ?? {}) as Record<string, unknown>;
+    return {
+      referenceNumber:
+        typeof d.referenceNumber === "string" ? d.referenceNumber : `${rec.bondNumber}-${action}`,
+      receivedAt: typeof d.receivedAt === "string" ? d.receivedAt : now().toISOString(),
+      raw: { gateway: true, live, ...d },
+    };
+  }
 }

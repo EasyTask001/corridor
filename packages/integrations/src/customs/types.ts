@@ -194,6 +194,31 @@ export interface CustomsCancelAck {
 
 export type CustomsClientMode = "mock" | "gateway";
 
+/** An in-bond move as CBP wants to hear about it (0026). */
+export interface InBondMessage {
+  bondNumber: string;
+  entryType: "IT" | "TE" | "IE";
+  arrivalPortCode: string;
+  exportPortCode: string;
+  firmsCode: string;
+  carrierCode: string | null;
+  /** Our control number, or the originating carrier's for an external shipment. */
+  controlNumber: string | null;
+}
+
+export interface InBondAck {
+  referenceNumber: string;
+  receivedAt: string;
+  raw: Record<string, unknown>;
+}
+
+export interface InBondStatusMessage {
+  bondNumber: string;
+  status: "open" | "arrived" | "exported" | "cancelled" | "unknown";
+  message: string | null;
+  raw: Record<string, unknown>;
+}
+
 export class CustomsTransportError extends Error {
   override readonly name = "CustomsTransportError";
   constructor(
@@ -240,6 +265,11 @@ export interface CustomsClient {
   ): InboundCustomsMessage | null;
   /** Connection test for the integrations page. */
   ping(): Promise<{ ok: boolean; mode: CustomsClientMode; live: boolean; detail: unknown }>;
+  /** In-bond messages (0026): arrival at the port, export, cancellation, and a status check. */
+  inBondArrival(rec: InBondMessage): Promise<InBondAck>;
+  inBondExport(rec: InBondMessage): Promise<InBondAck>;
+  inBondCancel(rec: InBondMessage, reason: string | null): Promise<InBondAck>;
+  inBondStatus(bondNumber: string): Promise<InBondStatusMessage>;
 }
 
 export interface CustomsClientSettings {
