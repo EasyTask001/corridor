@@ -20,6 +20,9 @@ import {
   regime as regimeSchema,
   sealAddInput,
   sealRemoveInput,
+  trailerAddInput,
+  trailerRemoveInput,
+  trailerReorderInput,
   uuid,
   type MovementStatus,
 } from "@corridor/domain";
@@ -52,12 +55,14 @@ import { recordUsage } from "../services/usage";
 const {
   movements,
   movementCrew,
+  movementTrailers,
   movementAmendments,
   movementSuggestions,
   seals,
   drivers,
   trucks,
   trailers,
+  equipmentTypes,
   partners,
   ports,
   organizationCarrierCodes,
@@ -144,14 +149,17 @@ export const movementRouter = router({
                 where mc.movement_id = ${movements.id} and mc.role = 'person_in_charge'
                 limit 1)`,
               truckUnit: trucks.unitNumber,
-              trailerUnit: trailers.unitNumber,
+              /** Every trailer in tow order, "TR-501 + TR-502" (0021). */
+              trailerUnit: sql<string | null>`(select string_agg(t.unit_number, ' + ' order by mt.position)
+                from public.movement_trailers mt
+                join public.trailers t on t.id = mt.trailer_id
+                where mt.movement_id = ${movements.id})`,
               shipmentCount: sql<number>`(select count(*)::int from public.shipments s where s.movement_id = ${movements.id})`,
               updatedAt: movements.updatedAt,
               createdAt: movements.createdAt,
             })
             .from(movements)
             .leftJoin(trucks, eq(trucks.id, movements.truckId))
-            .leftJoin(trailers, eq(trailers.id, movements.trailerId))
             .leftJoin(ports, eq(ports.id, movements.portId))
             .where(where)
             .orderBy(desc(movements.updatedAt))
@@ -261,7 +269,7 @@ export const movementRouter = router({
                 : null,
             }),
             ...(patch.truckId !== undefined && { truckId: patch.truckId }),
-            ...(patch.trailerId !== undefined && { trailerId: patch.trailerId }),
+            ...(patch.isEmpty !== undefined && { isEmpty: patch.isEmpty }),
             ...(patch.notes !== undefined && { notes: patch.notes }),
           })
           .where(eq(movements.id, id))
@@ -412,6 +420,132 @@ export const movementRouter = router({
       ),
   }),
 
+  trailers: router({
+    /** Hitch a trailer; it goes to the back of the tow. */
+    add: permissionProcedure("movement.write")
+      .input(trailerAddInput)
+      .mutation(({ ctx, input }) =>
+        ctx.rls(async (tx) => {
+          const m = await requireMovement(tx, ctx.orgId, input.movementId);
+          requireEditable(m.status);
+          const [unit] = await tx
+            .select({ id: trailers.id })
+            .from(trailers)
+            .where(and(eq(trailers.id, input.trailerId), eq(trailers.organizationId, ctx.orgId)))
+            .limit(1);
+          if (!unit) throw new TRPCError({ code: "NOT_FOUND", message: "Trailer not found" });
+          const nextRows = await tx
+            .select({ next: sql<number>`coalesce(max(${movementTrailers.position}), 0) + 1` })
+            .from(movementTrailers)
+            .where(eq(movementTrailers.movementId, input.movementId));
+          const [row] = await tx
+            .insert(movementTrailers)
+            .values({
+              organizationId: ctx.orgId,
+              movementId: input.movementId,
+              trailerId: input.trailerId,
+              position: nextRows[0]?.next ?? 1,
+            })
+            .returning()
+            .catch((e: unknown) => {
+              if ((e as { cause?: { code?: string } })?.cause?.code === "23505")
+                throw new TRPCError({
+                  code: "CONFLICT",
+                  message: "That trailer is already on this movement",
+                });
+              throw e;
+            });
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "movement.trailer_add",
+            "movement_trailer",
+            row!.id,
+            null,
+            row!,
+          );
+          return row!;
+        }),
+      ),
+
+    /** Drop a trailer; its seals go with it (on delete cascade). */
+    remove: permissionProcedure("movement.write")
+      .input(trailerRemoveInput)
+      .mutation(({ ctx, input }) =>
+        ctx.rls(async (tx) => {
+          const m = await requireMovement(tx, ctx.orgId, input.movementId);
+          requireEditable(m.status);
+          const [removed] = await tx
+            .delete(movementTrailers)
+            .where(
+              and(
+                eq(movementTrailers.movementId, input.movementId),
+                eq(movementTrailers.trailerId, input.trailerId),
+              ),
+            )
+            .returning();
+          if (!removed)
+            throw new TRPCError({ code: "NOT_FOUND", message: "Not on this movement" });
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "movement.trailer_remove",
+            "movement_trailer",
+            removed.id,
+            removed,
+            null,
+          );
+          return { id: removed.id };
+        }),
+      ),
+
+    /** Set the tow order; `trailerIds` must be exactly the trailers on the movement. */
+    reorder: permissionProcedure("movement.write")
+      .input(trailerReorderInput)
+      .mutation(({ ctx, input }) =>
+        ctx.rls(async (tx) => {
+          const m = await requireMovement(tx, ctx.orgId, input.movementId);
+          requireEditable(m.status);
+          const current = await tx
+            .select({ id: movementTrailers.id, trailerId: movementTrailers.trailerId })
+            .from(movementTrailers)
+            .where(eq(movementTrailers.movementId, input.movementId));
+          const wanted = new Set(input.trailerIds);
+          if (
+            wanted.size !== input.trailerIds.length ||
+            current.length !== wanted.size ||
+            current.some((c) => !wanted.has(c.trailerId))
+          ) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: "Tow order must list every trailer on the movement exactly once",
+            });
+          }
+          for (const [i, trailerId] of input.trailerIds.entries()) {
+            await tx
+              .update(movementTrailers)
+              .set({ position: i + 1 })
+              .where(
+                and(
+                  eq(movementTrailers.movementId, input.movementId),
+                  eq(movementTrailers.trailerId, trailerId),
+                ),
+              );
+          }
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "movement.trailer_reorder",
+            "movement",
+            input.movementId,
+            null,
+            { trailerIds: input.trailerIds },
+          );
+          return { ok: true };
+        }),
+      ),
+  }),
+
   seals: router({
     add: permissionProcedure("movement.write")
       .input(sealAddInput)
@@ -420,12 +554,32 @@ export const movementRouter = router({
           const { movementId, ...fields } = input;
           const m = await requireMovement(tx, ctx.orgId, movementId);
           requireEditable(m.status);
+          // A seal goes on one of this movement's trailer slots, or on the
+          // truck (null). seals_limit() is the backstop for both the slot
+          // ownership and the 4-per-trailer / 1-per-truck cap.
+          if (fields.movementTrailerId) {
+            const [slot] = await tx
+              .select({ id: movementTrailers.id })
+              .from(movementTrailers)
+              .where(
+                and(
+                  eq(movementTrailers.id, fields.movementTrailerId),
+                  eq(movementTrailers.movementId, movementId),
+                ),
+              )
+              .limit(1);
+            if (!slot)
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "That trailer is not on this movement",
+              });
+          }
           const [row] = await tx
             .insert(seals)
             .values({
               movementId,
               organizationId: ctx.orgId,
-              trailerId: fields.trailerId ?? m.trailerId,
+              movementTrailerId: fields.movementTrailerId ?? null,
               sealNumber: fields.sealNumber,
               sealType: fields.sealType ?? null,
               appliedBy: fields.appliedBy ?? null,
@@ -433,12 +587,14 @@ export const movementRouter = router({
             })
             .returning()
             .catch((e: unknown) => {
-              const code = (e as { cause?: { code?: string } })?.cause?.code;
-              if (code === "23505")
+              const cause = (e as { cause?: { code?: string; message?: string } })?.cause;
+              if (cause?.code === "23505")
                 throw new TRPCError({
                   code: "CONFLICT",
                   message: "Seal already recorded on this movement",
                 });
+              if (cause?.code === "P0001" && cause.message?.includes("seal limit"))
+                throw new TRPCError({ code: "PRECONDITION_FAILED", message: cause.message });
               throw e;
             });
           await writeAudit(tx, ctx.orgId, "movement.seal_add", "seal", row!.id, null, row!);
@@ -629,7 +785,7 @@ export const movementRouter = router({
             : null;
         }
         consider("truckId", m.truckId, p.truckId);
-        consider("trailerId", m.trailerId, p.trailerId);
+        consider("isEmpty", m.isEmpty, p.isEmpty);
         if (Object.keys(diff).length === 0) {
           throw new TRPCError({ code: "BAD_REQUEST", message: "Amendment contains no changes" });
         }
@@ -827,8 +983,14 @@ export const movementRouter = router({
           .where(and(eq(trucks.organizationId, ctx.orgId), eq(trucks.status, "active")))
           .orderBy(asc(trucks.unitNumber)),
         tx
-          .select({ id: trailers.id, label: trailers.unitNumber, type: trailers.trailerType })
+          .select({
+            id: trailers.id,
+            label: trailers.unitNumber,
+            type: trailers.trailerType,
+            typeLabel: equipmentTypes.label,
+          })
           .from(trailers)
+          .leftJoin(equipmentTypes, eq(equipmentTypes.code, trailers.trailerType))
           .where(and(eq(trailers.organizationId, ctx.orgId), eq(trailers.status, "active")))
           .orderBy(asc(trailers.unitNumber)),
         tx

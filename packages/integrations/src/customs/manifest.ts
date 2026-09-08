@@ -1,5 +1,5 @@
 import type { CrewRole, DriverDocumentType, Gender, Regime } from "@corridor/domain";
-import type { ManifestPayload, ManifestParty } from "./types";
+import type { ManifestPayload, ManifestParty, ManifestPlate } from "./types";
 
 /** Minimal structural input — the API passes its loaded movement + org. */
 export interface ManifestSource {
@@ -15,6 +15,7 @@ export interface ManifestSource {
     carrierCode: string | null;
     port: { code: string; name?: string } | null;
     scheduledCrossingAt: Date | string | null;
+    isEmpty: boolean;
   };
   crew: Array<{
     role: CrewRole;
@@ -38,9 +39,24 @@ export interface ManifestSource {
     vin: string | null;
     plateNumber: string;
     plateJurisdiction: string;
+    dotNumber: string | null;
+    insurancePolicyNumber: string | null;
+    insuranceCompany: string | null;
+    insuranceAmount: number | null;
+    insuranceYear: number | null;
+    plates: SourcePlate[];
+    /** Seal numbers recorded on the tractor (movement_trailer_id null). */
+    seals: string[];
   } | null;
-  trailer: { unitNumber: string; plateNumber: string; plateJurisdiction: string } | null;
-  seals: Array<{ sealNumber: string }>;
+  /** In tow order, each with the seals recorded on it. */
+  trailers: Array<{
+    unitNumber: string;
+    trailerType: string;
+    plateNumber: string;
+    plateJurisdiction: string;
+    plates: SourcePlate[];
+    seals: string[];
+  }>;
   shipments: Array<{
     controlNumber: string;
     shipmentType: string | null;
@@ -68,6 +84,14 @@ export interface ManifestSource {
     }>;
   }>;
 }
+
+interface SourcePlate {
+  plateNumber: string;
+  jurisdiction: string;
+}
+
+const plates = (rows: SourcePlate[]): ManifestPlate[] =>
+  rows.map((p) => ({ plate: p.plateNumber, jurisdiction: p.jurisdiction }));
 
 interface PostalAddress {
   line1?: string;
@@ -101,7 +125,10 @@ export function buildManifest(src: ManifestSource): ManifestPayload {
   if (!src.movement.port) throw new Error("manifest requires a port of entry");
   if (!src.movement.carrierCode) throw new Error("manifest requires a carrier code");
   if (!src.movement.scheduledCrossingAt) throw new Error("manifest requires an ETA");
-  if (src.shipments.length === 0) throw new Error("manifest requires at least one shipment");
+  if (src.shipments.length === 0 && !src.movement.isEmpty)
+    throw new Error("manifest requires at least one shipment");
+  if (src.shipments.length > 0 && src.movement.isEmpty)
+    throw new Error("an empty trip cannot carry shipments");
 
   const eta =
     typeof src.movement.scheduledCrossingAt === "string"
@@ -121,6 +148,7 @@ export function buildManifest(src: ManifestSource): ManifestPayload {
       tripNumber: src.movement.tripNumber,
       portOfEntry: src.movement.port.code,
       estimatedArrival: eta,
+      isEmpty: src.movement.isEmpty,
     },
     crew: src.crew.map((c) => ({
       role: c.role,
@@ -144,17 +172,30 @@ export function buildManifest(src: ManifestSource): ManifestPayload {
       vin: src.truck.vin,
       plate: src.truck.plateNumber,
       plateJurisdiction: src.truck.plateJurisdiction,
+      plates: plates(src.truck.plates),
+      dotNumber: src.truck.dotNumber,
+      insurance:
+        src.truck.insuranceCompany ||
+        src.truck.insurancePolicyNumber ||
+        src.truck.insuranceAmount != null ||
+        src.truck.insuranceYear != null
+          ? {
+              company: src.truck.insuranceCompany,
+              policyNumber: src.truck.insurancePolicyNumber,
+              amount: src.truck.insuranceAmount,
+              year: src.truck.insuranceYear,
+            }
+          : null,
+      seals: src.truck.seals,
     },
-    equipment: src.trailer
-      ? [
-          {
-            unitNumber: src.trailer.unitNumber,
-            plate: src.trailer.plateNumber,
-            plateJurisdiction: src.trailer.plateJurisdiction,
-            seals: src.seals.map((s) => s.sealNumber),
-          },
-        ]
-      : [],
+    equipment: src.trailers.map((t) => ({
+      unitNumber: t.unitNumber,
+      type: t.trailerType,
+      plate: t.plateNumber,
+      plateJurisdiction: t.plateJurisdiction,
+      plates: plates(t.plates),
+      seals: t.seals,
+    })),
     shipments: src.shipments.map((s) => ({
       controlNumber: s.controlNumber,
       shipmentType: s.shipmentType,

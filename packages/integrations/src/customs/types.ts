@@ -6,6 +6,11 @@ export interface ManifestParty {
   address: string | null;
 }
 
+export interface ManifestPlate {
+  plate: string;
+  jurisdiction: string;
+}
+
 /** Provider-neutral e-manifest payload built from a movement (see manifest.ts). */
 export interface ManifestPayload {
   regime: Regime;
@@ -24,6 +29,8 @@ export interface ManifestPayload {
     tripNumber: string | null;
     portOfEntry: string;
     estimatedArrival: string;
+    /** "Empty Trailer" (ACE) / "Empty Trip" (ACI): filed with no shipments. */
+    isEmpty: boolean;
   };
   crew: Array<{
     role: CrewRole;
@@ -43,11 +50,31 @@ export interface ManifestPayload {
       expiresOn: string | null;
     }>;
   }>;
-  conveyance: { unitNumber: string; vin: string | null; plate: string; plateJurisdiction: string };
-  equipment: Array<{
+  conveyance: {
     unitNumber: string;
+    vin: string | null;
     plate: string;
     plateJurisdiction: string;
+    /** Additional plates (equipment_plates, 0021) — the primary is `plate`. */
+    plates: ManifestPlate[];
+    dotNumber: string | null;
+    insurance: {
+      company: string | null;
+      policyNumber: string | null;
+      amount: number | null;
+      year: number | null;
+    } | null;
+    /** A seal on the tractor itself (at most one). */
+    seals: string[];
+  };
+  /** One entry per trailer, in tow order, each with its own seals. */
+  equipment: Array<{
+    unitNumber: string;
+    /** CBP equipment description code (equipment_types.code). */
+    type: string;
+    plate: string;
+    plateJurisdiction: string;
+    plates: ManifestPlate[];
     seals: string[];
   }>;
   shipments: Array<{

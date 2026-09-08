@@ -55,6 +55,7 @@ const TRAILER_ID = "77777777-7777-4777-8777-777777777777";
 const PARTNER_ID = "88888888-8888-4888-8888-888888888888";
 const PORT_ID = "99999999-9999-4999-8999-999999999998";
 const SHIPMENT_ID = "12121212-1212-4212-8212-121212121212";
+const SLOT_ID = "13131313-1313-4313-8313-131313131313";
 
 const inDays = (days: number) => {
   const d = new Date();
@@ -75,7 +76,7 @@ function movementRow(over: Row = {}): Row {
     carrierCode: "PFTR",
     scheduledCrossingAt: inDays(1),
     truckId: TRUCK_ID,
-    trailerId: TRAILER_ID,
+    isEmpty: false,
     customsReferenceNumber: null,
     notes: null,
     createdBy: TEST_USER_ID,
@@ -156,6 +157,25 @@ function transmittableRows(movement: Row = movementRow()): Record<string, Row[]>
         registrationExpiry: isoDay(180),
       },
     ],
+    // trailersForMovement() joins movement_trailers to trailers; as with the
+    // crew, the fake DB projects from the driving table, so the trailer's
+    // fields sit on the slot row.
+    movementTrailers: [
+      {
+        id: SLOT_ID,
+        organizationId: TEST_ORG_ID,
+        movementId: MOVEMENT_ID,
+        trailerId: TRAILER_ID,
+        position: 1,
+        unitNumber: "TR-501",
+        trailerType: "TF",
+        status: "active",
+        plateNumber: "TRL5011",
+        plateJurisdiction: "ON",
+        registrationExpiry: isoDay(180),
+      },
+    ],
+    equipmentPlates: [],
     shipments: [
       {
         id: SHIPMENT_ID,
@@ -200,6 +220,7 @@ function transmittableRows(movement: Row = movementRow()): Record<string, Row[]>
         id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         organizationId: TEST_ORG_ID,
         movementId: MOVEMENT_ID,
+        movementTrailerId: SLOT_ID,
         sealNumber: "SL-100231",
       },
     ],

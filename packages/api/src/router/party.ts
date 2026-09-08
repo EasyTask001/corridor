@@ -32,6 +32,7 @@ import {
   truckInput,
   uuid,
   type PermissionKey,
+  type PlateEntry,
 } from "@corridor/domain";
 import { mergeRouters, permissionProcedure, router } from "../trpc";
 import { writeAudit } from "../services/audit";
@@ -42,6 +43,7 @@ import {
   syncEntityAlerts,
   travelDocumentsFor,
 } from "../services/compliance";
+import { platesFor, writePlates } from "../services/equipment";
 
 const { drivers, driverDocuments, trucks, trailers, partners } = schema;
 
@@ -58,6 +60,12 @@ interface RegistryConfig<T extends PgTable, I extends z.ZodObject> {
   orderBy: (t: T) => ReturnType<typeof asc>[];
   /** after insert/update/archive: run compliance rules for this entity */
   afterSave?: (tx: RlsTransaction, orgId: string, row: T["$inferSelect"]) => Promise<unknown>;
+  /**
+   * Trucks and trailers carry extra plates in `equipment_plates` (0021). The
+   * input's `extraPlates` array is split off the row and written there, and
+   * rows read back carry it again so the edit form can round-trip it.
+   */
+  plateOwner?: "truckId" | "trailerId";
 }
 
 function mapDbError(e: unknown): never {
@@ -71,7 +79,9 @@ function mapDbError(e: unknown): never {
         ? "document number"
         : constraint.includes("license")
           ? "license number"
-          : "unit number";
+          : constraint.includes("plates")
+            ? "plate position"
+            : "unit number";
     throw new TRPCError({
       code: "CONFLICT",
       message: `A record with this ${which} already exists`,
@@ -80,7 +90,26 @@ function mapDbError(e: unknown): never {
   if (cause?.code === "23514") {
     throw new TRPCError({ code: "BAD_REQUEST", message: "A field failed validation" });
   }
+  if (cause?.code === "23503" && constraint.includes("trailer_type")) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Unknown equipment type code" });
+  }
   throw e;
+}
+
+type PlateRow = Awaited<ReturnType<typeof platesFor>>[number];
+
+/** Attach `extraPlates` to registry rows that own plates. */
+function withPlates<R extends { id: string }>(
+  rows: R[],
+  owner: "truckId" | "trailerId",
+  plates: PlateRow[],
+) {
+  return rows.map((row) => ({
+    ...row,
+    extraPlates: plates
+      .filter((p) => p[owner] === row.id)
+      .map((p) => ({ plateNumber: p.plateNumber, jurisdiction: p.jurisdiction })),
+  }));
 }
 
 function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryConfig<T, I>) {
@@ -103,7 +132,7 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
             conds.push(or(...searchColumns.map((c) => ilike(c, like)))!);
           }
           const where = and(...conds);
-          const [rows, counts] = await Promise.all([
+          const [rawRows, counts] = await Promise.all([
             tx
               .select()
               .from(t)
@@ -116,6 +145,17 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
               .from(t)
               .where(where),
           ]);
+          const rows = cfg.plateOwner
+            ? withPlates(
+                rawRows,
+                cfg.plateOwner,
+                await platesFor(tx, {
+                  [cfg.plateOwner === "truckId" ? "truckIds" : "trailerIds"]: rawRows.map(
+                    (r) => r.id,
+                  ),
+                }),
+              )
+            : rawRows;
           return { rows: rows as unknown as Row[], total: counts[0]?.count ?? 0 };
         }),
       ),
@@ -130,7 +170,11 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
             .where(and(eq(t.id, input.id), eq(t.organizationId, ctx.orgId)))
             .limit(1);
           if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-          return row as unknown as Row;
+          if (!cfg.plateOwner) return row as unknown as Row;
+          const plates = await platesFor(tx, {
+            [cfg.plateOwner === "truckId" ? "truckIds" : "trailerIds"]: [row.id],
+          });
+          return withPlates([row], cfg.plateOwner, plates)[0] as unknown as Row;
         }),
       ),
 
@@ -138,13 +182,18 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
       .input(cfg.input)
       .mutation(({ ctx, input }) =>
         ctx.rls(async (tx) => {
+          const { extraPlates, ...fields } = input as Record<string, unknown> & {
+            extraPlates?: PlateEntry[];
+          };
           const values = {
-            ...(input as Record<string, unknown>),
+            ...fields,
             organizationId: ctx.orgId,
             createdBy: ctx.session.user.id,
           } as unknown as RegistryTable["$inferInsert"];
           const [row] = await tx.insert(t).values(values).returning().catch(mapDbError);
           const saved = row as unknown as Row & { id: string };
+          if (cfg.plateOwner && extraPlates)
+            await writePlates(tx, ctx.orgId, { [cfg.plateOwner]: saved.id } as never, extraPlates);
           await writeAudit(
             tx,
             ctx.orgId,
@@ -163,7 +212,10 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
       .input(updateInput)
       .mutation(({ ctx, input }) =>
         ctx.rls(async (tx) => {
-          const { id, ...patch } = input as { id: string } & Record<string, unknown>;
+          const { id, extraPlates, ...patch } = input as { id: string } & Record<
+            string,
+            unknown
+          > & { extraPlates?: PlateEntry[] };
           const [before] = await tx
             .select()
             .from(t)
@@ -177,6 +229,8 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
             .returning()
             .catch(mapDbError);
           const saved = row as unknown as Row;
+          if (cfg.plateOwner && extraPlates)
+            await writePlates(tx, ctx.orgId, { [cfg.plateOwner]: id } as never, extraPlates);
           await writeAudit(
             tx,
             ctx.orgId,
@@ -355,6 +409,7 @@ export const partyRouter = router({
     entityType: "truck",
     searchColumns: (t) => [t.unitNumber, t.vin, t.plateNumber],
     orderBy: (t) => [asc(t.unitNumber)],
+    plateOwner: "truckId",
     afterSave: (tx, orgId, row) =>
       syncEntityAlerts(tx, orgId, { type: "truck", id: row.id }, findingsForTruck(row)),
   }),
@@ -366,6 +421,7 @@ export const partyRouter = router({
     entityType: "trailer",
     searchColumns: (t) => [t.unitNumber, t.vin, t.plateNumber],
     orderBy: (t) => [asc(t.unitNumber)],
+    plateOwner: "trailerId",
     afterSave: (tx, orgId, row) =>
       syncEntityAlerts(tx, orgId, { type: "trailer", id: row.id }, findingsForTrailer(row)),
   }),

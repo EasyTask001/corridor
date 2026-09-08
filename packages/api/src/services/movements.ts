@@ -6,6 +6,7 @@
  */
 import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, inArray, schema, type RlsTransaction } from "@corridor/db";
+import { platesFor, trailersForMovement } from "./equipment";
 import { shipmentsForMovement } from "./shipments";
 import {
   actorMayTransition,
@@ -24,7 +25,6 @@ const {
   drivers,
   driverDocuments,
   trucks,
-  trailers,
   userProfiles,
   organizations,
   ports,
@@ -226,7 +226,7 @@ export async function crewForMovement(tx: Tx, movementId: string) {
 
 export async function loadFull(tx: Tx, orgId: string, id: string) {
   const m = await requireMovement(tx, orgId, id);
-  const [crew, truck, trailer, port, shipmentRows, sealRows, events, amendments] =
+  const [crew, truck, trailerRows, port, shipmentRows, sealRows, events, amendments] =
     await Promise.all([
       crewForMovement(tx, id),
       m.truckId
@@ -235,14 +235,11 @@ export async function loadFull(tx: Tx, orgId: string, id: string) {
             .from(trucks)
             .where(eq(trucks.id, m.truckId))
             .then((r) => r[0] ?? null)
+            .then(async (t) =>
+              t ? { ...t, plates: await platesFor(tx, { truckIds: [t.id] }) } : null,
+            )
         : null,
-      m.trailerId
-        ? tx
-            .select()
-            .from(trailers)
-            .where(eq(trailers.id, m.trailerId))
-            .then((r) => r[0] ?? null)
-        : null,
+      trailersForMovement(tx, id),
       m.portId
         ? tx
             .select()
@@ -279,9 +276,11 @@ export async function loadFull(tx: Tx, orgId: string, id: string) {
     ...m,
     crew,
     truck,
-    trailer,
+    /** In tow order, each with its plates and seals (0021). */
+    trailers: trailerRows,
     port,
     shipments: shipmentRows,
+    /** Every seal on the movement; `movementTrailerId` null = on the truck. */
     seals: sealRows,
     events,
     amendments,
@@ -317,13 +316,14 @@ export function validationFor(full: FullMovement) {
           status: full.truck.status,
         }
       : null,
-    trailer: full.trailer
-      ? {
-          registrationExpiry: full.trailer.registrationExpiry,
-          plateNumber: full.trailer.plateNumber,
-          status: full.trailer.status,
-        }
-      : null,
+    isEmpty: full.isEmpty,
+    trailers: full.trailers.map((t) => ({
+      unitNumber: t.unitNumber,
+      registrationExpiry: t.registrationExpiry,
+      plateNumber: t.plateNumber,
+      status: t.status,
+      sealCount: t.seals.length,
+    })),
     shipments: full.shipments.map((s) => ({
       controlNumber: s.controlNumber,
       shipmentType: s.shipmentType,

@@ -1,9 +1,9 @@
-/** Global port/office lookup for the trip step and movement filters. */
-import { and, eq, ilike, or, schema } from "@corridor/db";
+/** Global lookups: ports/offices for the trip step and filters, equipment types for the registry. */
+import { and, asc, eq, ilike, or, schema } from "@corridor/db";
 import { portsSearchInput } from "@corridor/domain";
 import { orgProcedure, router } from "../trpc";
 
-const { ports } = schema;
+const { ports, equipmentTypes } = schema;
 
 export const referenceRouter = router({
   ports: router({
@@ -23,6 +23,12 @@ export const referenceRouter = router({
           .orderBy(ports.code)
           .limit(input.limit);
       }),
+    ),
+  }),
+  /** CBP equipment description codes (migration 0021) for the trailer registry. */
+  equipmentTypes: router({
+    list: orgProcedure.query(({ ctx }) =>
+      ctx.rls((tx) => tx.select().from(equipmentTypes).orderBy(asc(equipmentTypes.label))),
     ),
   }),
 });

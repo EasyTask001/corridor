@@ -17,6 +17,7 @@ const src: ManifestSource = {
     carrierCode: "PFTR",
     port: { code: "3801", name: "Detroit" },
     scheduledCrossingAt: "2026-09-08T14:00:00.000Z",
+    isEmpty: false,
   },
   crew: [
     {
@@ -50,9 +51,37 @@ const src: ManifestSource = {
       documents: [],
     },
   ],
-  truck: { unitNumber: "T-101", vin: null, plateNumber: "AB1", plateJurisdiction: "ON" },
-  trailer: { unitNumber: "TR-501", plateNumber: "TRL1", plateJurisdiction: "ON" },
-  seals: [{ sealNumber: "S1" }, { sealNumber: "S2" }],
+  truck: {
+    unitNumber: "T-101",
+    vin: null,
+    plateNumber: "AB1",
+    plateJurisdiction: "ON",
+    dotNumber: "1234567",
+    insurancePolicyNumber: "POL-1",
+    insuranceCompany: "Northbridge",
+    insuranceAmount: 2000000,
+    insuranceYear: 2026,
+    plates: [{ plateNumber: "AB1-MI", jurisdiction: "MI" }],
+    seals: ["S0"],
+  },
+  trailers: [
+    {
+      unitNumber: "TR-501",
+      trailerType: "TF",
+      plateNumber: "TRL1",
+      plateJurisdiction: "ON",
+      plates: [],
+      seals: ["S1", "S2"],
+    },
+    {
+      unitNumber: "TR-502",
+      trailerType: "RT",
+      plateNumber: "TRL2",
+      plateJurisdiction: "ON",
+      plates: [{ plateNumber: "TRL2-QC", jurisdiction: "QC" }],
+      seals: ["S3"],
+    },
+  ],
   shipments: [
     {
       controlNumber: "PFTRPAPS0001",
@@ -106,7 +135,21 @@ describe("buildManifest", () => {
       },
     ]);
     expect(m.crew[1]?.gender).toBe("F");
+    expect(m.trip.isEmpty).toBe(false);
+    expect(m.conveyance.dotNumber).toBe("1234567");
+    expect(m.conveyance.plates).toEqual([{ plate: "AB1-MI", jurisdiction: "MI" }]);
+    expect(m.conveyance.insurance).toEqual({
+      company: "Northbridge",
+      policyNumber: "POL-1",
+      amount: 2000000,
+      year: 2026,
+    });
+    expect(m.conveyance.seals).toEqual(["S0"]);
+    expect(m.equipment.map((e) => e.unitNumber)).toEqual(["TR-501", "TR-502"]);
+    expect(m.equipment[0]?.type).toBe("TF");
     expect(m.equipment[0]?.seals).toEqual(["S1", "S2"]);
+    expect(m.equipment[1]?.seals).toEqual(["S3"]);
+    expect(m.equipment[1]?.plates).toEqual([{ plate: "TRL2-QC", jurisdiction: "QC" }]);
     expect(m.shipments[0]?.controlNumber).toBe("PFTRPAPS0001");
     expect(m.shipments[0]?.shipper).toEqual({
       name: "A",
@@ -127,6 +170,19 @@ describe("buildManifest", () => {
       buildManifest({ ...src, movement: { ...src.movement, carrierCode: null } }),
     ).toThrow(/carrier code/);
     expect(() => buildManifest({ ...src, shipments: [] })).toThrow(/shipment/);
+    expect(() =>
+      buildManifest({ ...src, movement: { ...src.movement, isEmpty: true } }),
+    ).toThrow(/empty trip/);
+  });
+  it("files an empty trip with no shipments and no equipment", () => {
+    const m = buildManifest({
+      ...src,
+      movement: { ...src.movement, isEmpty: true },
+      shipments: [],
+      trailers: [],
+    });
+    expect(m.trip.isEmpty).toBe(true);
+    expect(m.equipment).toEqual([]);
   });
 });
 

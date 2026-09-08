@@ -13,7 +13,7 @@ import { isEditable, movementSuggestionPayload } from "@corridor/domain";
 import { suggestMovement, type MovementFingerprint } from "@corridor/ai";
 import { requireMovement } from "./movements";
 
-const { movements, movementCrew, movementSuggestions, shipments, ports } = schema;
+const { movements, movementCrew, movementTrailers, movementSuggestions, shipments, ports } = schema;
 
 export async function generateMovementSuggestion(
   tx: RlsTransaction,
@@ -111,6 +111,11 @@ export async function generateMovementSuggestion(
     .from(movementCrew)
     .where(eq(movementCrew.movementId, source.id))
     .orderBy(movementCrew.position);
+  const sourceTrailers = await tx
+    .select({ trailerId: movementTrailers.trailerId })
+    .from(movementTrailers)
+    .where(eq(movementTrailers.movementId, source.id))
+    .orderBy(movementTrailers.position);
 
   const payload = movementSuggestionPayload.parse({
     sourceMovementId: source.id,
@@ -120,7 +125,7 @@ export async function generateMovementSuggestion(
     carrierCode: source.carrierCode ?? null,
     crew: sourceCrew,
     truckId: source.truckId,
-    trailerId: source.trailerId,
+    trailerIds: sourceTrailers.map((t) => t.trailerId),
   });
   const [suggestion] = await tx
     .insert(movementSuggestions)
@@ -171,7 +176,6 @@ export async function acceptMovementSuggestion(
     ...(!movement.portId && payload.port && { portId: payload.port.id }),
     ...(!movement.carrierCode && payload.carrierCode && { carrierCode: payload.carrierCode }),
     ...(!movement.truckId && payload.truckId && { truckId: payload.truckId }),
-    ...(!movement.trailerId && payload.trailerId && { trailerId: payload.trailerId }),
   };
   if (Object.keys(patch).length > 0) {
     await tx.update(movements).set(patch).where(eq(movements.id, movement.id));
@@ -191,6 +195,23 @@ export async function acceptMovementSuggestion(
         movementId: movement.id,
         driverId: c.driverId,
         role: c.role,
+        position: i + 1,
+      })),
+    );
+  }
+
+  // Trailers likewise: the whole tow, only onto a movement with none yet.
+  const existingTrailers = await tx
+    .select({ id: movementTrailers.id })
+    .from(movementTrailers)
+    .where(eq(movementTrailers.movementId, movement.id))
+    .limit(1);
+  if (existingTrailers.length === 0 && payload.trailerIds.length > 0) {
+    await tx.insert(movementTrailers).values(
+      payload.trailerIds.map((trailerId, i) => ({
+        organizationId: orgId,
+        movementId: movement.id,
+        trailerId,
         position: i + 1,
       })),
     );
