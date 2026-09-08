@@ -16,7 +16,7 @@ export function DialogOverlay({
 }: ComponentProps<typeof DialogPrimitive.Overlay>) {
   return (
     <DialogPrimitive.Overlay
-      className={cn("fixed inset-0 z-40 bg-ink-950/40", className)}
+      className={cn("fixed inset-0 z-40 bg-ink-950/50", className)}
       {...props}
     />
   );
@@ -33,7 +33,7 @@ export function DialogContent({
       <DialogPrimitive.Content
         className={cn(
           "fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2",
-          "rounded-xl border border-ink-100 bg-white p-6 shadow-xl focus:outline-none",
+          "rounded-xl border border-border-default bg-surface-overlay p-6 shadow-lg focus:outline-none",
           className,
         )}
         {...props}
@@ -41,7 +41,7 @@ export function DialogContent({
         {children}
         <DialogPrimitive.Close
           aria-label="Close"
-          className="absolute right-4 top-4 text-ink-500 transition-colors hover:text-ink-950"
+          className="absolute right-4 top-4 text-fg-secondary transition-colors hover:text-fg-primary"
         >
           <X className="size-4" aria-hidden />
         </DialogPrimitive.Close>
@@ -67,6 +67,6 @@ export function DialogDescription({
   ...props
 }: ComponentProps<typeof DialogPrimitive.Description>) {
   return (
-    <DialogPrimitive.Description className={cn("text-sm text-ink-500", className)} {...props} />
+    <DialogPrimitive.Description className={cn("text-sm text-fg-secondary", className)} {...props} />
   );
 }

@@ -33,7 +33,7 @@ export function SelectTrigger({
     >
       {children}
       <SelectPrimitive.Icon asChild>
-        <ChevronDown className="size-4 shrink-0 text-ink-500" aria-hidden />
+        <ChevronDown className="size-4 shrink-0 text-fg-secondary" aria-hidden />
       </SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
   );
@@ -50,16 +50,16 @@ export function SelectContent({
       <SelectPrimitive.Content
         position={position}
         className={cn(
-          "z-50 max-h-72 min-w-[8rem] overflow-hidden rounded-md border border-ink-100 bg-white text-sm shadow-lg",
+          "z-50 max-h-72 min-w-[8rem] overflow-hidden rounded-md border border-border-default bg-surface-overlay text-sm shadow-md",
           className,
         )}
         {...props}
       >
-        <SelectPrimitive.ScrollUpButton className="flex justify-center py-1 text-ink-500">
+        <SelectPrimitive.ScrollUpButton className="flex justify-center py-1 text-fg-secondary">
           <ChevronUp className="size-4" aria-hidden />
         </SelectPrimitive.ScrollUpButton>
         <SelectPrimitive.Viewport className="p-1">{children}</SelectPrimitive.Viewport>
-        <SelectPrimitive.ScrollDownButton className="flex justify-center py-1 text-ink-500">
+        <SelectPrimitive.ScrollDownButton className="flex justify-center py-1 text-fg-secondary">
           <ChevronDown className="size-4" aria-hidden />
         </SelectPrimitive.ScrollDownButton>
       </SelectPrimitive.Content>
@@ -70,7 +70,7 @@ export function SelectContent({
 export function SelectLabel({ className, ...props }: ComponentProps<typeof SelectPrimitive.Label>) {
   return (
     <SelectPrimitive.Label
-      className={cn("px-2 py-1.5 text-xs uppercase tracking-wide text-ink-500", className)}
+      className={cn("px-2 py-1.5 text-xs uppercase tracking-wide text-fg-secondary", className)}
       {...props}
     />
   );
@@ -85,14 +85,14 @@ export function SelectItem({
     <SelectPrimitive.Item
       className={cn(
         "relative flex cursor-default select-none items-center rounded px-2 py-1.5 pr-7 outline-none",
-        "data-[highlighted]:bg-ink-50 data-[disabled]:opacity-50",
+        "data-[highlighted]:bg-surface-sunken data-[disabled]:opacity-50",
         className,
       )}
       {...props}
     >
       <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
       <SelectPrimitive.ItemIndicator className="absolute right-2">
-        <Check className="size-4 text-ink-700" aria-hidden />
+        <Check className="size-4 text-accent" aria-hidden />
       </SelectPrimitive.ItemIndicator>
     </SelectPrimitive.Item>
   );
@@ -102,5 +102,7 @@ export function SelectSeparator({
   className,
   ...props
 }: ComponentProps<typeof SelectPrimitive.Separator>) {
-  return <SelectPrimitive.Separator className={cn("my-1 h-px bg-ink-100", className)} {...props} />;
+  return (
+    <SelectPrimitive.Separator className={cn("my-1 h-px bg-border-default", className)} {...props} />
+  );
 }
