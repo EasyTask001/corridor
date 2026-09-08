@@ -153,6 +153,12 @@ function ShipmentRows({
             {s.controlNumber}
           </button>
           {s.isPars && <span className="ml-2 text-[10px] uppercase text-ink-500">PARS</span>}
+          {s.entryNumber && (
+            <div className="mt-0.5 text-[11px] text-ink-500">
+              entry {s.entryNumber}
+              {s.entryPortCode ? ` @ ${s.entryPortCode}` : ""}
+            </div>
+          )}
         </td>
         <td className="px-3 py-2 capitalize">{kindOf(s)}</td>
         <td className="px-3 py-2 text-xs">

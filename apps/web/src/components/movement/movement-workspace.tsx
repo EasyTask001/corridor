@@ -10,7 +10,12 @@ import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@corridor/api";
-import { isEditable, type MovementStatus } from "@corridor/domain";
+import {
+  CBSA_AMENDMENT_REASON_CODES,
+  isEditable,
+  type CbsaAmendmentReasonCode,
+  type MovementStatus,
+} from "@corridor/domain";
 import { PortPicker, type PickablePort } from "@/components/port-picker";
 import { useTRPC } from "@/lib/trpc/client";
 import { Field } from "./field";
@@ -406,9 +411,13 @@ export function MovementWorkspace({
               onSubmit={(e: FormEvent<HTMLFormElement>) => {
                 e.preventDefault();
                 const fd = new FormData(e.currentTarget);
+                const reasonCode = String(fd.get("reasonCode") ?? "");
+                const shipmentId = String(fd.get("amendShipment") ?? "");
                 amend.mutate({
                   movementId: id,
                   reason: String(fd.get("reason") ?? ""),
+                  ...(reasonCode && { reasonCode: reasonCode as CbsaAmendmentReasonCode }),
+                  ...(shipmentId && { shipmentId }),
                   patch: {
                     scheduledCrossingAt: fromLocalInput(String(fd.get("eta") ?? "")),
                     portId: amendPortId,
@@ -425,6 +434,28 @@ export function MovementWorkspace({
               </div>
               <Field label="Reason" htmlFor="amendReason">
                 <input id="amendReason" name="reason" required className="input" />
+              </Field>
+              {m.regime === "ACI" && (
+                <Field label="CBSA reason code" htmlFor="amendReasonCode">
+                  <select id="amendReasonCode" name="reasonCode" required className="input">
+                    <option value="">— select —</option>
+                    {CBSA_AMENDMENT_REASON_CODES.map((r) => (
+                      <option key={r.code} value={r.code}>
+                        {r.code} · {r.label}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              )}
+              <Field label="About" htmlFor="amendShipment">
+                <select id="amendShipment" name="amendShipment" className="input">
+                  <option value="">Trip / conveyance</option>
+                  {m.shipments.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      Shipment {s.controlNumber}
+                    </option>
+                  ))}
+                </select>
               </Field>
               <Field label="Estimated crossing" htmlFor="amendEta">
                 <input

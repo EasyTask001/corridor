@@ -171,11 +171,17 @@ test.describe("movement builder", () => {
     await expect(page.getByRole("button", { name: "Save trip" })).toHaveCount(0);
     await expect(page.getByLabel("Trip number")).toBeDisabled();
 
-    // Customs simulation: accepted → released; dispatcher marks arrived
+    // Customs simulation: accepted → released; dispatcher marks arrived.
+    // Each decision unfolds as the gateway's message sequence on the timeline.
     await page.getByRole("button", { name: "accepted", exact: true }).click();
     await expect(heading(page).getByText("accepted")).toBeVisible();
+    await expect(timeline(page).getByText("Preliminary check passed")).toBeVisible();
     await page.getByRole("button", { name: "released", exact: true }).click();
     await expect(heading(page).getByText("released")).toBeVisible();
+    await expect(timeline(page).getByText(/^Entry on file · .* · entry 300\d{8} @ 3801/)).toBeVisible();
+    // …and the entry number lands on the shipment row.
+    await page.getByRole("button", { name: /^Shipments/ }).click();
+    await expect(page.getByText(/^entry 300\d{8} @ 3801/)).toBeVisible();
     await page.getByRole("button", { name: "Mark arrived" }).click();
     await expect(heading(page).getByText("arrived")).toBeVisible();
 

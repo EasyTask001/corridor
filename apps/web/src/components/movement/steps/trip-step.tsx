@@ -1,6 +1,13 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import {
+  ACI_FLAG_KEYS,
+  ACI_FLAG_LABELS,
+  IIT_INDICATORS,
+  IIT_INDICATOR_LABELS,
+  type IitIndicator,
+} from "@corridor/domain";
 import { PortPicker, type PickablePort } from "@/components/port-picker";
 import { RegimeBadge } from "../status-badge";
 import { Field } from "../field";
@@ -56,6 +63,9 @@ export function TripStep() {
           carrierCode: String(fd.get("carrierCode") ?? "").trim() || defaultCarrierCode,
           scheduledCrossingAt: fromLocalInput(String(fd.get("eta") ?? "")),
           isEmpty: fd.get("isEmpty") === "on",
+          iitIndicator: String(fd.get("iitIndicator") ?? "none") as IitIndicator,
+          ...(m.regime === "ACI" &&
+            Object.fromEntries(ACI_FLAG_KEYS.map((k) => [k, fd.get(k) === "on"]))),
         });
       }}
     >
@@ -130,6 +140,34 @@ export function TripStep() {
           <span className="text-xs text-ink-500">(filed with no shipments)</span>
         </label>
       </Field>
+      <Field label="Instruments of international traffic" htmlFor="iitIndicator">
+        <select
+          id="iitIndicator"
+          name="iitIndicator"
+          defaultValue={m.iitIndicator}
+          disabled={!editable}
+          className="input"
+        >
+          {IIT_INDICATORS.map((v) => (
+            <option key={v} value={v}>
+              {IIT_INDICATOR_LABELS[v]}
+            </option>
+          ))}
+        </select>
+      </Field>
+      {m.regime === "ACI" && (
+        <fieldset className="col-span-2">
+          <legend className="label">CBSA trip flags</legend>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+            {ACI_FLAG_KEYS.map((k) => (
+              <label key={k} className="flex items-center gap-2">
+                <input type="checkbox" name={k} defaultChecked={m[k]} disabled={!editable} />
+                {ACI_FLAG_LABELS[k]}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      )}
       {editable && (
         <div className="col-span-2">
           <button className="btn-primary" disabled={update.isPending}>
