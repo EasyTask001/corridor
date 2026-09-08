@@ -284,6 +284,12 @@ export const organizationRouter = router({
             ...(input.simpleDriverSheet !== undefined && {
               simpleDriverSheet: input.simpleDriverSheet,
             }),
+            ...(input.timezone !== undefined && { timezone: input.timezone }),
+            ...(input.billingAddress !== undefined && { billingAddress: input.billingAddress }),
+            ...(input.includeParsInCargoNumbers !== undefined && {
+              includeParsInCargoNumbers: input.includeParsInCargoNumbers,
+            }),
+            ...(input.dispatchEmails !== undefined && { dispatchEmails: input.dispatchEmails }),
           })
           .where(eq(organizations.id, ctx.orgId))
           .returning();

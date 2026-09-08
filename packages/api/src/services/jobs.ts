@@ -30,6 +30,7 @@ export type JobType =
   | "customs.decide"
   | "customs.poll_status"
   | "customs.notices_sync"
+  | "driver.notify"
   | "compliance.scan"
   | "document.extract"
   | "copilot.embed_knowledge"
@@ -180,6 +181,17 @@ export const jobHandlers: Partial<Record<JobType, Handler>> = {
       });
     }
     return result;
+  },
+
+  /** Driver sheet + entry numbers to dispatch and the driver (0025). */
+  "driver.notify": async (tx, job) => {
+    if (!job.organizationId) throw new Error("driver.notify requires organization_id");
+    const trigger = job.payload.trigger === "entries_complete" ? "entries_complete" : "accepted";
+    const { runDriverNotify } = await import("./driver-notify");
+    return runDriverNotify(tx, job.organizationId, {
+      movementId: String(job.payload.movementId),
+      trigger,
+    });
   },
 
   /** Hourly (vercel.json → /api/jobs/notices-sync): pull CBP/CBSA notices, fan out. */

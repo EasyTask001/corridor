@@ -117,6 +117,7 @@ async function applyShipmentOutcomes(
       id: shipments.id,
       controlNumber: shipments.controlNumber,
       status: shipments.status,
+      entryNumber: shipments.entryNumber,
     })
     .from(shipments)
     .where(eq(shipments.movementId, m.id));
@@ -154,6 +155,8 @@ async function applyShipmentOutcomes(
   }
 
   const mentioned = new Map(outcomes.map((o) => [o.controlNumber, o]));
+  const hadAllEntries = attached.length > 0 && attached.every((s) => !!s.entryNumber);
+  let entries = 0;
   for (const s of attached) {
     const o = mentioned.get(s.controlNumber);
     // A shipment the gateway placed on entry first, then released, passes
@@ -176,9 +179,21 @@ async function applyShipmentOutcomes(
       set.entryNumber = o.entryNumber;
       set.entryPortId = (await portIdFor(o.entryPortCode)) ?? undefined;
     }
+    if (o?.entryNumber || s.entryNumber) entries += 1;
     if (Object.keys(set).length > 0)
       await tx.update(shipments).set(set).where(eq(shipments.id, s.id));
   }
+  const allEntries = attached.length > 0 && entries === attached.length;
+  if (allEntries && !hadAllEntries) {
+    const { notifyOrganization } = await import("./notifications");
+    await notifyOrganization(tx, {
+      orgId: actor.orgId,
+      eventType: "shipment.entry_on_file",
+      title: `${m.movementNumber}: entry numbers on file for every shipment`,
+      linkPath: `/movements/${m.id}`,
+    });
+  }
+  return { entriesJustCompleted: allEntries && !hadAllEntries };
 }
 
 export async function applyTransition(
@@ -266,7 +281,7 @@ export async function applyCustomsDecision(
         and(eq(movementAmendments.movementId, m.id), eq(movementAmendments.status, "submitted")),
       );
   }
-  await applyShipmentOutcomes(
+  const outcomes = await applyShipmentOutcomes(
     tx,
     actor,
     m,
@@ -274,6 +289,26 @@ export async function applyCustomsDecision(
     input.events ?? [],
     input.shipments ?? [],
   );
+
+  // Driver / dispatch paperwork (0025): the sheet goes out on acceptance, and
+  // again once every shipment has its entry number.
+  const { enqueueJob } = await import("./jobs");
+  if (input.decision === "accepted") {
+    await enqueueJob(tx, {
+      orgId: actor.orgId,
+      jobType: "driver.notify",
+      payload: { movementId: m.id, trigger: "accepted" },
+      maxAttempts: 2,
+    });
+  }
+  if (outcomes.entriesJustCompleted) {
+    await enqueueJob(tx, {
+      orgId: actor.orgId,
+      jobType: "driver.notify",
+      payload: { movementId: m.id, trigger: "entries_complete" },
+      maxAttempts: 2,
+    });
+  }
 
   // Dynamic import: notifications.ts -> customs.ts -> movements.ts would otherwise cycle.
   const { notifyOrganization } = await import("./notifications");
@@ -290,6 +325,14 @@ export async function applyCustomsDecision(
     body: input.message ?? undefined,
     linkPath: `/movements/${m.id}`,
   });
+  if (input.decision === "accepted") {
+    await notifyOrganization(tx, {
+      orgId: actor.orgId,
+      eventType: "movement.accepted",
+      title: `${m.movementNumber} accepted — driver sheet on its way to dispatch`,
+      linkPath: `/movements/${m.id}`,
+    });
+  }
 
   return updated;
 }

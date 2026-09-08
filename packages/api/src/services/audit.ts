@@ -164,6 +164,7 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
   // --- printable documents (0024) -----------------------------------------
   "pdf.generate": "pdf.generate",
   "pdf.blankDriverSheets": "pdf.blank_driver_sheets",
+  "pdf.email": "pdf.email",
 };
 
 /**

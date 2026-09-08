@@ -31,9 +31,15 @@ const { generatedDocuments, movementEvents } = schema;
 /** Signed URLs live this long — enough to open or download, not to share. */
 export const SIGNED_URL_SECONDS = 60;
 
+/**
+ * Unique per render: the worker (driver.notify) and a dispatcher pressing
+ * "Print" can render the same sheet in the same second, so the stamp carries
+ * milliseconds and a short random suffix.
+ */
 export function generatedPathFor(orgId: string, scope: string, kind: string, at = new Date()) {
-  const stamp = at.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
-  return `${orgId}/generated/${scope}/${kind}-${stamp}.pdf`;
+  const stamp = at.toISOString().replace(/[-:]/g, "").replace("Z", "");
+  const nonce = Math.random().toString(36).slice(2, 6);
+  return `${orgId}/generated/${scope}/${kind}-${stamp}-${nonce}.pdf`;
 }
 
 /**
