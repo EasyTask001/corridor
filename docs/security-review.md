@@ -216,6 +216,16 @@ before touching anything, and is idempotent per `eventId`). Each is a place wher
 there is genuinely no caller to derive claims from. Cross-tenant-leak coverage lives in
 `packages/db/src/rls.integration.test.ts`.
 
+One caller is the deliberate exception to "filters `organization_id` itself":
+`packages/api/src/services/tracking.ts` (public `/track` lookup, migration 0027)
+calls `withServiceRole()` to invoke `lookup_shipment_status()`, which matches
+across every tenant on carrier code + control number rather than one
+organization — there is no session to scope to. The function itself is the
+guard: `SECURITY DEFINER`, `search_path` pinned, `EXECUTE` revoked from `anon`
+and `authenticated` and granted only to `service_role`, and it returns only
+status/port/entry timestamps. The route is additionally IP-rate-limited
+(`services/tracking.ts` → `checkPublicRateLimit`) before the lookup runs.
+
 ## 9. SECURITY DEFINER functions pin `search_path`
 
 Every application-defined SECURITY DEFINER function in `public` has
