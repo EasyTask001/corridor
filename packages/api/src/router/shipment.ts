@@ -6,7 +6,7 @@
  */
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, asc, desc, eq, ilike, inArray, isNull, or, schema, sql } from "@corridor/db";
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, or, schema, sql } from "@corridor/db";
 import {
   assignShipmentsInput,
   commodityRemoveInput,
@@ -490,7 +490,7 @@ export const shipmentRouter = router({
           const since = new Date(Date.now() - input.rangeDays * 86_400_000);
           const conds = [
             eq(parsRnsEvents.organizationId, ctx.orgId),
-            sql`${parsRnsEvents.receivedAt} >= ${since}`,
+            gte(parsRnsEvents.receivedAt, since),
           ];
           if (input.q) {
             const like = `%${input.q.replace(/[%_\\]/g, "\\$&")}%`;
