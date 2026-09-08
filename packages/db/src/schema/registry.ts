@@ -57,6 +57,11 @@ export const drivers = pgTable(
     gender: text("gender", { enum: GENDERS }),
     hazmatEndorsement: boolean("hazmat_endorsement").notNull().default(false),
     usAddress: jsonb("us_address").$type<Address>().notNull().default({}),
+    // 0025 — SMS opt-in with a phone per regime; whether the sheet is e-mailed.
+    smsOptIn: boolean("sms_opt_in").notNull().default(false),
+    smsPhoneAce: text("sms_phone_ace"),
+    smsPhoneAci: text("sms_phone_aci"),
+    emailDriverSheet: boolean("email_driver_sheet").notNull().default(true),
   },
   (t) => [
     index("drivers_organization_id_idx").on(t.organizationId),

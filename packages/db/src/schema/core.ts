@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import type { Address } from "@corridor/domain";
 import {
   bigint,
   boolean,
@@ -62,6 +63,11 @@ export const organizations = pgTable("organizations", {
     .default("trialing"),
   /** 0024 — Avaal's "simple" driver sheet: no commodity lines. */
   simpleDriverSheet: boolean("simple_driver_sheet").notNull().default(false),
+  // 0025 — company profile
+  timezone: text("timezone").notNull().default("America/Toronto"),
+  billingAddress: jsonb("billing_address").$type<Address>().notNull().default({}),
+  includeParsInCargoNumbers: boolean("include_pars_in_cargo_numbers").notNull().default(false),
+  dispatchEmails: text("dispatch_emails").array().notNull().default(sql`'{}'::text[]`),
   ...timestamps,
 });
 
@@ -155,6 +161,8 @@ export const userProfiles = pgTable("user_profiles", {
     .references(() => authUsers.id, { onDelete: "cascade" }),
   displayName: text("display_name"),
   avatarUrl: text("avatar_url"),
+  /** 0025 — SMS address for notification rules with the `sms` channel. */
+  phone: text("phone"),
   ...timestamps,
 });
 

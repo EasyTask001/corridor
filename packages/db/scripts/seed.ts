@@ -281,6 +281,17 @@ export async function seed() {
       values (${otherOrgId}, 'Nora', 'Bergstrom', 'B9999-00000-11111', 'BC', ${day(365)})
       on conflict do nothing`;
 
+    // Singh gets entry numbers by text (0025); two demo dispatch inboxes.
+    await sql`
+      update public.drivers set sms_opt_in = true, sms_phone_ace = '+1 905 555 0101', sms_phone_aci = '+1 905 555 0101'
+      where organization_id = ${orgId} and last_name = 'Singh'`;
+    await sql`
+      update public.organizations
+      set dispatch_emails = array['dispatch@pathfinder.demo', 'ops@pathfinder.demo'],
+          timezone = 'America/Toronto',
+          billing_address = ${sql.json({ line1: "1 Corridor Way", city: "Mississauga", region: "ON", postalCode: "L5T 2M8", country: "CA" })}
+      where id = ${orgId} and cardinality(dispatch_emails) = 0`;
+
     // 3b. integration configs — sandbox mock gateways with a short decision delay
     await sql`
       insert into public.integration_configs (organization_id, provider, environment, settings)
