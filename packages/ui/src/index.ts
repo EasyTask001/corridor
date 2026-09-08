@@ -70,3 +70,4 @@ export { Textarea } from "./components/textarea";
 export type { TextareaProps } from "./components/textarea";
 export { Switch } from "./components/switch";
 export { ThemeToggle } from "./components/theme-toggle";
+export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./components/tooltip";
