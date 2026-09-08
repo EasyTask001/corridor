@@ -22,10 +22,18 @@ import {
   type DataTableColumnDef,
 } from "@corridor/ui";
 import { useTRPC } from "@/lib/trpc/client";
+import { RecordHistoryDialog } from "@/components/record-history";
 import { DriverDocumentsPanel } from "./driver-documents-panel";
 import { REGISTRIES, type FieldDef, type RegistryConfig, type RegistryKind } from "./fields";
 
 type Row = Record<string, unknown> & { id: string; status: string };
+
+const ENTITY_OF: Record<RegistryKind, "driver" | "truck" | "trailer" | "partner"> = {
+  drivers: "driver",
+  trucks: "truck",
+  trailers: "trailer",
+  partners: "partner",
+};
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -215,6 +223,13 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
     }),
   );
   const archive = useMutation(procs.archive.mutationOptions({ onSuccess: invalidate }));
+  const [exportUrl, setExportUrl] = useState<{ url: string; format: string } | null>(null);
+  const exportList = useMutation(
+    procs.export.mutationOptions({
+      onSuccess: (r) => setExportUrl({ url: r.signedUrl, format: r.format }),
+      onError,
+    }),
+  );
 
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -235,15 +250,21 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
         meta: { className: "whitespace-nowrap", headerClassName: "whitespace-nowrap" },
       }),
     );
-    if (canWrite) {
-      cols.push(
-        helper.display({
-          id: "__actions",
-          header: "",
-          meta: { className: "whitespace-nowrap text-right" },
-          cell: ({ row }) => (
-            <>
-              <Button
+    cols.push(
+      helper.display({
+        id: "__actions",
+        header: "",
+        meta: { className: "whitespace-nowrap text-right" },
+        cell: ({ row }) => (
+          <span className="inline-flex items-center gap-3">
+            <RecordHistoryDialog
+              entityType={ENTITY_OF[cfg.kind]}
+              entityId={row.original.id}
+              label={cfg.displayName(row.original)}
+            />
+            {canWrite && (
+              <>
+                <Button
                 variant="ghost"
                 size="xs"
                 className="mr-3 px-0 py-0"
@@ -265,11 +286,12 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
                   Archive
                 </Button>
               )}
-            </>
-          ),
-        }),
-      );
-    }
+              </>
+            )}
+          </span>
+        ),
+      }),
+    );
     return cols;
   }, [cfg, canWrite, archive]);
 
@@ -298,6 +320,30 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
             />
             Show archived
           </label>
+          <span className="flex items-center gap-1 text-xs">
+            {(["csv", "pdf"] as const).map((format) => (
+              <Button
+                key={format}
+                variant="ghost"
+                size="xs"
+                disabled={exportList.isPending}
+                onClick={() => exportList.mutate({ format, includeArchived })}
+              >
+                Export {format.toUpperCase()}
+              </Button>
+            ))}
+            {exportUrl && (
+              <a
+                href={exportUrl.url}
+                target="_blank"
+                rel="noopener"
+                data-testid="registry-export-link"
+                className="font-medium text-ink-950 underline underline-offset-2"
+              >
+                Download {exportUrl.format.toUpperCase()}
+              </a>
+            )}
+          </span>
           {canWrite && (
             <Button
               onClick={() => {

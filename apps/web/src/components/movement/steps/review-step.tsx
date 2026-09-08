@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useTRPC } from "@/lib/trpc/client";
 import { PrintMenu } from "../print-menu";
+import { RecordHistoryDialog } from "@/components/record-history";
 import { fmt, stepForIssue, useWorkspace, type Movement } from "../workspace-context";
 
 export function ReviewStep() {
@@ -57,7 +58,10 @@ export function ReviewStep() {
         )}
       </div>
       <Summary m={m} />
-      <PrintMenu movementId={m.id} />
+      <div className="flex flex-wrap items-center gap-4">
+        <PrintMenu movementId={m.id} />
+        <RecordHistoryDialog entityType="movement" entityId={m.id} label={m.movementNumber} size="sm" />
+      </div>
       {integrationLog.data && integrationLog.data.length > 0 && (
         <div className="panel p-5">
           <h3 className="font-medium">Customs transmission log</h3>

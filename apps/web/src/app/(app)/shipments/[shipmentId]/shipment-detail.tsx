@@ -9,6 +9,7 @@ import type { AppRouter } from "@corridor/api";
 import { isEditable } from "@corridor/domain";
 import { CommodityForm } from "@/components/shipment/commodity-form";
 import { ShipmentForm } from "@/components/shipment/shipment-form";
+import { RecordHistoryDialog } from "@/components/record-history";
 import { useTRPC } from "@/lib/trpc/client";
 
 type Shipment = inferRouterOutputs<AppRouter>["shipment"]["get"];
@@ -72,6 +73,7 @@ export function ShipmentDetail({
             <span className="rounded bg-ink-100 px-2 py-0.5 text-xs capitalize">
               {s.status.replace(/_/g, " ")}
             </span>
+            <RecordHistoryDialog entityType="shipment" entityId={s.id} label={s.controlNumber} size="sm" />
           </h1>
           <p className="mt-1 text-sm text-ink-500">
             {s.movement ? (
