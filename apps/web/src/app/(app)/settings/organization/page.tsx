@@ -40,6 +40,7 @@ export default async function OrganizationSettingsPage() {
           filerCode: org.filerCode ?? "",
           billingEmail: org.billingEmail ?? "",
         }}
+        simpleDriverSheet={org.simpleDriverSheet}
         readOnly={!canManage}
       />
       {canManage && <CarrierCodesPanel initial={carrierCodes} />}

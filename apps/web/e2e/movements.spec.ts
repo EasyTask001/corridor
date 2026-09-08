@@ -74,6 +74,20 @@ async function buildReadyMovement(page: Page) {
   return page.url();
 }
 
+/** Render the driver sheet from the review step and return the signed PDF URL. */
+async function downloadDriverSheet(page: Page) {
+  await page.getByRole("button", { name: /^Review/ }).click();
+  // "Print" opens a tab that is then pointed at the signed URL; headless
+  // Chromium treats the PDF as a download and aborts that navigation, so the
+  // assertion is on the link the page shows once the sheet is rendered.
+  const popup = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "Print driver sheet" }).click();
+  const link = page.getByTestId("pdf-link");
+  await expect(link).toHaveAttribute("href", /\.pdf/, { timeout: 30_000 });
+  await (await popup).close().catch(() => undefined);
+  return (await link.getAttribute("href")) ?? "";
+}
+
 /** Add a shipment to the open movement and give it one complete commodity line. */
 async function addShipmentWithLine(page: Page, reference: string) {
   await page.getByRole("button", { name: /^Shipments/ }).click();
@@ -179,6 +193,8 @@ test.describe("movement builder", () => {
     await page.getByRole("button", { name: "released", exact: true }).click();
     await expect(heading(page).getByText("released")).toBeVisible();
     await expect(timeline(page).getByText(/^Entry on file · .* · entry 300\d{8} @ 3801/)).toBeVisible();
+    // The driver sheet renders from the manifest as filed (0024).
+    expect(await downloadDriverSheet(page)).toMatch(/driver_sheet-.*\.pdf/);
     // …and the entry number lands on the shipment row.
     await page.getByRole("button", { name: /^Shipments/ }).click();
     await expect(page.getByText(/^entry 300\d{8} @ 3801/)).toBeVisible();

@@ -26,9 +26,19 @@ const FIELDS: { key: keyof Fields; label: string; mono?: boolean }[] = [
   { key: "billingEmail", label: "Billing email" },
 ];
 
-export function OrganizationForm({ initial, readOnly }: { initial: Fields; readOnly: boolean }) {
+export function OrganizationForm({
+  initial,
+  readOnly,
+  simpleDriverSheet: initialSimple = false,
+}: {
+  initial: Fields;
+  readOnly: boolean;
+  /** organizations.simple_driver_sheet (0024): print sheets without commodity lines. */
+  simpleDriverSheet?: boolean;
+}) {
   const trpc = useTRPC();
   const [form, setForm] = useState(initial);
+  const [simpleDriverSheet, setSimpleDriverSheet] = useState(initialSimple);
   const [saved, setSaved] = useState(false);
   const update = useMutation(
     trpc.organization.update.mutationOptions({ onSuccess: () => setSaved(true) }),
@@ -40,11 +50,12 @@ export function OrganizationForm({ initial, readOnly }: { initial: Fields; readO
       onSubmit={(e) => {
         e.preventDefault();
         setSaved(false);
-        const payload: Record<string, string | undefined> = {};
+        const payload: Record<string, string | boolean | undefined> = {};
         for (const { key } of FIELDS) {
           const v = form[key].trim();
           if (v !== (initial[key] ?? "")) payload[key] = v || undefined;
         }
+        if (simpleDriverSheet !== initialSimple) payload.simpleDriverSheet = simpleDriverSheet;
         update.mutate(payload);
       }}
     >
@@ -64,6 +75,16 @@ export function OrganizationForm({ initial, readOnly }: { initial: Fields; readO
           </div>
         ))}
       </div>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={simpleDriverSheet}
+          disabled={readOnly}
+          onChange={(e) => setSimpleDriverSheet(e.target.checked)}
+        />
+        Simple driver sheet
+        <span className="text-xs text-ink-500">(print without commodity lines)</span>
+      </label>
       {update.error && <p className="text-sm text-danger-500">{update.error.message}</p>}
       {saved && <p className="text-sm text-ok-500">Saved.</p>}
       {!readOnly && (

@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useTRPC } from "@/lib/trpc/client";
+import { PrintMenu } from "../print-menu";
 import { fmt, stepForIssue, useWorkspace, type Movement } from "../workspace-context";
 
 export function ReviewStep() {
@@ -56,6 +57,7 @@ export function ReviewStep() {
         )}
       </div>
       <Summary m={m} />
+      <PrintMenu movementId={m.id} />
       {integrationLog.data && integrationLog.data.length > 0 && (
         <div className="panel p-5">
           <h3 className="font-medium">Customs transmission log</h3>

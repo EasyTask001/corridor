@@ -5,6 +5,7 @@ import { movementStatus, uuid, type MovementStatus } from "@corridor/domain";
 import { Button, buttonVariants, Card, Input } from "@corridor/ui";
 import { getSession } from "@/lib/session";
 import { api } from "@/lib/trpc/server";
+import { BlankSheetsDialog } from "./blank-sheets-dialog";
 import { MovementsPortFilter } from "./port-filter";
 import { MovementsTable, type MovementRow } from "./movements-table";
 import { createMovement } from "./actions";
@@ -98,6 +99,7 @@ export default async function MovementsPage({
             <Link href="/movements/new" className={buttonVariants({ variant: "secondary" })}>
               New movement…
             </Link>
+            <BlankSheetsDialog />
           </div>
         )}
       </header>
