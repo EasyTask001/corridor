@@ -65,3 +65,4 @@ export {
 export { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/tabs";
 export { Textarea } from "./components/textarea";
 export type { TextareaProps } from "./components/textarea";
+export { ThemeToggle } from "./components/theme-toggle";
