@@ -207,10 +207,13 @@ reachable from a browser bundle:
 The RLS-bypassing **database** path is `withServiceRole()` (`packages/db/src/rls.ts:56`),
 whose contract is that callers must filter by `organization_id` themselves. Its
 call sites are the job worker and cron routes (`api/jobs/process`,
-`api/jobs/expiry-scan`), `packages/api/src/services/jobs.ts`,
-`packages/api/src/services/audit.ts` (audit rows for actorless events) and
-`packages/api/src/router/billing.ts`. Each is a place where there is genuinely no
-caller to derive claims from. Cross-tenant-leak coverage lives in
+`api/jobs/expiry-scan`, `api/jobs/notices-sync`), `packages/api/src/services/jobs.ts`,
+`packages/api/src/services/audit.ts` (audit rows for actorless events),
+`packages/api/src/router/billing.ts`, and — since migration 0023 — the customs
+webhook (`api/webhooks/customs` → `applyInboundCustomsMessage`, which resolves the
+gateway's reference number to one organization through `customs_submissions`
+before touching anything, and is idempotent per `eventId`). Each is a place where
+there is genuinely no caller to derive claims from. Cross-tenant-leak coverage lives in
 `packages/db/src/rls.integration.test.ts`.
 
 ## 9. SECURITY DEFINER functions pin `search_path`
