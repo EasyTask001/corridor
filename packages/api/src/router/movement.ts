@@ -1073,7 +1073,12 @@ export const movementRouter = router({
           .where(and(eq(trailers.organizationId, ctx.orgId), eq(trailers.status, "active")))
           .orderBy(asc(trailers.unitNumber)),
         tx
-          .select({ id: partners.id, label: partners.name, type: partners.type })
+          .select({
+            id: partners.id,
+            label: partners.name,
+            type: partners.type,
+            country: sql<string | null>`${partners.address}->>'country'`,
+          })
           .from(partners)
           .where(and(eq(partners.organizationId, ctx.orgId), eq(partners.status, "active")))
           .orderBy(asc(partners.name)),

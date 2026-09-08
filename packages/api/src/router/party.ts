@@ -15,6 +15,7 @@ import {
   asc,
   eq,
   ilike,
+  inArray,
   or,
   schema,
   sql,
@@ -31,11 +32,13 @@ import {
   trailerInput,
   truckInput,
   uuid,
+  registryExportInput,
   type PermissionKey,
   type PlateEntry,
 } from "@corridor/domain";
 import { mergeRouters, permissionProcedure, router } from "../trpc";
 import { writeAudit } from "../services/audit";
+import { exportTable } from "../services/reporting-export";
 import {
   findingsForDriver,
   findingsForTrailer,
@@ -66,7 +69,22 @@ interface RegistryConfig<T extends PgTable, I extends z.ZodObject> {
    * rows read back carry it again so the edit form can round-trip it.
    */
   plateOwner?: "truckId" | "trailerId";
+  /** Title and columns of the CSV / PDF export (Task 12). */
+  title: string;
+  exportColumns: Array<{ key: string; label: string; value?: (row: T["$inferSelect"]) => unknown }>;
 }
+
+/** Flatten a registry cell for a CSV / PDF: dates to ISO days, booleans to yes/no. */
+function exportCell(value: unknown): string | number | null {
+  if (value === null || value === undefined || value === "") return null;
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  if (typeof value === "number") return value;
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+const addressPart = (part: string) => (row: { address?: unknown }) =>
+  (row.address as Record<string, unknown> | null | undefined)?.[part] ?? null;
 
 function mapDbError(e: unknown): never {
   const cause = (e as { cause?: { code?: string; constraint_name?: string; constraint?: string } })
@@ -131,6 +149,10 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
             const like = `%${input.search.replace(/[%_\\]/g, "\\$&")}%`;
             conds.push(or(...searchColumns.map((c) => ilike(c, like)))!);
           }
+          if (input.direction && cfg.entityType === "partner") {
+            const pt = cfg.table as unknown as typeof partners;
+            conds.push(inArray(pt.type, [input.direction, "both"]));
+          }
           const where = and(...conds);
           const [rawRows, counts] = await Promise.all([
             tx
@@ -157,6 +179,52 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
               )
             : rawRows;
           return { rows: rows as unknown as Row[], total: counts[0]?.count ?? 0 };
+        }),
+      ),
+
+    /** The whole registry as a CSV or PDF, stored like any generated document. */
+    export: permissionProcedure(cfg.read)
+      .input(registryExportInput)
+      .mutation(({ ctx, input }) =>
+        ctx.rls(async (tx) => {
+          const conds = [eq(t.organizationId, ctx.orgId)];
+          if (!input.includeArchived) conds.push(sql`${t.status} <> 'archived'`);
+          const raw = (await tx
+            .select()
+            .from(t)
+            .where(and(...conds))
+            .orderBy(...orderBy)
+            .limit(5000)) as unknown as Row[];
+          const columns = cfg.exportColumns.map(({ key, label }) => ({ key, label }));
+          const rows = raw.map((r) =>
+            Object.fromEntries(
+              cfg.exportColumns.map((c) => [
+                c.key,
+                exportCell(c.value ? c.value(r) : (r as Record<string, unknown>)[c.key]),
+              ]),
+            ),
+          );
+          const doc = await exportTable(
+            tx,
+            { orgId: ctx.orgId, userId: ctx.session.user.id },
+            {
+              kind: "registry_export",
+              scope: `${cfg.entityType}s`,
+              format: input.format,
+              data: {
+                title: cfg.title,
+                subtitle: input.includeArchived ? "Including archived" : "Active and inactive",
+                columns,
+                rows,
+              },
+              metadata: { registry: cfg.entityType, includeArchived: input.includeArchived },
+            },
+          );
+          await writeAudit(tx, ctx.orgId, `${cfg.entityType}.export`, "generated_document", doc.id, null, {
+            format: input.format,
+            rowCount: rows.length,
+          });
+          return { id: doc.id, signedUrl: doc.signedUrl, byteSize: doc.byteSize, format: input.format };
         }),
       ),
 
@@ -389,6 +457,20 @@ export const partyRouter = router({
       read: "driver.read",
       write: "driver.write",
       entityType: "driver",
+    title: "Drivers",
+    exportColumns: [
+      { key: "firstName", label: "First name" },
+      { key: "lastName", label: "Last name" },
+      { key: "personType", label: "Type" },
+      { key: "licenseNumber", label: "License" },
+      { key: "licenseJurisdiction", label: "License jurisdiction" },
+      { key: "licenseExpiry", label: "License expiry" },
+      { key: "medicalCertExpiry", label: "Medical expiry" },
+      { key: "citizenship", label: "Citizenship" },
+      { key: "phone", label: "Phone" },
+      { key: "email", label: "Email" },
+      { key: "status", label: "Status" },
+    ],
       searchColumns: (t) => [t.firstName, t.lastName, t.licenseNumber],
       orderBy: (t) => [asc(t.lastName), asc(t.firstName)],
       afterSave: async (tx, orgId, row) =>
@@ -407,6 +489,21 @@ export const partyRouter = router({
     read: "truck.read",
     write: "truck.write",
     entityType: "truck",
+    title: "Trucks",
+    exportColumns: [
+      { key: "unitNumber", label: "Unit" },
+      { key: "vin", label: "VIN" },
+      { key: "make", label: "Make" },
+      { key: "model", label: "Model" },
+      { key: "modelYear", label: "Year" },
+      { key: "plateNumber", label: "Plate" },
+      { key: "plateJurisdiction", label: "Plate jurisdiction" },
+      { key: "dotNumber", label: "DOT #" },
+      { key: "registrationExpiry", label: "Registration expiry" },
+      { key: "insuranceExpiry", label: "Insurance expiry" },
+      { key: "annualInspectionExpiry", label: "Inspection expiry" },
+      { key: "status", label: "Status" },
+    ],
     searchColumns: (t) => [t.unitNumber, t.vin, t.plateNumber],
     orderBy: (t) => [asc(t.unitNumber)],
     plateOwner: "truckId",
@@ -419,6 +516,19 @@ export const partyRouter = router({
     read: "trailer.read",
     write: "trailer.write",
     entityType: "trailer",
+    title: "Trailers",
+    exportColumns: [
+      { key: "unitNumber", label: "Unit" },
+      { key: "trailerType", label: "Type" },
+      { key: "vin", label: "VIN" },
+      { key: "plateNumber", label: "Plate" },
+      { key: "plateJurisdiction", label: "Plate jurisdiction" },
+      { key: "lengthFt", label: "Length (ft)" },
+      { key: "registrationExpiry", label: "Registration expiry" },
+      { key: "insuranceExpiry", label: "Insurance expiry" },
+      { key: "annualInspectionExpiry", label: "Inspection expiry" },
+      { key: "status", label: "Status" },
+    ],
     searchColumns: (t) => [t.unitNumber, t.vin, t.plateNumber],
     orderBy: (t) => [asc(t.unitNumber)],
     plateOwner: "trailerId",
@@ -431,6 +541,21 @@ export const partyRouter = router({
     read: "partner.read",
     write: "partner.write",
     entityType: "partner",
+    title: "Partners",
+    exportColumns: [
+      { key: "name", label: "Partner" },
+      { key: "type", label: "Role" },
+      { key: "line1", label: "Address", value: addressPart("line1") },
+      { key: "city", label: "City", value: addressPart("city") },
+      { key: "region", label: "Province / state", value: addressPart("region") },
+      { key: "postalCode", label: "Postal / ZIP", value: addressPart("postalCode") },
+      { key: "country", label: "Country", value: addressPart("country") },
+      { key: "taxId", label: "Tax ID" },
+      { key: "contactName", label: "Contact" },
+      { key: "contactEmail", label: "Contact email" },
+      { key: "contactPhone", label: "Contact phone" },
+      { key: "status", label: "Status" },
+    ],
     searchColumns: (t) => [t.name, t.contactName, t.taxId],
     orderBy: (t) => [asc(t.name)],
   }),

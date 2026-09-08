@@ -61,6 +61,16 @@ function adminStorage() {
     .storage;
 }
 
+/** Put a generated file (PDF or CSV) into the documents bucket. */
+export async function uploadGeneratedFile(storagePath: string, bytes: Buffer, contentType: string) {
+  const { error } = await adminStorage()
+    .from(DOCUMENTS_BUCKET)
+    .upload(storagePath, bytes, { contentType, upsert: false });
+  if (error) {
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Upload failed: ${error.message}` });
+  }
+}
+
 export async function signedUrlFor(storagePath: string, seconds = SIGNED_URL_SECONDS) {
   const { data, error } = await adminStorage()
     .from(DOCUMENTS_BUCKET)

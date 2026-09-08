@@ -257,7 +257,8 @@ export type PartnerType = z.infer<typeof partnerType>;
 export const partnerInput = z.object({
   name: nonEmpty.max(160),
   type: partnerType,
-  address: address.default({}),
+  /** A partner's country decides which side of an ACE / ACI shipment it is offered for. */
+  address: address.extend({ country: countryCode2 }),
   taxId: optionalText(40),
   contactName: optionalText(120),
   contactEmail: email.nullable().optional(),
@@ -281,9 +282,23 @@ export type Partner = z.infer<typeof partnerSchema>;
 
 export const registryListInput = z.object({
   search: z.string().trim().max(100).optional(),
+  /** Partners only: the side of a shipment they can take (`both` always qualifies). */
+  direction: z.enum(["shipper", "consignee"]).optional(),
   status: registryStatus.optional(),
   includeArchived: z.boolean().default(false),
   limit: z.number().int().min(1).max(200).default(50),
   offset: z.number().int().min(0).default(0),
 });
 export type RegistryListInput = z.infer<typeof registryListInput>;
+
+/** A partner's side of a shipment, for pre-filtering the pickers. */
+export const partnerDirection = z.enum(["shipper", "consignee"]);
+export type PartnerDirection = z.infer<typeof partnerDirection>;
+
+/**
+ * Which country a shipper / consignee is normally in for a regime: an ACE
+ * (US-bound) load is picked up in Canada and delivered in the US; ACI the
+ * reverse. The form pre-filters on this and offers an override.
+ */
+export const expectedPartnerCountry = (regime: "ACE" | "ACI", direction: PartnerDirection) =>
+  (regime === "ACE") === (direction === "shipper") ? "CA" : "US";

@@ -90,17 +90,21 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
   "party.drivers.create": "driver.create",
   "party.drivers.update": "driver.update",
   "party.drivers.archive": "driver.archive",
+  "party.drivers.export": "driver.export",
   "party.drivers.documents.upsert": "driver.document_add / driver.document_update",
   "party.drivers.documents.remove": "driver.document_remove",
   "party.trucks.create": "truck.create",
   "party.trucks.update": "truck.update",
   "party.trucks.archive": "truck.archive",
+  "party.trucks.export": "truck.export",
   "party.trailers.create": "trailer.create",
   "party.trailers.update": "trailer.update",
   "party.trailers.archive": "trailer.archive",
+  "party.trailers.export": "trailer.export",
   "party.partners.create": "partner.create",
   "party.partners.update": "partner.update",
   "party.partners.archive": "partner.archive",
+  "party.partners.export": "partner.export",
 
   // --- alerts -------------------------------------------------------------
   "alerts.setStatus": "alert.status_update",
@@ -177,6 +181,7 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
 
   // --- reporting ----------------------------------------------------------
   "reporting.run": "report.run",
+  "reporting.export": "report.export",
 
   // --- printable documents (0024) -----------------------------------------
   "pdf.generate": "pdf.generate",

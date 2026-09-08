@@ -1,10 +1,18 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, desc, eq, gte, schema, sql, type RlsTransaction, type SQL } from "@corridor/db";
-import { reportQuery, type ReportQuery } from "@corridor/domain";
+import {
+  crossingReportInput,
+  reportExportInput,
+  reportQuery,
+  type ReportQuery,
+} from "@corridor/domain";
 import { translateReportQuestion, UnsupportedReportQuestionError } from "@corridor/ai";
 import { permissionProcedure, router } from "../trpc";
 import { writeAudit } from "../services/audit";
+import { crossingReport, dashboardData } from "../services/crossings";
+import { loadOrganization } from "../services/movements";
+import { exportTable } from "../services/reporting-export";
 
 const { movements, shipments, commodities, ports } = schema;
 
@@ -125,6 +133,72 @@ function summarize(
 }
 
 export const reportingRouter = router({
+  /** Crossing log: one row per movement in a date range, with whichever columns were picked. */
+  crossings: permissionProcedure("report.read", "movement.read")
+    .input(crossingReportInput)
+    .query(({ ctx, input }) =>
+      ctx.rls(async (tx) => {
+        const org = await loadOrganization(tx, ctx.orgId);
+        return crossingReport(tx, ctx.orgId, input, org.timezone ?? undefined);
+      }),
+    ),
+
+  /** CSV or PDF of the crossing report or of a question's result; stored as a generated document. */
+  export: permissionProcedure("report.read", "movement.read")
+    .input(reportExportInput)
+    .mutation(({ ctx, input }) =>
+      ctx.rls(async (tx) => {
+        const actor = { orgId: ctx.orgId, userId: ctx.session.user.id };
+        let doc;
+        if (input.source.kind === "crossings") {
+          const org = await loadOrganization(tx, ctx.orgId);
+          const q = { ...input.source.query, limit: 1000, offset: 0 };
+          const report = await crossingReport(tx, ctx.orgId, q, org.timezone ?? undefined);
+          doc = await exportTable(tx, actor, {
+            kind: "report",
+            scope: "crossings",
+            format: input.format,
+            data: {
+              title: "Crossing report",
+              subtitle: `${q.from} to ${q.to}${q.regime ? ` · ${q.regime}` : ""}`,
+              columns: report.columns,
+              rows: report.rows,
+            },
+            metadata: { report: "crossings", from: q.from, to: q.to, columns: q.columns },
+          });
+        } else {
+          const rows = await executeReport(tx, ctx.orgId, input.source.query);
+          const unit = unitFor(input.source.query);
+          doc = await exportTable(tx, actor, {
+            kind: "report",
+            scope: "question",
+            format: input.format,
+            data: {
+              title: input.source.title,
+              subtitle: input.source.query.range.replace(/_/g, " "),
+              columns: [
+                { key: "label", label: "Group", width: 60 },
+                { key: "value", label: unit, width: 40 },
+              ],
+              rows,
+            },
+            metadata: { report: "question", query: input.source.query },
+          });
+        }
+        await writeAudit(tx, ctx.orgId, "report.export", "generated_document", doc.id, null, {
+          format: input.format,
+          source: input.source.kind,
+          byteSize: doc.byteSize,
+        });
+        return { id: doc.id, signedUrl: doc.signedUrl, byteSize: doc.byteSize, format: input.format };
+      }),
+    ),
+
+  /** Dashboard tiles, the trailing-year series and the latest shipments. */
+  dashboard: permissionProcedure("movement.read").query(({ ctx }) =>
+    ctx.rls((tx) => dashboardData(tx, ctx.orgId)),
+  ),
+
   run: permissionProcedure("report.read", "movement.read")
     .input(reportInput)
     .mutation(({ ctx, input }) =>
