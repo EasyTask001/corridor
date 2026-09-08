@@ -19,6 +19,9 @@ export default async function OrganizationSettingsPage() {
   // has to be able to show and undo that configuration on any plan.
   const sso = canManage ? await caller.organization.sso.get() : null;
   const carrierCodes = canManage ? await caller.organization.carrierCodes.list() : [];
+  const billing = session?.permissions.has("billing.read")
+    ? await caller.billing.status().catch(() => null)
+    : null;
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -39,8 +42,13 @@ export default async function OrganizationSettingsPage() {
           mcNumber: org.mcNumber ?? "",
           filerCode: org.filerCode ?? "",
           billingEmail: org.billingEmail ?? "",
+          timezone: org.timezone,
         }}
         simpleDriverSheet={org.simpleDriverSheet}
+        includeParsInCargoNumbers={org.includeParsInCargoNumbers}
+        billingAddress={org.billingAddress}
+        dispatchEmails={org.dispatchEmails}
+        billing={billing}
         readOnly={!canManage}
       />
       {canManage && <CarrierCodesPanel initial={carrierCodes} />}

@@ -137,6 +137,27 @@ export const REGISTRIES: Record<RegistryKind, RegistryConfig> = {
       { name: "dateOfBirth", label: "Date of birth", type: "date" },
       { name: "phone", label: "Phone", type: "tel" },
       { name: "email", label: "Email", type: "email" },
+      // 0025 — entry numbers by SMS, one phone per regime; the sheet by e-mail.
+      {
+        name: "smsOptIn",
+        label: "SMS entry numbers",
+        type: "boolean",
+        options: [
+          { value: "false", label: "No" },
+          { value: "true", label: "Yes" },
+        ],
+      },
+      {
+        name: "emailDriverSheet",
+        label: "E-mail driver sheet",
+        type: "boolean",
+        options: [
+          { value: "true", label: "Yes" },
+          { value: "false", label: "No" },
+        ],
+      },
+      { name: "smsPhoneAce", label: "SMS phone (ACE / US trips)", type: "tel" },
+      { name: "smsPhoneAci", label: "SMS phone (ACI / Canada trips)", type: "tel" },
       { name: "usAddress.line1", label: "US address line 1", span: 2 },
       { name: "usAddress.city", label: "US city" },
       { name: "usAddress.region", label: "US state", uppercase: true },

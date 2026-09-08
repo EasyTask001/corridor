@@ -4,7 +4,7 @@
  * Print / download the driver sheet or the manifest summary for a movement.
  * Each action renders a fresh PDF (the sheet must show the manifest as it is
  * now), then either opens it in a new tab or hands the browser the file.
- * "Email" arrives with Task 8.
+ * "Send by e-mail" mails a 24-hour link to the last rendered document.
  */
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
@@ -17,6 +17,18 @@ export function PrintMenu({ movementId }: { movementId: string }) {
   const trpc = useTRPC();
   const [last, setLast] = useState<{ kind: Kind; url: string; id: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [mailTo, setMailTo] = useState("");
+  const [mailed, setMailed] = useState<string | null>(null);
+  const email = useMutation(
+    trpc.pdf.email.mutationOptions({
+      onSuccess: (r) => {
+        setError(null);
+        const ok = r.results.filter((x) => x.ok).length;
+        setMailed(`Sent to ${ok} of ${r.results.length} address${r.results.length === 1 ? "" : "es"}${r.results[0]?.mode === "mock" ? " (mock mail)" : ""}.`);
+      },
+      onError: (e) => setError(e.message),
+    }),
+  );
   const generate = useMutation(
     trpc.pdf.generate.mutationOptions({
       onSuccess: (doc, vars) => {
@@ -74,13 +86,43 @@ export function PrintMenu({ movementId }: { movementId: string }) {
       {generate.isPending && <p className="mt-2 text-xs text-ink-500">Rendering…</p>}
       {error && <p className="mt-2 text-xs text-danger-500">{error}</p>}
       {last && !generate.isPending && (
-        <p className="mt-2 text-xs text-ink-500">
-          {LABEL[last.kind]} ready:{" "}
-          <a href={last.url} className="underline" target="_blank" rel="noopener" data-testid="pdf-link">
-            open PDF
-          </a>
-          <span className="ml-1 text-ink-300">(link valid for one minute)</span>
-        </p>
+        <>
+          <p className="mt-2 text-xs text-ink-500">
+            {LABEL[last.kind]} ready:{" "}
+            <a href={last.url} className="underline" target="_blank" rel="noopener" data-testid="pdf-link">
+              open PDF
+            </a>
+            <span className="ml-1 text-ink-300">(link valid for one minute)</span>
+          </p>
+          <form
+            className="mt-3 flex flex-wrap items-end gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const to = mailTo
+                .split(/[,;\s]+/)
+                .map((s) => s.trim())
+                .filter(Boolean);
+              if (to.length) email.mutate({ id: last.id, to });
+            }}
+          >
+            <div className="min-w-64 flex-1">
+              <label htmlFor="pdfMailTo" className="label">
+                Send {LABEL[last.kind].toLowerCase()} by e-mail
+              </label>
+              <input
+                id="pdfMailTo"
+                value={mailTo}
+                onChange={(e) => setMailTo(e.target.value)}
+                placeholder="broker@example.com, dispatch@example.com"
+                className="input"
+              />
+            </div>
+            <button className="btn-secondary" disabled={email.isPending || !mailTo.trim()}>
+              {email.isPending ? "Sending…" : "Send"}
+            </button>
+            {mailed && <span className="text-xs text-ok-500">{mailed}</span>}
+          </form>
+        </>
       )}
     </div>
   );

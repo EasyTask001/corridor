@@ -76,6 +76,16 @@ export function NotificationRulesPanel({ initial }: { initial: Rules }) {
               />
               Push
             </label>
+            {/* Text message to the phone on your profile (0025). */}
+            <label className={`flex items-center gap-1.5 ${rule.enabled ? "" : "opacity-40"}`}>
+              <input
+                type="checkbox"
+                disabled={!rule.enabled}
+                checked={rule.channel.includes("sms")}
+                onChange={() => toggleChannel(rule, "sms")}
+              />
+              SMS
+            </label>
           </div>
         </div>
       ))}
