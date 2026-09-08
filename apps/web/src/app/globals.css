@@ -4,37 +4,28 @@
 /* Tailwind 4 scans this app plus the shared component library for utilities. */
 @source "../../../../packages/ui/src";
 
-:root {
-  color-scheme: light;
-  --bg: var(--color-ink-50);
-  --fg: var(--color-ink-950);
-  --muted: var(--color-ink-500);
-  --panel: #ffffff;
-  --border: var(--color-ink-100);
-}
-
 html,
 body {
   height: 100%;
-  background: var(--bg);
-  color: var(--fg);
+  background: var(--color-surface-canvas);
+  color: var(--color-fg-primary);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
 
 .panel {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 0.75rem;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-default);
+  border-radius: var(--radius-xl);
 }
 
 @utility label {
-  @apply mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500;
+  @apply mb-1 block text-xs font-medium uppercase tracking-wide text-fg-secondary;
 }
 
 @utility input {
-  @apply w-full rounded-md border border-ink-100 bg-white px-3 py-2 text-sm text-ink-950
-    placeholder:text-ink-300 focus:border-ink-700 focus:outline-none focus:ring-2 focus:ring-ink-700/15;
+  @apply w-full rounded-md border border-border-default bg-surface-raised px-3 py-2 text-sm text-fg-primary
+    placeholder:text-fg-secondary/60 focus:border-accent focus:outline-none focus:ring-2 focus:ring-focus-ring/15;
 }
 
 @utility btn {
@@ -42,11 +33,23 @@ body {
     transition-colors disabled:cursor-not-allowed disabled:opacity-50;
 }
 @utility btn-primary {
-  @apply btn bg-ink-950 text-white hover:bg-ink-800;
+  @apply btn bg-accent text-accent-fg hover:bg-accent-hover;
 }
 @utility btn-secondary {
-  @apply btn border border-ink-100 bg-white text-ink-950 hover:bg-ink-50;
+  @apply btn border border-border-default bg-surface-raised text-fg-primary hover:bg-surface-sunken;
 }
 @utility btn-signal {
   @apply btn bg-signal-500 text-ink-950 hover:bg-signal-600;
+}
+
+/* ui-ux-pro-max pre-delivery checklist: respect reduced-motion system-wide. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
