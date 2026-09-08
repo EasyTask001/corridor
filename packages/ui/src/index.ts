@@ -6,6 +6,8 @@ export { Badge, badgeVariants } from "./components/badge";
 export type { BadgeProps } from "./components/badge";
 export { Button, buttonVariants } from "./components/button";
 export type { ButtonProps } from "./components/button";
+export { Checkbox } from "./components/checkbox";
+export type { CheckboxProps } from "./components/checkbox";
 export {
   Card,
   CardContent,
@@ -51,6 +53,7 @@ export {
   SelectValue,
 } from "./components/select";
 export type { NativeSelectProps } from "./components/select";
+export { RadioGroup, RadioGroupItem } from "./components/radio-group";
 export { Skeleton } from "./components/skeleton";
 export {
   Table,
@@ -65,4 +68,5 @@ export {
 export { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/tabs";
 export { Textarea } from "./components/textarea";
 export type { TextareaProps } from "./components/textarea";
+export { Switch } from "./components/switch";
 export { ThemeToggle } from "./components/theme-toggle";
