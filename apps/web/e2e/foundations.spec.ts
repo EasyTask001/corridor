@@ -31,6 +31,8 @@ test.describe("auth + onboarding", () => {
     await expect(page).toHaveURL(/\/dashboard/);
     await expect(page.getByText("EECX")).toBeVisible(); // SCAC upper-cased by schema + RPC
     await expect(page.getByText("All clear")).toBeVisible(); // fresh org: no alerts
+    await expect(page.getByTestId("tile-ace")).toHaveText("0"); // monthly tiles, nothing filed yet
+    await expect(page.getByLabel("Movements by month")).toBeVisible();
     await expect(page.getByRole("link", { name: "Users" })).toBeVisible(); // owner grant
   });
 });

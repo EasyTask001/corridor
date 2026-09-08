@@ -296,7 +296,7 @@ export const REGISTRIES: Record<RegistryKind, RegistryConfig> = {
       { name: "address.city", label: "City" },
       { name: "address.region", label: "Province/state", uppercase: true },
       { name: "address.postalCode", label: "Postal / ZIP", uppercase: true },
-      { name: "address.country", label: "Country", placeholder: "CA", uppercase: true },
+      { name: "address.country", label: "Country", placeholder: "CA", uppercase: true, required: true },
       { name: "contactName", label: "Contact name" },
       { name: "contactEmail", label: "Contact email", type: "email" },
       { name: "contactPhone", label: "Contact phone", type: "tel" },

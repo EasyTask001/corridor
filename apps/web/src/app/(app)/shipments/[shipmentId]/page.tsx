@@ -26,7 +26,12 @@ export default async function ShipmentPage({
   return (
     <ShipmentDetail
       initial={shipment}
-      partners={partners.rows.map((p) => ({ id: p.id, label: p.name, type: p.type }))}
+      partners={partners.rows.map((p) => ({
+        id: p.id,
+        label: p.name,
+        type: p.type,
+        country: (p.address as { country?: string } | null)?.country ?? null,
+      }))}
       canWrite={session.permissions.has("shipment.write")}
     />
   );

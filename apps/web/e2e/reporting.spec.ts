@@ -14,6 +14,7 @@ test.describe("natural-language reporting", () => {
   }) => {
     await login(page, "dispatch@pathfinder.demo");
     await page.goto("/reports");
+    await page.getByRole("tab", { name: "Ask a question" }).click();
     await page
       .getByLabel("What do you want to know?")
       .fill("How many movements by status all time?");
@@ -31,6 +32,7 @@ test.describe("natural-language reporting", () => {
   }) => {
     await login(page, "dispatch@pathfinder.demo");
     await page.goto("/reports");
+    await page.getByRole("tab", { name: "Ask a question" }).click();
     await page.getByLabel("What do you want to know?").fill("Average border wait time by driver");
     await page.getByRole("button", { name: "Run report" }).click();
     await expect(
@@ -41,6 +43,7 @@ test.describe("natural-language reporting", () => {
   test("executes every approved aggregate family", async ({ page }) => {
     await login(page, "dispatch@pathfinder.demo");
     await page.goto("/reports");
+    await page.getByRole("tab", { name: "Ask a question" }).click();
 
     const questions = [
       ["Show total cargo weight by crossing all time", "Cargo weight by crossing"],
@@ -63,5 +66,26 @@ test.describe("natural-language reporting", () => {
     await page.goto("/reports");
     await expect(page).toHaveURL(/\/dashboard/);
     await expect(page.getByRole("link", { name: "Reports" })).toHaveCount(0);
+  });
+
+  test("crossing report: picks columns, lists seeded crossings and exports a CSV link", async ({ page }) => {
+    await login(page, "dispatch@pathfinder.demo");
+    await page.goto("/reports");
+    await page.getByLabel("From", { exact: true }).fill("2020-01-01");
+    await page.getByLabel("To", { exact: true }).fill("2030-12-31");
+    const table = page.getByLabel("Crossing report", { exact: true });
+    await expect(table.getByRole("columnheader", { name: "Movement" })).toBeVisible();
+    await expect(table.getByRole("columnheader", { name: "Trip" })).toHaveCount(0);
+    await expect(table.getByRole("link", { name: /^AC[EI]-\d{2}-\d{5}$/ }).first()).toBeVisible();
+
+    await page.getByText(/^Columns \(\d+ of \d+\)$/).click();
+    await page.getByRole("group", { name: "Report columns" }).getByLabel("Trip").check();
+    await expect(table.getByRole("columnheader", { name: "Trip" })).toBeVisible();
+    await page.getByText(/^Columns \(\d+ of \d+\)$/).click(); // close the picker
+
+    await page.getByRole("button", { name: "Export CSV" }).click();
+    const link = page.getByTestId("report-export-link");
+    await expect(link).toHaveText("Download CSV");
+    await expect(link).toHaveAttribute("href", /\/storage\/v1\/object\/sign\//);
   });
 });

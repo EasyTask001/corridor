@@ -9,6 +9,7 @@ import {
   type AciCargoType,
   type Regime,
 } from "@corridor/domain";
+import { expectedPartnerCountry } from "@corridor/domain";
 import { PortPicker, type PickablePort } from "@/components/port-picker";
 import { Field } from "@/components/movement/field";
 
@@ -71,7 +72,7 @@ export function ShipmentForm({
 }: {
   regime: Regime;
   initial: ShipmentFormInitial | null;
-  partners: { id: string; label: string; type: string }[];
+  partners: { id: string; label: string; type: string; country?: string | null }[];
   /** id → code/name for the ports `initial` already points at, so the pickers
    * open showing what is stored rather than an empty box. */
   portLabels?: Record<string, { code: string; name: string }>;
@@ -81,8 +82,18 @@ export function ShipmentForm({
   onCancel?: () => void;
   onSubmit: (values: ShipmentFormValues) => void;
 }) {
-  const shippers = partners.filter((p) => p.type === "shipper" || p.type === "both");
-  const consignees = partners.filter((p) => p.type === "consignee" || p.type === "both");
+  // ACE loads are picked up in Canada and delivered in the US, ACI the reverse:
+  // offer the partners on the expected side first, with an override.
+  const [anyCountry, setAnyCountry] = useState(false);
+  const bySide = (direction: "shipper" | "consignee", keep: string | null | undefined) => {
+    const pool = partners.filter((p) => p.type === direction || p.type === "both");
+    if (anyCountry) return pool;
+    const expected = expectedPartnerCountry(regime, direction);
+    const local = pool.filter((p) => p.id === keep || !p.country || p.country === expected);
+    return local.length > 0 ? local : pool;
+  };
+  const shippers = bySide("shipper", initial?.shipperId);
+  const consignees = bySide("consignee", initial?.consigneeId);
 
   const [entryPortId, setEntryPortId] = useState(initial?.entryPortId ?? null);
   const [inBondPortId, setInBondPortId] = useState(initial?.inBondDestinationPortId ?? null);
@@ -225,6 +236,23 @@ export function ShipmentForm({
             </option>
           ))}
         </select>
+      </Field>
+      <Field label="Partner countries" htmlFor="anyCountry">
+        <label className="flex items-center gap-2 text-sm" htmlFor="anyCountry">
+          <input
+            id="anyCountry"
+            type="checkbox"
+            checked={anyCountry}
+            onChange={(e) => setAnyCountry(e.target.checked)}
+            disabled={disabled}
+          />
+          Show partners in any country
+        </label>
+        {!anyCountry && (
+          <p className="mt-1 text-xs text-ink-500">
+            {regime === "ACE" ? "Canadian shippers, US consignees" : "US shippers, Canadian consignees"}
+          </p>
+        )}
       </Field>
       <Field label="Entry number" htmlFor="entryNumber">
         <input
