@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const rpc = vi.fn();
+const schema = vi.fn(() => ({ rpc }));
 vi.mock("@supabase/supabase-js", () => ({
-  createClient: vi.fn(() => ({ rpc })),
+  createClient: vi.fn(() => ({ schema })),
 }));
 
 process.env.NEXT_PUBLIC_SUPABASE_URL ??= "http://127.0.0.1:55321";

@@ -42,9 +42,10 @@ export async function lookupSso(email: string): Promise<SsoLookup> {
   const supabase = createClient(env.supabaseUrl, env.supabaseAnonKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+  const api = supabase.schema("api");
   const [provider, enforced] = await Promise.all([
-    supabase.rpc("sso_provider_for_email", { p_email: email }),
-    supabase.rpc("sso_enforced_for_email", { p_email: email }),
+    api.rpc("sso_provider_for_email", { p_email: email }),
+    api.rpc("sso_enforced_for_email", { p_email: email }),
   ]);
   if (provider.error) throw new Error(provider.error.message);
   if (enforced.error) throw new Error(enforced.error.message);
