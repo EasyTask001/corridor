@@ -14,7 +14,7 @@ import { colors, styles } from "../../src/lib/theme";
 export default function NotificationsScreen() {
   const { membership } = useSession();
   const { data, error, loading, refetch } = useAsync(
-    () => trpc.notifications.list.query({ limit: 50, offset: 0, unreadOnly: false }),
+    () => trpc.notifications.list.query({ limit: 50, unreadOnly: false }),
     membership?.organizationId ?? "",
   );
   const [readLocally, setReadLocally] = useState<string[]>([]);
