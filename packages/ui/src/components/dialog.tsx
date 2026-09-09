@@ -41,7 +41,7 @@ export function DialogContent({
         {children}
         <DialogPrimitive.Close
           aria-label="Close"
-          className="absolute right-3 top-3 inline-flex size-9 items-center justify-center rounded-md text-fg-secondary transition-colors hover:bg-surface-sunken hover:text-fg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring/40"
+          className="absolute right-3 top-3 inline-flex size-11 items-center justify-center rounded-md text-fg-secondary transition-colors hover:bg-surface-sunken hover:text-fg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring/40 sm:size-9"
         >
           <X className="size-4" aria-hidden />
         </DialogPrimitive.Close>
@@ -55,7 +55,15 @@ export function DialogHeader({ className, ...props }: ComponentProps<"div">) {
 }
 
 export function DialogFooter({ className, ...props }: ComponentProps<"div">) {
-  return <div className={cn("mt-6 flex items-center justify-end gap-2", className)} {...props} />;
+  return (
+    <div
+      className={cn(
+        "mt-6 flex flex-col-reverse items-stretch justify-end gap-2 sm:flex-row sm:items-center",
+        className,
+      )}
+      {...props}
+    />
+  );
 }
 
 export function DialogTitle({ className, ...props }: ComponentProps<typeof DialogPrimitive.Title>) {

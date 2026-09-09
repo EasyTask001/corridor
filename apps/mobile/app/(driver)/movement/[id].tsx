@@ -55,7 +55,7 @@ export default function MovementScreen() {
     >
       <View style={styles.panel}>
         <View style={styles.row}>
-          <Text style={styles.h1}>{movement.movementNumber}</Text>
+          <Text style={[styles.h1, styles.flexText]}>{movement.movementNumber}</Text>
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{movement.status}</Text>
           </View>

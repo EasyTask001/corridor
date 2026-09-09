@@ -20,8 +20,20 @@ export const colors = {
 
 export const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.bg },
-  content: { flexGrow: 1, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 32, gap: 16 },
+  content: {
+    width: "100%",
+    maxWidth: 760,
+    alignSelf: "center",
+    flexGrow: 1,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 32,
+    gap: 16,
+  },
   authContent: {
+    width: "100%",
+    maxWidth: 520,
+    alignSelf: "center",
     flexGrow: 1,
     justifyContent: "center",
     paddingHorizontal: 24,
@@ -120,6 +132,7 @@ export const styles = StyleSheet.create({
   buttonText: { color: "#ffffff", fontWeight: "700", fontSize: 15 },
   buttonSecondaryText: { color: colors.ink, fontWeight: "600", fontSize: 15 },
   row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  flexText: { flex: 1, minWidth: 0 },
   badge: {
     minHeight: 28,
     alignSelf: "flex-start",
@@ -134,7 +147,7 @@ export const styles = StyleSheet.create({
   badgeSelected: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
   badgeText: { fontSize: 12, lineHeight: 16, color: colors.inkMuted, fontWeight: "600" },
   link: {
-    minHeight: 44,
+    minHeight: 48,
     justifyContent: "center",
     color: colors.accent,
     fontSize: 14,

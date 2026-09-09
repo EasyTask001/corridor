@@ -90,7 +90,7 @@ export default function CaptureScreen() {
               onPress={() => setDocType(t.value)}
               style={({ pressed }) => [
                 styles.badge,
-                { minHeight: 44 },
+                { minHeight: 48 },
                 t.value === docType && styles.badgeSelected,
                 pressed && styles.buttonPressed,
               ]}

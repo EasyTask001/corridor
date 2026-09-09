@@ -449,9 +449,9 @@ export function AppShell({
 
       <aside
         id="app-navigation"
-        className={`fixed inset-y-0 left-0 z-50 flex w-72 shrink-0 flex-col border-r border-border-default bg-surface-raised shadow-lg transition-transform lg:sticky lg:top-0 lg:z-30 lg:h-dvh lg:w-60 lg:translate-x-0 lg:shadow-none ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}
+        className={`app-navigation fixed inset-y-0 left-0 z-50 flex w-72 max-w-[calc(100vw-1rem)] shrink-0 flex-col border-r border-border-default bg-surface-raised shadow-lg transition-transform lg:sticky lg:top-0 lg:z-30 lg:h-dvh lg:w-60 lg:max-w-none lg:translate-x-0 lg:shadow-none ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}
       >
-        <div className="flex h-16 shrink-0 items-center gap-3 border-b border-border-default px-4">
+        <div className="app-navigation-header flex min-h-16 shrink-0 items-center gap-3 border-b border-border-default px-4">
           <span className="flex size-9 items-center justify-center rounded-lg bg-accent text-accent-fg shadow-sm">
             <Route className="size-5" aria-hidden />
           </span>
@@ -490,7 +490,7 @@ export function AppShell({
           })}
         </nav>
 
-        <div className="max-h-[55dvh] shrink-0 overflow-y-auto border-t border-border-default p-3">
+        <div className="app-navigation-footer max-h-[55dvh] shrink-0 overflow-y-auto border-t border-border-default p-3">
           {settingsVisible.length > 0 && (
             <NavGroup
               icon={SettingsIcon}
@@ -527,7 +527,7 @@ export function AppShell({
       </aside>
 
       <div className="min-w-0 flex-1">
-        <header className="sticky top-0 z-30 flex min-h-16 flex-wrap items-center gap-3 border-b border-border-default bg-surface-raised/95 px-4 py-2 backdrop-blur sm:px-6 md:flex-nowrap md:py-0">
+        <header className="app-header sticky top-0 z-30 flex min-h-16 flex-wrap items-center gap-3 border-b border-border-default bg-surface-raised/95 px-4 py-2 backdrop-blur sm:px-6 md:flex-nowrap md:py-0">
           <button
             type="button"
             aria-label="Open menu"
@@ -553,7 +553,7 @@ export function AppShell({
           {contextLinks.length > 0 && (
             <nav
               aria-label="Next steps"
-              className="order-last flex w-full items-center gap-1 overflow-x-auto border-t border-border-default pt-2 md:order-none md:w-auto md:overflow-visible md:border-r md:border-t-0 md:py-0 md:pr-3"
+              className="order-last flex w-full flex-wrap items-center gap-2 border-t border-border-default pt-2 md:order-none md:w-auto md:flex-nowrap md:gap-1 md:border-r md:border-t-0 md:py-0 md:pr-3"
             >
               <span className="mr-1 hidden text-[11px] font-semibold uppercase tracking-wider text-fg-secondary sm:inline">
                 Next
@@ -562,7 +562,7 @@ export function AppShell({
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="inline-flex min-h-9 items-center gap-1 rounded-md px-2.5 text-xs font-medium text-fg-secondary transition-colors hover:bg-surface-sunken hover:text-fg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring/40"
+                  className="inline-flex min-h-11 items-center gap-1 rounded-md px-2.5 text-xs font-medium text-fg-secondary transition-colors hover:bg-surface-sunken hover:text-fg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring/40 md:min-h-9"
                 >
                   {link.label}
                   <ArrowUpRight className="size-3.5" aria-hidden />

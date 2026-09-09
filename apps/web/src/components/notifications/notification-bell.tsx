@@ -124,7 +124,7 @@ export function NotificationBell() {
         aria-label={`Notifications${unread > 0 ? `, ${unread} unread` : ""}`}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="relative inline-flex size-10 items-center justify-center rounded-full text-fg-secondary transition-colors hover:bg-surface-sunken hover:text-fg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring/40"
+        className="relative inline-flex size-11 items-center justify-center rounded-full text-fg-secondary transition-colors hover:bg-surface-sunken hover:text-fg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring/40 sm:size-10"
       >
         <BellIcon />
         {unread > 0 && (
@@ -141,7 +141,7 @@ export function NotificationBell() {
             {unread > 0 && (
               <button
                 type="button"
-                className="min-h-8 text-xs font-medium text-fg-secondary hover:text-fg-primary"
+                className="min-h-11 text-xs font-medium text-fg-secondary hover:text-fg-primary sm:min-h-8"
                 onClick={() => markAllRead.mutate()}
               >
                 Mark all read
@@ -194,7 +194,7 @@ export function NotificationBell() {
           <Link
             href="/notifications"
             onClick={() => setOpen(false)}
-            className="block min-h-10 border-t border-border-default px-4 py-3 text-center text-xs font-medium text-fg-secondary hover:bg-surface-sunken hover:text-fg-primary"
+            className="block min-h-11 border-t border-border-default px-4 py-3 text-center text-xs font-medium text-fg-secondary hover:bg-surface-sunken hover:text-fg-primary"
           >
             View all
           </Link>

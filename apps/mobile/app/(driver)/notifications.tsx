@@ -66,7 +66,7 @@ export default function NotificationsScreen() {
             onPress={() => (unread ? void markRead(item.id) : undefined)}
           >
             <View style={styles.row}>
-              <Text style={styles.h2}>{item.title}</Text>
+              <Text style={[styles.h2, styles.flexText]}>{item.title}</Text>
               {unread ? (
                 <View style={styles.badge}>
                   <Text style={styles.badgeText}>New</Text>

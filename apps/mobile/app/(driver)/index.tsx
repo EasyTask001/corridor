@@ -39,14 +39,16 @@ export default function DriverBoard() {
       ListHeaderComponent={
         <View style={{ gap: 8 }}>
           <View style={styles.row}>
-            <Text style={styles.h1}>{membership?.organizationName ?? "Corridor"}</Text>
+            <Text style={[styles.h1, styles.flexText]}>
+              {membership?.organizationName ?? "Corridor"}
+            </Text>
             <Link href="/(driver)/notifications" asChild>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Open notifications"
                 hitSlop={8}
                 style={({ pressed }) => [
-                  { minHeight: 44, justifyContent: "center", paddingHorizontal: 4 },
+                  { minHeight: 48, justifyContent: "center", paddingHorizontal: 8 },
                   pressed && styles.buttonPressed,
                 ]}
               >
@@ -92,7 +94,7 @@ export default function DriverBoard() {
           onPress={() => router.push(`/(driver)/movement/${item.id}`)}
         >
           <View style={styles.row}>
-            <Text style={styles.h2}>{item.movementNumber}</Text>
+            <Text style={[styles.h2, styles.flexText]}>{item.movementNumber}</Text>
             <View style={styles.badge}>
               <Text style={styles.badgeText}>{item.status}</Text>
             </View>
