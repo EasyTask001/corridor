@@ -13,7 +13,6 @@ import {
   type DatabaseClient,
   type RlsTransaction,
 } from "@corridor/db";
-import type { ManifestPayload } from "@corridor/integrations";
 import {
   POLL_INTERVAL_MS,
   customsClientFor,
