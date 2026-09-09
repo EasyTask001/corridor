@@ -31,7 +31,6 @@ export function NotificationBell() {
   const { data: unread = 0 } = useQuery({ ...unreadOpts, refetchInterval: 60_000 });
   const listOpts = trpc.notifications.list.queryOptions({
     limit: 10,
-    offset: 0,
     unreadOnly: false,
   });
   const { data } = useQuery({ ...listOpts, enabled: open });

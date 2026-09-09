@@ -100,7 +100,7 @@ export type Notification = z.infer<typeof notificationSchema>;
 export const notificationListInput = z.object({
   unreadOnly: z.boolean().default(false),
   limit: z.number().int().min(1).max(100).default(30),
-  offset: z.number().int().min(0).default(0),
+  cursor: z.string().optional(),
 });
 
 export const notificationRuleInput = z.object({

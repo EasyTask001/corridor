@@ -14,7 +14,7 @@ export function NotificationsList({ initial }: { initial: List }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const [unreadOnly, setUnreadOnly] = useState(false);
-  const listOpts = trpc.notifications.list.queryOptions({ limit: 50, offset: 0, unreadOnly });
+  const listOpts = trpc.notifications.list.queryOptions({ limit: 50, unreadOnly });
   const { data = initial } = useQuery({
     ...listOpts,
     initialData: unreadOnly ? undefined : initial,

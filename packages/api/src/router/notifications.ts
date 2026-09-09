@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, schema, sql } from "@corridor/db";
+import { and, desc, eq, isNull, lt, or, schema, sql } from "@corridor/db";
 import {
   NOTIFICATION_EVENT_TYPES,
   defaultChannelFor,
@@ -25,21 +25,23 @@ export const notificationsRouter = router({
         eq(notifications.organizationId, ctx.orgId),
       ];
       if (input.unreadOnly) conds.push(isNull(notifications.readAt));
+      if (input.cursor) {
+        const [createdAt, id] = input.cursor.split("|");
+        if (createdAt && id) {
+          conds.push(or(lt(notifications.createdAt, new Date(createdAt)), and(eq(notifications.createdAt, new Date(createdAt)), lt(notifications.id, id)))!);
+        }
+      }
       const where = and(...conds);
-      const [rows, counts] = await Promise.all([
-        tx
+      const rows = await tx
           .select()
           .from(notifications)
           .where(where)
-          .orderBy(desc(notifications.createdAt))
-          .limit(input.limit)
-          .offset(input.offset),
-        tx
-          .select({ count: sql<number>`count(*)::int` })
-          .from(notifications)
-          .where(where),
-      ]);
-      return { rows, total: counts[0]?.count ?? 0 };
+          .orderBy(desc(notifications.createdAt), desc(notifications.id))
+          .limit(input.limit + 1);
+      const hasMore = rows.length > input.limit;
+      const page = hasMore ? rows.slice(0, input.limit) : rows;
+      const last = page.at(-1);
+      return { rows: page, nextCursor: hasMore && last ? `${new Date(last.createdAt).toISOString()}|${last.id}` : null };
     }),
   ),
 

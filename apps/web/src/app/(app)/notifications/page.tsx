@@ -6,7 +6,7 @@ export const metadata: Metadata = { title: "Notifications" };
 
 export default async function NotificationsPage() {
   const caller = await api();
-  const initial = await caller.notifications.list({ limit: 50, offset: 0, unreadOnly: false });
+  const initial = await caller.notifications.list({ limit: 50, unreadOnly: false });
   return (
     <div className="max-w-2xl space-y-4">
       <header>
