@@ -132,9 +132,10 @@ dropped.
 Before mutation, create a full local PostgreSQL backup and record current Pathfinder row counts by
 table. Verify that the backup can be listed and read.
 
-The replacement preserves the organization row and performs tenant-data deletion and insertion in
-one database transaction, ordered around foreign-key dependencies. Authentication administration
-uses the Supabase Admin API outside that transaction:
+The replacement preserves the organization UUID and performs a transactional delete/reinsert of
+the organization. The schema's tenant foreign keys cascade from that row, which removes every demo
+child without maintaining a brittle manual table list; reinserting the same UUID keeps local tenant
+identity stable. Authentication administration uses the Supabase Admin API outside that transaction:
 
 1. Ensure the intended administrator Auth user exists.
 2. Replace tenant data and membership transactionally.
