@@ -99,64 +99,6 @@ export const jobHandlers: Partial<Record<JobType, Handler>> = {
    * apply it. Chains the next decision (accepted → released/held → released)
    * with a further delay so the timeline unfolds like a real crossing.
    */
-  "customs.decide": async (tx, job) => {
-    const orgId = job.organizationId;
-    const movementId = String(job.payload.movementId);
-    if (!orgId) throw new Error("customs.decide requires organization_id");
-    const m = await requireMovement(tx, orgId, movementId);
-    if (m.status !== "sent" && m.status !== "accepted" && m.status !== "held") {
-      return { skipped: true, reason: `movement is ${m.status}` };
-    }
-    const full = await loadFull(tx, orgId, movementId);
-    const org = await loadOrganization(tx, orgId);
-    const { client } = await customsClientFor(tx, orgId, m.regime);
-    const manifest: ManifestPayload = manifestFor(org, full);
-    const ref = String(job.payload.referenceNumber ?? m.customsReferenceNumber ?? "");
-    const started = Date.now();
-    const decision = await client.fetchDecision(ref, manifest, { currentStatus: m.status });
-    await logIntegrationEvent(tx, {
-      orgId,
-      movementId,
-      provider: client.provider,
-      direction: "inbound",
-      operation: "decision",
-      request: { referenceNumber: ref, currentStatus: m.status },
-      response: { decision: decision.decision, message: decision.message, ...decision.raw },
-      statusCode: 200,
-      success: true,
-      durationMs: Date.now() - started,
-      correlationId:
-        typeof job.payload.correlationId === "string" ? job.payload.correlationId : null,
-    });
-    const updated = await applyCustomsDecision(tx, { orgId, userId: null }, m, {
-      decision: decision.decision,
-      referenceNumber: decision.referenceNumber,
-      message: decision.message,
-      simulated: client.environment === "sandbox",
-      raw: decision.raw,
-      events: decision.events,
-      shipments: decision.shipments,
-    });
-    // Chain the next stage of the crossing.
-    if (updated.status === "accepted" || updated.status === "held") {
-      const delay = Math.max(
-        1500,
-        Number((await customsClientFor(tx, orgId, m.regime)).config?.settings?.mockDelayMs ?? 4000),
-      );
-      await enqueueJob(tx, {
-        orgId,
-        jobType: "customs.decide",
-        payload: {
-          movementId,
-          referenceNumber: ref,
-          correlationId: job.payload.correlationId ?? null,
-        },
-        runAt: new Date(Date.now() + (updated.status === "held" ? delay * 3 : delay)),
-      });
-    }
-    return { decision: decision.decision, status: updated.status };
-  },
-
   /**
    * Gateway mode (0023): ask the gateway where the filing stands and apply
    * it. Re-enqueues itself every POLL_INTERVAL_MS until the decision is
@@ -253,6 +195,47 @@ export const jobHandlers: Partial<Record<JobType, Handler>> = {
 type DetachedHandler = (db: DatabaseClient, job: Job) => Promise<Record<string, unknown> | void>;
 
 export const detachedJobHandlers: Partial<Record<JobType, DetachedHandler>> = {
+  "customs.decide": async (db, job) => {
+    const orgId = job.organizationId;
+    const movementId = String(job.payload.movementId);
+    if (!orgId) throw new Error("customs.decide requires organization_id");
+    const prepared = await withServiceRole(db, async (tx) => {
+      const m = await requireMovement(tx, orgId, movementId);
+      if (m.status !== "sent" && m.status !== "accepted" && m.status !== "held") return { m, skip: true as const };
+      const full = await loadFull(tx, orgId, movementId);
+      const org = await loadOrganization(tx, orgId);
+      const gateway = await customsClientFor(tx, orgId, m.regime);
+      return { m, full, org, client: gateway.client, config: gateway.config, skip: false as const };
+    });
+    if (prepared.skip) return { skipped: true, reason: `movement is ${prepared.m.status}` };
+    const ref = String(job.payload.referenceNumber ?? prepared.m.customsReferenceNumber ?? "");
+    const decision = await prepared.client.fetchDecision(
+      ref,
+      manifestFor(prepared.org, prepared.full),
+      { currentStatus: prepared.m.status as "sent" | "accepted" | "held" },
+    );
+    return withServiceRole(db, async (tx) => {
+      await logIntegrationEvent(tx, {
+        orgId, movementId, provider: prepared.client.provider, direction: "inbound", operation: "decision",
+        request: { referenceNumber: ref, currentStatus: prepared.m.status },
+        response: { decision: decision.decision, message: decision.message, ...decision.raw },
+        statusCode: 200, success: true, durationMs: 0,
+        correlationId: typeof job.payload.correlationId === "string" ? job.payload.correlationId : null,
+      });
+      const updated = await applyCustomsDecision(tx, { orgId, userId: null }, prepared.m, {
+        decision: decision.decision, referenceNumber: decision.referenceNumber, message: decision.message,
+        simulated: prepared.client.environment === "sandbox", raw: decision.raw,
+        events: decision.events, shipments: decision.shipments,
+      });
+      if (updated.status === "accepted" || updated.status === "held") {
+        const delay = Math.max(1500, Number(prepared.config?.settings?.mockDelayMs ?? 4000));
+        await enqueueJob(tx, { orgId, jobType: "customs.decide", payload: {
+          movementId, referenceNumber: ref, correlationId: job.payload.correlationId ?? null,
+        }, runAt: new Date(Date.now() + (updated.status === "held" ? delay * 3 : delay)) });
+      }
+      return { decision: decision.decision, status: updated.status };
+    });
+  },
   /**
    * Push metered usage to Stripe. Queue-wide (organization_id is null): the
    * body lives in services/usage.ts so it can be exercised directly by
