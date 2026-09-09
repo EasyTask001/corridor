@@ -1,6 +1,6 @@
 # Corridor database hardening — design
 
-Status: architecture approved in chat on 2026-09-09; written spec awaiting review
+Status: approved for implementation in chat on 2026-09-09
 
 ## Why
 
