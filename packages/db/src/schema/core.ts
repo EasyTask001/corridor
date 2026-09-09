@@ -118,7 +118,12 @@ export const rolePermissions = pgTable(
       .notNull()
       .references(() => permissions.id, { onDelete: "cascade" }),
   },
-  (t) => [primaryKey({ columns: [t.roleId, t.permissionId] })],
+  (t) => [
+    primaryKey({ columns: [t.roleId, t.permissionId] }),
+    // 0030 — permission_id is never the leading column of the PK, so a
+    // permission delete (cascade) has to scan without this.
+    index("role_permissions_permission_id_idx").on(t.permissionId),
+  ],
 );
 
 export const organizationMembers = pgTable(
@@ -146,6 +151,9 @@ export const organizationMembers = pgTable(
   (t) => [
     index("organization_members_user_id_idx").on(t.userId),
     index("organization_members_organization_id_idx").on(t.organizationId),
+    // 0030 — joined directly in notify_organization() and the member-list
+    // query; a restrict-delete of a role also has to scan for this.
+    index("organization_members_role_id_idx").on(t.roleId),
     uniqueIndex("organization_members_org_user_unique")
       .on(t.organizationId, t.userId)
       .where(sql`${t.userId} is not null`),

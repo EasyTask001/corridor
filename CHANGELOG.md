@@ -84,7 +84,14 @@ the section headings are the build phases, not versions.
 - Migration 0017: a caller check on `notify_organization()` (see Security).
 - Migrations 0018–0029: ports/carrier codes, shipments, crew/equipment, customs gateway,
   generated documents, in-bond, PARS RNS and CSV import (see Added).
-- Drizzle schema mirror verified against migrations 0001–0029.
+- Migration 0030: indexes `organization_members.role_id` and `role_permissions.permission_id` —
+  a db-lint pass against the `supabase-postgres-best-practices` guidelines found both had zero
+  index coverage (only the leading column of an existing composite/PK was covered), the first
+  used in a direct `JOIN`, the second on the FK a permission-delete cascade actually walks. Two
+  other candidates from the same raw "unindexed FK" scan (`drivers.user_id`,
+  `notification_rules.user_id`) turned out to already be covered by existing composite/partial
+  unique indexes once checked against real query shapes — not touched.
+- Drizzle schema mirror verified against migrations 0001–0030.
 - Web app pages and the Expo driver app restyled onto the new design tokens, across dashboard,
   documents, alerts, copilot, in-bond and the mobile sign-in, movement and capture screens.
 - AI extraction and copilot run on Claude Sonnet 4.5 when `AI_GATEWAY_API_KEY` is set, on OpenAI
