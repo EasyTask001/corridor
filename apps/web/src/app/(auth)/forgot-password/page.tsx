@@ -9,13 +9,13 @@ export default function ForgotPasswordPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Forgot your password?</h1>
-        <p className="mt-1 text-sm text-ink-500">
+        <p className="mt-1 text-sm text-fg-secondary">
           Enter your work e-mail and we will send a link to choose a new one.
         </p>
       </div>
       <ForgotPasswordForm />
-      <p className="text-sm text-ink-500">
-        <Link href="/login" className="font-medium text-ink-950 underline">
+      <p className="text-sm text-fg-secondary">
+        <Link href="/login" className="font-medium text-fg-primary underline">
           Back to sign in
         </Link>
       </p>

@@ -45,7 +45,9 @@ function readStoredColumns(): CrossingColumn[] {
   cachedRaw = raw;
   try {
     const parsed = raw ? JSON.parse(raw) : null;
-    const cols = Array.isArray(parsed) ? parsed.filter((k) => crossingColumn.safeParse(k).success) : [];
+    const cols = Array.isArray(parsed)
+      ? parsed.filter((k) => crossingColumn.safeParse(k).success)
+      : [];
     cachedColumns = cols.length > 0 ? (cols as CrossingColumn[]) : DEFAULT_CROSSING_COLUMNS;
   } catch {
     cachedColumns = DEFAULT_CROSSING_COLUMNS;
@@ -79,7 +81,11 @@ export function CrossingReport() {
   const [truckId, setTruckId] = useState("");
   const [trailerId, setTrailerId] = useState("");
   const [portId, setPortId] = useState<string | null>(null);
-  const columns = useSyncExternalStore(subscribe, readStoredColumns, () => DEFAULT_CROSSING_COLUMNS);
+  const columns = useSyncExternalStore(
+    subscribe,
+    readStoredColumns,
+    () => DEFAULT_CROSSING_COLUMNS,
+  );
   const [exported, setExported] = useState<{ url: string; format: string } | null>(null);
   const pickColumns = storeColumns;
 
@@ -94,7 +100,10 @@ export function CrossingReport() {
   };
   const { data: options } = useQuery(trpc.movement.options.queryOptions());
   const report = useQuery(
-    trpc.reporting.crossings.queryOptions({ ...filters, columns, limit: 200, offset: 0 }, { enabled: from <= to }),
+    trpc.reporting.crossings.queryOptions(
+      { ...filters, columns, limit: 200, offset: 0 },
+      { enabled: from <= to },
+    ),
   );
   const exportReport = useMutation(
     trpc.reporting.export.mutationOptions({
@@ -116,7 +125,11 @@ export function CrossingReport() {
           </div>
           <div>
             <Label htmlFor="xRegime">Regime</Label>
-            <NativeSelect id="xRegime" value={regime} onChange={(e) => setRegime(e.target.value as "" | "ACE" | "ACI")}>
+            <NativeSelect
+              id="xRegime"
+              value={regime}
+              onChange={(e) => setRegime(e.target.value as "" | "ACE" | "ACI")}
+            >
               <option value="">Both</option>
               <option value="ACE">ACE (US-bound)</option>
               <option value="ACI">ACI (Canada-bound)</option>
@@ -124,11 +137,20 @@ export function CrossingReport() {
           </div>
           <div>
             <Label htmlFor="xPort">Port</Label>
-            <PortPicker id="xPort" regime={regime || undefined} onSelect={(p) => setPortId(p?.id ?? null)} placeholder="Any port" />
+            <PortPicker
+              id="xPort"
+              regime={regime || undefined}
+              onSelect={(p) => setPortId(p?.id ?? null)}
+              placeholder="Any port"
+            />
           </div>
           <div>
             <Label htmlFor="xDriver">Driver</Label>
-            <NativeSelect id="xDriver" value={driverId} onChange={(e) => setDriverId(e.target.value)}>
+            <NativeSelect
+              id="xDriver"
+              value={driverId}
+              onChange={(e) => setDriverId(e.target.value)}
+            >
               <option value="">Any driver</option>
               {options?.drivers.map((d) => (
                 <option key={d.id} value={d.id}>
@@ -150,7 +172,11 @@ export function CrossingReport() {
           </div>
           <div>
             <Label htmlFor="xTrailer">Trailer</Label>
-            <NativeSelect id="xTrailer" value={trailerId} onChange={(e) => setTrailerId(e.target.value)}>
+            <NativeSelect
+              id="xTrailer"
+              value={trailerId}
+              onChange={(e) => setTrailerId(e.target.value)}
+            >
               <option value="">Any trailer</option>
               {options?.trailers.map((t) => (
                 <option key={t.id} value={t.id}>
@@ -160,12 +186,21 @@ export function CrossingReport() {
             </NativeSelect>
           </div>
           <div className="flex items-end">
-            <ColumnPicker columns={CROSSING_REPORT_COLUMNS} selected={columns} defaults={DEFAULT_CROSSING_COLUMNS} onChange={pickColumns} />
+            <ColumnPicker
+              columns={CROSSING_REPORT_COLUMNS}
+              selected={columns}
+              defaults={DEFAULT_CROSSING_COLUMNS}
+              onChange={pickColumns}
+            />
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-ink-500">
-            {report.data ? `${report.data.total} crossing${report.data.total === 1 ? "" : "s"}` : report.isLoading ? "Loading…" : ""}
+          <span className="text-fg-secondary">
+            {report.data
+              ? `${report.data.total} crossing${report.data.total === 1 ? "" : "s"}`
+              : report.isLoading
+                ? "Loading…"
+                : ""}
             {from > to && "The range ends before it starts."}
           </span>
           <span className="ml-auto flex items-center gap-2">
@@ -175,7 +210,12 @@ export function CrossingReport() {
                 variant="secondary"
                 size="sm"
                 disabled={exportReport.isPending || !report.data}
-                onClick={() => exportReport.mutate({ format, source: { kind: "crossings", query: { ...filters, columns } } })}
+                onClick={() =>
+                  exportReport.mutate({
+                    format,
+                    source: { kind: "crossings", query: { ...filters, columns } },
+                  })
+                }
               >
                 Export {format.toUpperCase()}
               </Button>
@@ -194,7 +234,10 @@ export function CrossingReport() {
           </span>
         </div>
         {(report.error || exportReport.error) && (
-          <p role="alert" className="rounded-md bg-danger-500/10 px-3 py-2 text-sm text-danger-500">
+          <p
+            role="alert"
+            className="rounded-md bg-danger-500/10 px-3 py-2 text-sm text-status-danger"
+          >
             {report.error?.message ?? exportReport.error?.message}
           </p>
         )}
@@ -202,7 +245,7 @@ export function CrossingReport() {
 
       <section className="panel overflow-x-auto" aria-label="Crossing report">
         <table className="w-full text-sm">
-          <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">
+          <thead className="bg-surface-sunken text-left text-xs uppercase tracking-wide text-fg-secondary">
             <tr>
               {(report.data?.columns ?? []).map((c) => (
                 <th key={c.key} className="whitespace-nowrap px-3 py-2 font-medium">
@@ -211,10 +254,10 @@ export function CrossingReport() {
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-ink-100">
+          <tbody className="divide-y divide-border-default">
             {report.data?.rows.length === 0 && (
               <tr>
-                <td colSpan={columns.length} className="px-3 py-5 text-ink-500">
+                <td colSpan={columns.length} className="px-3 py-5 text-fg-secondary">
                   No crossings in this range.
                 </td>
               </tr>
@@ -223,11 +266,22 @@ export function CrossingReport() {
               <tr key={row.id}>
                 {report.data.columns.map((c) => {
                   const v = row[c.key];
-                  const text = v === null || v === undefined ? "—" : typeof v === "number" ? v.toLocaleString("en-CA") : v;
+                  const text =
+                    v === null || v === undefined
+                      ? "—"
+                      : typeof v === "number"
+                        ? v.toLocaleString("en-CA")
+                        : v;
                   return (
-                    <td key={c.key} className={`whitespace-nowrap px-3 py-2 ${typeof v === "number" ? "text-right font-mono text-xs" : ""}`}>
+                    <td
+                      key={c.key}
+                      className={`whitespace-nowrap px-3 py-2 ${typeof v === "number" ? "text-right font-mono text-xs" : ""}`}
+                    >
                       {c.key === "movementNumber" ? (
-                        <Link href={`/movements/${row.id}`} className="font-mono text-xs hover:underline">
+                        <Link
+                          href={`/movements/${row.id}`}
+                          className="font-mono text-xs hover:underline"
+                        >
                           {text}
                         </Link>
                       ) : (

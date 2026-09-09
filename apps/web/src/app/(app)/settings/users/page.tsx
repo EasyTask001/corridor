@@ -20,7 +20,9 @@ export default async function UsersPage() {
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Users</h1>
-        <p className="text-sm text-ink-500">Members and pending invitations for this carrier.</p>
+        <p className="text-sm text-fg-secondary">
+          Members and pending invitations for this carrier.
+        </p>
       </header>
       <MembersTable
         initialMembers={members}

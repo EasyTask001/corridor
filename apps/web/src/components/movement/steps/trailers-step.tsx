@@ -30,7 +30,7 @@ export function TrailersStep() {
     <div className="max-w-3xl space-y-4">
       <div className="panel overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">
+          <thead className="bg-surface-sunken text-left text-xs uppercase tracking-wide text-fg-secondary">
             <tr>
               <th className="w-12 px-3 py-2 font-medium">Tow</th>
               <th className="px-3 py-2 font-medium">Unit</th>
@@ -41,10 +41,10 @@ export function TrailersStep() {
               <th />
             </tr>
           </thead>
-          <tbody className="divide-y divide-ink-100">
+          <tbody className="divide-y divide-border-default">
             {m.trailers.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-3 py-5 text-ink-500">
+                <td colSpan={7} className="px-3 py-5 text-fg-secondary">
                   {m.isEmpty
                     ? "No trailer: the trip is declared empty."
                     : "No trailer hitched yet (bobtail)."}
@@ -53,16 +53,16 @@ export function TrailersStep() {
             )}
             {m.trailers.map((t, i) => (
               <tr key={t.id}>
-                <td className="px-3 py-2 font-mono text-xs text-ink-500">{i + 1}</td>
+                <td className="px-3 py-2 font-mono text-xs text-fg-secondary">{i + 1}</td>
                 <td className="px-3 py-2">
                   <div className="font-mono font-medium">{t.unitNumber}</div>
                   {t.lengthFt != null && (
-                    <div className="text-xs text-ink-500">{t.lengthFt} ft</div>
+                    <div className="text-xs text-fg-secondary">{t.lengthFt} ft</div>
                   )}
                 </td>
                 <td className="px-3 py-2">
                   <span className="font-mono text-xs">{t.trailerType}</span>
-                  <span className="ml-1.5 text-xs text-ink-500">
+                  <span className="ml-1.5 text-xs text-fg-secondary">
                     {options.trailers.find((o) => o.id === t.trailerId)?.typeLabel ?? ""}
                   </span>
                 </td>
@@ -80,7 +80,7 @@ export function TrailersStep() {
                       <button
                         type="button"
                         aria-label={`Move ${t.unitNumber} forward`}
-                        className="mr-2 text-xs text-ink-500 hover:text-ink-950 disabled:opacity-30"
+                        className="mr-2 text-xs text-fg-secondary hover:text-fg-primary disabled:opacity-30"
                         disabled={i === 0 || reorderTrailers.isPending}
                         onClick={() => move(i, -1)}
                       >
@@ -89,7 +89,7 @@ export function TrailersStep() {
                       <button
                         type="button"
                         aria-label={`Move ${t.unitNumber} back`}
-                        className="mr-3 text-xs text-ink-500 hover:text-ink-950 disabled:opacity-30"
+                        className="mr-3 text-xs text-fg-secondary hover:text-fg-primary disabled:opacity-30"
                         disabled={i === m.trailers.length - 1 || reorderTrailers.isPending}
                         onClick={() => move(i, 1)}
                       >
@@ -97,7 +97,7 @@ export function TrailersStep() {
                       </button>
                       <button
                         type="button"
-                        className="text-xs text-danger-500 hover:underline"
+                        className="text-xs text-status-danger hover:underline"
                         onClick={() =>
                           removeTrailer.mutate({ movementId: m.id, trailerId: t.trailerId })
                         }
@@ -118,7 +118,7 @@ export function TrailersStep() {
           <Field label="Hitch trailer" htmlFor="addTrailer">
             <select
               id="addTrailer"
-              className="input w-72"
+              className="input w-full sm:w-72"
               value={adding}
               disabled={full}
               onChange={(e) => setAdding(e.target.value)}

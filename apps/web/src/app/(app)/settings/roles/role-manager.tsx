@@ -97,7 +97,7 @@ export function RoleManager({ initialRoles, catalog }: { initialRoles: Role[]; c
           </div>
           <div className="mt-3 space-y-1">
             {customRoles.length === 0 && (
-              <p className="text-sm text-ink-500">No custom roles yet.</p>
+              <p className="text-sm text-fg-secondary">No custom roles yet.</p>
             )}
             {customRoles.map((role) => (
               <button
@@ -107,8 +107,8 @@ export function RoleManager({ initialRoles, catalog }: { initialRoles: Role[]; c
                 onClick={() => edit(role)}
                 className={`w-full rounded-md px-3 py-2 text-left text-sm ${
                   selectedId === role.id
-                    ? "bg-ink-900 text-white"
-                    : "bg-ink-50 text-ink-700 hover:bg-ink-100"
+                    ? "bg-accent text-accent-fg"
+                    : "bg-surface-sunken text-fg-primary hover:bg-surface-sunken"
                 }`}
               >
                 <span className="font-medium">{role.name}</span>
@@ -124,11 +124,11 @@ export function RoleManager({ initialRoles, catalog }: { initialRoles: Role[]; c
             {systemRoles.map((role) => (
               <li key={role.id} className="flex justify-between gap-3">
                 <span>{role.name}</span>
-                <span className="text-xs text-ink-500">{role.permissions.length} grants</span>
+                <span className="text-xs text-fg-secondary">{role.permissions.length} grants</span>
               </li>
             ))}
           </ul>
-          <p className="mt-3 text-xs text-ink-500">System roles are read-only templates.</p>
+          <p className="mt-3 text-xs text-fg-secondary">System roles are read-only templates.</p>
         </section>
       </aside>
 
@@ -138,14 +138,14 @@ export function RoleManager({ initialRoles, catalog }: { initialRoles: Role[]; c
             <h2 className="text-lg font-semibold">
               {selectedId ? "Edit custom role" : "New role"}
             </h2>
-            <p className="text-sm text-ink-500">
+            <p className="text-sm text-fg-secondary">
               Permission changes take effect on a member&apos;s next request.
             </p>
           </div>
           {selectedId && (
             <button
               type="button"
-              className="text-sm text-danger-500 hover:underline"
+              className="text-sm text-status-danger hover:underline"
               disabled={busy}
               onClick={() => {
                 if (window.confirm(`Delete ${name}?`)) remove.mutate({ id: selectedId });
@@ -175,7 +175,7 @@ export function RoleManager({ initialRoles, catalog }: { initialRoles: Role[]; c
         <div className="mt-6 space-y-6">
           {groups.map(([module, permissions]) => (
             <fieldset key={module}>
-              <legend className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+              <legend className="text-xs font-semibold uppercase tracking-wide text-fg-secondary">
                 {module}
               </legend>
               <div className="mt-2 grid gap-2 md:grid-cols-2">
@@ -185,7 +185,9 @@ export function RoleManager({ initialRoles, catalog }: { initialRoles: Role[]; c
                     <label
                       key={permission.key}
                       className={`flex gap-3 rounded-md border p-3 text-sm ${
-                        permission.assignable ? "border-ink-100" : "border-ink-100 bg-ink-50"
+                        permission.assignable
+                          ? "border-border-default"
+                          : "border-border-default bg-surface-sunken"
                       }`}
                     >
                       <input
@@ -204,7 +206,7 @@ export function RoleManager({ initialRoles, catalog }: { initialRoles: Role[]; c
                       />
                       <span>
                         <span className="block font-mono text-xs">{permission.key}</span>
-                        <span className="text-xs text-ink-500">{permission.description}</span>
+                        <span className="text-xs text-fg-secondary">{permission.description}</span>
                       </span>
                     </label>
                   );
@@ -214,9 +216,9 @@ export function RoleManager({ initialRoles, catalog }: { initialRoles: Role[]; c
           ))}
         </div>
 
-        {error && <p className="mt-4 text-sm text-danger-500">{error.message}</p>}
-        {notice && <p className="mt-4 text-sm text-ok-500">{notice}</p>}
-        <div className="mt-6 flex items-center gap-3 border-t border-ink-100 pt-4">
+        {error && <p className="mt-4 text-sm text-status-danger">{error.message}</p>}
+        {notice && <p className="mt-4 text-sm text-status-ok">{notice}</p>}
+        <div className="mt-6 flex items-center gap-3 border-t border-border-default pt-4">
           <button
             type="submit"
             className="btn-primary"
@@ -224,7 +226,7 @@ export function RoleManager({ initialRoles, catalog }: { initialRoles: Role[]; c
           >
             {busy ? "Saving…" : selectedId ? "Save role" : "Create role"}
           </button>
-          <span className="text-xs text-ink-500">{selected.size} permissions selected</span>
+          <span className="text-xs text-fg-secondary">{selected.size} permissions selected</span>
         </div>
       </form>
     </div>

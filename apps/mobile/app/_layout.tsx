@@ -13,7 +13,10 @@ export default function RootLayout() {
           screenOptions={{
             headerStyle: { backgroundColor: colors.panel },
             headerTintColor: colors.ink,
+            headerShadowVisible: false,
+            headerTitleStyle: { fontWeight: "600" },
             contentStyle: { backgroundColor: colors.bg },
+            animation: "slide_from_right",
           }}
         >
           <Stack.Screen name="index" options={{ headerShown: false }} />

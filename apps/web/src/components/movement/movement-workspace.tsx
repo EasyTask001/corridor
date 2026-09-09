@@ -211,11 +211,11 @@ export function MovementWorkspace({
         goToStep: setStep,
       }}
     >
-      <div className="grid min-h-[calc(100vh-4rem)] grid-cols-[1fr_20rem] gap-6">
+      <div className="grid min-h-[calc(100dvh-7rem)] gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="min-w-0 space-y-5">
           <header className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <div className="flex items-center gap-2 text-sm text-ink-500">
+              <div className="flex items-center gap-2 text-sm text-fg-secondary">
                 <Link href="/movements" className="hover:underline">
                   Movements
                 </Link>
@@ -226,7 +226,7 @@ export function MovementWorkspace({
                 <RegimeBadge regime={m.regime} />
                 <StatusBadge status={m.status} />
               </h1>
-              <p className="mt-1 text-sm text-ink-500">
+              <p className="mt-1 text-sm text-fg-secondary">
                 {m.port?.name ?? "No port selected"} · ETA {fmt(m.scheduledCrossingAt)}
                 {m.customsReferenceNumber && (
                   <>
@@ -242,13 +242,16 @@ export function MovementWorkspace({
                       {borderWait.data.lanes.commercial} min
                     </span>
                     {borderWait.data.lanes.fast < borderWait.data.lanes.commercial && (
-                      <span className="text-ink-300"> · FAST {borderWait.data.lanes.fast} min</span>
+                      <span className="text-fg-secondary/60">
+                        {" "}
+                        · FAST {borderWait.data.lanes.fast} min
+                      </span>
                     )}
                   </>
                 )}
               </p>
               {(m.status === "sent" || m.status === "held") && (
-                <p className="mt-1 inline-flex items-center gap-2 rounded bg-signal-500/10 px-2 py-0.5 text-xs text-signal-600">
+                <p className="mt-1 inline-flex items-center gap-2 rounded bg-signal-500/10 px-2 py-0.5 text-xs text-status-signal">
                   <span
                     className="h-1.5 w-1.5 animate-pulse rounded-full bg-signal-500"
                     aria-hidden
@@ -299,7 +302,7 @@ export function MovementWorkspace({
               )}
               {!terminal && permissions.cancel && (
                 <button
-                  className="btn-secondary text-danger-500"
+                  className="btn-secondary text-status-danger"
                   onClick={() => setCancelling((v) => !v)}
                 >
                   Cancel
@@ -311,7 +314,7 @@ export function MovementWorkspace({
           {error && (
             <p
               role="alert"
-              className="rounded-md bg-danger-500/10 px-3 py-2 text-sm text-danger-500"
+              className="rounded-md bg-danger-500/10 px-3 py-2 text-sm text-status-danger"
             >
               {error}
             </p>
@@ -321,13 +324,13 @@ export function MovementWorkspace({
             <section className="rounded-md border border-signal-500/40 bg-signal-500/5 p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-signal-600">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-status-signal">
                     AI suggested · not applied
                   </div>
                   <h2 className="mt-1 font-medium">
                     Reuse the lane from {suggestion.suggestedPayload.sourceMovementNumber}
                   </h2>
-                  <p className="mt-1 text-sm text-ink-500">
+                  <p className="mt-1 text-sm text-fg-secondary">
                     Similarity {suggestion.score}/100 · {suggestion.reasons.join(" · ")}
                   </p>
                 </div>
@@ -378,7 +381,7 @@ export function MovementWorkspace({
 
           {cancelling && (
             <form
-              className="panel flex items-end gap-3 p-4"
+              className="panel flex flex-col gap-3 p-4 sm:flex-row sm:items-end"
               onSubmit={(e: FormEvent<HTMLFormElement>) => {
                 e.preventDefault();
                 cancel.mutate(
@@ -391,7 +394,7 @@ export function MovementWorkspace({
               }}
             >
               <Field label="Cancellation reason" htmlFor="cancelReason">
-                <input id="cancelReason" name="reason" className="input w-96" />
+                <input id="cancelReason" name="reason" className="input w-full sm:w-96" />
               </Field>
               <button
                 className="btn-primary bg-danger-500 hover:bg-danger-500/90"
@@ -407,7 +410,7 @@ export function MovementWorkspace({
 
           {amending && (
             <form
-              className="panel grid grid-cols-2 gap-4 p-4"
+              className="panel grid grid-cols-1 gap-4 p-4 sm:grid-cols-2"
               onSubmit={(e: FormEvent<HTMLFormElement>) => {
                 e.preventDefault();
                 const fd = new FormData(e.currentTarget);
@@ -429,7 +432,7 @@ export function MovementWorkspace({
                 });
               }}
             >
-              <div className="col-span-2 text-sm font-medium">
+              <div className="sm:col-span-2 text-sm font-medium">
                 Amend accepted manifest — re-transmits to customs
               </div>
               <Field label="Reason" htmlFor="amendReason">
@@ -516,7 +519,7 @@ export function MovementWorkspace({
                   {m.regime === "ACE" ? "Empty trailer" : "Empty trip"}
                 </label>
               </Field>
-              <div className="col-span-2 flex gap-2">
+              <div className="flex flex-wrap gap-2 sm:col-span-2">
                 <button className="btn-signal" disabled={amend.isPending}>
                   Submit amendment
                 </button>
@@ -531,7 +534,7 @@ export function MovementWorkspace({
             permissions.transmit &&
             ["sent", "accepted", "held"].includes(m.status) && (
               <div className="flex flex-wrap items-center gap-2 rounded-md border border-dashed border-signal-500/60 bg-signal-500/5 px-3 py-2 text-xs">
-                <span className="font-medium text-signal-600">Customs simulation (dev)</span>
+                <span className="font-medium text-status-signal">Customs simulation (dev)</span>
                 {simDecisions(m.status).map((d) => (
                   <button
                     key={d}
@@ -545,7 +548,10 @@ export function MovementWorkspace({
               </div>
             )}
 
-          <nav className="flex gap-1 rounded-md bg-ink-100 p-0.5" aria-label="Wizard steps">
+          <nav
+            className="flex gap-1 overflow-x-auto rounded-lg bg-surface-sunken p-1"
+            aria-label="Wizard steps"
+          >
             {STEPS.map((s) => {
               const n = issuesFor(s.key);
               const hasBlock = n.some((i) => i.severity === "blocking");
@@ -553,12 +559,12 @@ export function MovementWorkspace({
                 <button
                   key={s.key}
                   onClick={() => setStep(s.key)}
-                  className={`flex-1 rounded px-3 py-1.5 text-sm ${step === s.key ? "bg-white font-medium shadow-sm" : "text-ink-500 hover:text-ink-950"}`}
+                  className={`min-h-10 min-w-max flex-1 rounded-md px-3 py-1.5 text-sm transition-colors ${step === s.key ? "bg-surface-raised font-medium text-fg-primary shadow-sm" : "text-fg-secondary hover:bg-surface-raised/60 hover:text-fg-primary"}`}
                 >
                   {s.label}
                   {n.length > 0 && (
                     <span
-                      className={`ml-1.5 rounded-full px-1.5 text-[10px] font-semibold ${hasBlock ? "bg-danger-500/10 text-danger-500" : "bg-warn-500/10 text-warn-500"}`}
+                      className={`ml-1.5 rounded-full px-1.5 text-[10px] font-semibold ${hasBlock ? "bg-danger-500/10 text-status-danger" : "bg-warn-500/10 text-status-warn"}`}
                     >
                       {n.length}
                     </span>
@@ -573,7 +579,7 @@ export function MovementWorkspace({
           </section>
         </div>
 
-        <div className="panel sticky top-4 max-h-[calc(100vh-2rem)] p-4">
+        <div className="panel p-4 xl:sticky xl:top-20 xl:max-h-[calc(100dvh-6rem)] xl:overflow-y-auto">
           <Timeline
             movementId={id}
             events={m.events}
@@ -598,7 +604,7 @@ function simDecisions(
 function SuggestionValue({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-xs uppercase tracking-wide text-ink-500">{label}</dt>
+      <dt className="text-xs uppercase tracking-wide text-fg-secondary">{label}</dt>
       <dd className="mt-0.5 font-medium">{value}</dd>
     </div>
   );

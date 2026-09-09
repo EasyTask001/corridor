@@ -117,14 +117,17 @@ export function LoginForm({ next }: { next: string }) {
             <input id="remember" name="remember" type="checkbox" defaultChecked />
             Stay signed in
           </label>
-          <Link href="/forgot-password" className="text-ink-500 underline-offset-2 hover:underline">
+          <Link
+            href="/forgot-password"
+            className="text-fg-secondary underline-offset-2 hover:underline"
+          >
             Forgot password?
           </Link>
         </div>
       )}
 
-      {state?.error && <p className="text-sm text-danger-500">{state.error}</p>}
-      {ssoError && <p className="text-sm text-danger-500">{ssoError}</p>}
+      {state?.error && <p className="text-sm text-status-danger">{state.error}</p>}
+      {ssoError && <p className="text-sm text-status-danger">{ssoError}</p>}
 
       {hint?.sso && (
         <Button

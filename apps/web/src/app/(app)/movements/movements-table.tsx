@@ -74,7 +74,7 @@ export function MovementsTable({
               {row.original.movementNumber}
             </Link>
             {row.original.tripNumber && (
-              <div className="text-xs text-ink-500">{row.original.tripNumber}</div>
+              <div className="text-xs text-fg-secondary">{row.original.tripNumber}</div>
             )}
           </>
         ),
@@ -88,7 +88,7 @@ export function MovementsTable({
       helper.accessor("etaLabel", {
         id: "eta",
         header: "ETA",
-        meta: { className: "whitespace-nowrap text-ink-700" },
+        meta: { className: "whitespace-nowrap text-fg-primary" },
       }),
       helper.accessor("driverLabel", { id: "driver", header: "Driver" }),
       helper.accessor("unitsLabel", {
@@ -120,7 +120,7 @@ export function MovementsTable({
       getRowId={(row) => row.id}
       isLoading={isLoading}
       emptyMessage="No movements match."
-      rowClassName={() => "hover:bg-ink-50"}
+      rowClassName={() => "hover:bg-surface-sunken"}
       onRowClick={(row) => router.push(`/movements/${row.id}`)}
       pageIndex={pageIndex}
       pageSize={pageSize}

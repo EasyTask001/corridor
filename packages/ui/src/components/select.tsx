@@ -84,7 +84,7 @@ export function SelectItem({
   return (
     <SelectPrimitive.Item
       className={cn(
-        "relative flex cursor-default select-none items-center rounded px-2 py-1.5 pr-7 outline-none",
+        "relative flex min-h-9 cursor-default select-none items-center rounded-md px-2 py-1.5 pr-7 outline-none",
         "data-[highlighted]:bg-surface-sunken data-[disabled]:opacity-50",
         className,
       )}
@@ -103,6 +103,9 @@ export function SelectSeparator({
   ...props
 }: ComponentProps<typeof SelectPrimitive.Separator>) {
   return (
-    <SelectPrimitive.Separator className={cn("my-1 h-px bg-border-default", className)} {...props} />
+    <SelectPrimitive.Separator
+      className={cn("my-1 h-px bg-border-default", className)}
+      {...props}
+    />
   );
 }

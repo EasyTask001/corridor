@@ -28,21 +28,41 @@ export default function NotificationsScreen() {
     <FlatList
       style={styles.screen}
       contentContainerStyle={styles.content}
+      contentInsetAdjustmentBehavior="automatic"
       data={data?.rows ?? []}
       keyExtractor={(n) => n.id}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void refetch()} />}
-      ListHeaderComponent={error ? <Text style={styles.error}>{error}</Text> : null}
+      ListHeaderComponent={
+        error ? (
+          <Text style={styles.error} accessibilityLiveRegion="polite">
+            {error}
+          </Text>
+        ) : null
+      }
       ListEmptyComponent={
-        <View style={styles.panel}>
-          <Text style={styles.body}>Nothing to read.</Text>
-        </View>
+        loading ? (
+          <View style={{ minHeight: 160, alignItems: "center", justifyContent: "center" }}>
+            <Text style={styles.muted}>Loading notifications…</Text>
+          </View>
+        ) : (
+          <View style={styles.panel}>
+            <Text style={styles.h2}>You’re all caught up</Text>
+            <Text style={styles.muted}>New operational alerts will appear here.</Text>
+          </View>
+        )
       }
       renderItem={({ item }) => {
         const unread = !item.readAt && !readLocally.includes(item.id);
         return (
           <Pressable
             accessibilityRole="button"
-            style={[styles.panel, unread ? { borderColor: colors.accent } : null]}
+            accessibilityState={{ selected: unread }}
+            accessibilityHint={unread ? "Marks this notification as read" : undefined}
+            style={({ pressed }) => [
+              styles.panel,
+              unread && { borderColor: colors.accent, backgroundColor: colors.accentSoft },
+              pressed && styles.panelPressed,
+            ]}
             onPress={() => (unread ? void markRead(item.id) : undefined)}
           >
             <View style={styles.row}>

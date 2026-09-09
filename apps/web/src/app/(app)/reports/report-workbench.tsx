@@ -31,9 +31,9 @@ export function ReportWorkbench() {
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-ink-500">
-        Ask about movement volume, cargo, rejection, or hold history. Questions are translated
-        into a constrained reporting query, never raw SQL.
+      <p className="text-sm text-fg-secondary">
+        Ask about movement volume, cargo, rejection, or hold history. Questions are translated into
+        a constrained reporting query, never raw SQL.
       </p>
 
       <form className="panel space-y-3 p-5" onSubmit={submit} aria-label="Run a report">
@@ -58,7 +58,7 @@ export function ReportWorkbench() {
             <button
               key={example}
               type="button"
-              className="rounded-full border border-ink-100 bg-white px-3 py-1 text-left text-xs text-ink-500 hover:bg-ink-50 hover:text-ink-950"
+              className="rounded-full border border-border-default bg-surface-raised px-3 py-1 text-left text-xs text-fg-secondary hover:bg-surface-sunken hover:text-fg-primary"
               onClick={() => setQuestion(example)}
             >
               {example}
@@ -68,7 +68,10 @@ export function ReportWorkbench() {
       </form>
 
       {run.error && (
-        <p role="alert" className="rounded-md bg-danger-500/10 px-3 py-2 text-sm text-danger-500">
+        <p
+          role="alert"
+          className="rounded-md bg-danger-500/10 px-3 py-2 text-sm text-status-danger"
+        >
           {run.error.message}
         </p>
       )}
@@ -76,15 +79,18 @@ export function ReportWorkbench() {
       {result && (
         <div className="space-y-4" aria-live="polite">
           <section className="panel p-5">
-            <div className="text-xs font-medium uppercase tracking-wide text-ink-500">
+            <div className="text-xs font-medium uppercase tracking-wide text-fg-secondary">
               Interpreted query
             </div>
             <h2 className="mt-1 text-xl font-semibold">{result.title}</h2>
-            <p className="mt-1 text-sm text-ink-500">{result.interpretation}</p>
+            <p className="mt-1 text-sm text-fg-secondary">{result.interpretation}</p>
             <p className="mt-4 text-lg font-medium">{result.summary}</p>
             <div className="mt-3 flex flex-wrap gap-2 text-xs">
               {Object.entries(result.query).map(([key, value]) => (
-                <span key={key} className="rounded bg-ink-100 px-2 py-1 font-mono text-ink-700">
+                <span
+                  key={key}
+                  className="rounded bg-surface-sunken px-2 py-1 font-mono text-fg-primary"
+                >
                   {key}: {String(value)}
                 </span>
               ))}
@@ -118,7 +124,7 @@ export function ReportWorkbench() {
                 </a>
               )}
               {exportResult.error && (
-                <span role="alert" className="text-danger-500">
+                <span role="alert" className="text-status-danger">
                   {exportResult.error.message}
                 </span>
               )}
@@ -130,13 +136,13 @@ export function ReportWorkbench() {
               <ReportChart title={result.title} rows={result.rows} unit={result.unit} />
               <div className="panel overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">
+                  <thead className="bg-surface-sunken text-left text-xs uppercase tracking-wide text-fg-secondary">
                     <tr>
                       <th className="px-4 py-2 font-medium">Group</th>
                       <th className="px-4 py-2 text-right font-medium">Result</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-ink-100">
+                  <tbody className="divide-y divide-border-default">
                     {result.rows.map((row) => (
                       <tr key={row.label}>
                         <td className="px-4 py-2">{row.label}</td>
@@ -176,7 +182,7 @@ function ReportChart({
               <span className="truncate">{row.label}</span>
               <span className="shrink-0 font-mono">{formatValue(row.value, unit)}</span>
             </div>
-            <div className="h-2 overflow-hidden rounded-full bg-ink-100">
+            <div className="h-2 overflow-hidden rounded-full bg-surface-sunken">
               <div
                 className="h-full rounded-full bg-signal-500"
                 style={{ width: `${Math.max(1, (row.value / max) * 100)}%` }}

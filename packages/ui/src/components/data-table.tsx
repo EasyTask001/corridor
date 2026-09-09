@@ -172,7 +172,7 @@ export function DataTable<TData extends RowData>({
                       <button
                         type="button"
                         onClick={header.column.getToggleSortingHandler()}
-                        className="inline-flex items-center gap-1 uppercase tracking-wide transition-colors hover:text-fg-primary"
+                        className="inline-flex min-h-8 items-center gap-1 rounded px-1 uppercase tracking-wide transition-colors hover:bg-surface-raised hover:text-fg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring/40"
                       >
                         <table.FlexRender header={header} />
                         <SortIcon

@@ -11,7 +11,7 @@ export default async function NotificationsPage() {
     <div className="max-w-2xl space-y-4">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Notifications</h1>
-        <p className="text-sm text-ink-500">
+        <p className="text-sm text-fg-secondary">
           Critical compliance alerts, customs decisions and documents needing review. Manage what
           you get notified about in{" "}
           <a href="/settings/notifications" className="underline">

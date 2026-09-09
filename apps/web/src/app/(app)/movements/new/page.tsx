@@ -43,15 +43,15 @@ export default async function NewMovementPage() {
   return (
     <div className="space-y-6">
       <header className="space-y-1">
-        <nav className="text-sm text-ink-500">
-          <Link href="/movements" className="hover:text-ink-950 hover:underline">
+        <nav className="text-sm text-fg-secondary">
+          <Link href="/movements" className="hover:text-fg-primary hover:underline">
             Movements
           </Link>
           <span aria-hidden> / </span>
           <span>New</span>
         </nav>
         <h1 className="text-2xl font-semibold tracking-tight">New movement</h1>
-        <p className="text-sm text-ink-500">
+        <p className="text-sm text-fg-secondary">
           Pick the direction of travel. Everything else — trip, crew, truck, shipment lines and
           seals — is filled in on the movement itself, and nothing is transmitted until it passes
           validation.
@@ -64,11 +64,11 @@ export default async function NewMovementPage() {
             <input type="hidden" name="regime" value={r.regime} />
             <div className="flex items-baseline justify-between gap-3">
               <h2 className="text-lg font-semibold">{r.heading}</h2>
-              <span className="font-mono text-xs text-ink-500">{r.regime}</span>
+              <span className="font-mono text-xs text-fg-secondary">{r.regime}</span>
             </div>
-            <p className="font-mono text-xs uppercase tracking-wide text-ink-500">{r.lane}</p>
-            <p className="text-sm text-ink-700">{r.blurb}</p>
-            <p className="text-xs text-ink-500">Filed with {r.agency}.</p>
+            <p className="font-mono text-xs uppercase tracking-wide text-fg-secondary">{r.lane}</p>
+            <p className="text-sm text-fg-primary">{r.blurb}</p>
+            <p className="text-xs text-fg-secondary">Filed with {r.agency}.</p>
             <button className={`${r.className} mt-auto self-start`}>{r.cta}</button>
           </form>
         ))}

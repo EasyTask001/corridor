@@ -9,7 +9,7 @@ export function TableHeader({ className, ...props }: ComponentProps<"thead">) {
   return (
     <thead
       className={cn(
-        "bg-surface-sunken text-left text-xs uppercase tracking-wide text-fg-secondary",
+        "border-b border-border-default bg-surface-sunken/80 text-left text-[11px] uppercase tracking-wider text-fg-secondary",
         className,
       )}
       {...props}
@@ -26,15 +26,17 @@ export function TableFooter({ className, ...props }: ComponentProps<"tfoot">) {
 }
 
 export function TableRow({ className, ...props }: ComponentProps<"tr">) {
-  return <tr className={className} {...props} />;
+  return (
+    <tr className={cn("transition-colors hover:bg-surface-sunken/60", className)} {...props} />
+  );
 }
 
 export function TableHead({ className, ...props }: ComponentProps<"th">) {
-  return <th className={cn("px-4 py-2 font-medium", className)} {...props} />;
+  return <th className={cn("px-4 py-3 font-semibold", className)} {...props} />;
 }
 
 export function TableCell({ className, ...props }: ComponentProps<"td">) {
-  return <td className={cn("px-4 py-2", className)} {...props} />;
+  return <td className={cn("px-4 py-3", className)} {...props} />;
 }
 
 export function TableCaption({ className, ...props }: ComponentProps<"caption">) {

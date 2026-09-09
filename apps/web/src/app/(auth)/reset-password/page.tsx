@@ -8,7 +8,7 @@ export default function ResetPasswordPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Choose a new password</h1>
-        <p className="mt-1 text-sm text-ink-500">At least 8 characters.</p>
+        <p className="mt-1 text-sm text-fg-secondary">At least 8 characters.</p>
       </div>
       <ResetPasswordForm />
     </div>

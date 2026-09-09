@@ -23,14 +23,14 @@ export function ReviewStep() {
       <div className="panel p-5">
         <h3 className="font-medium">Pre-transmit checks</h3>
         {validation.issues.length === 0 ? (
-          <p className="mt-2 text-sm text-ok-500">
+          <p className="mt-2 text-sm text-status-ok">
             All checks pass. Ready to transmit to {m.regime === "ACE" ? "CBP" : "CBSA"}.
           </p>
         ) : (
           <ul className="mt-3 space-y-1.5 text-sm">
             {blocking.map((i) => (
               <li key={i.code} className="flex gap-2">
-                <span className="mt-0.5 shrink-0 rounded bg-danger-500/10 px-1.5 text-xs font-semibold uppercase text-danger-500">
+                <span className="mt-0.5 shrink-0 rounded bg-danger-500/10 px-1.5 text-xs font-semibold uppercase text-status-danger">
                   block
                 </span>
                 <button
@@ -43,7 +43,7 @@ export function ReviewStep() {
             ))}
             {warnings.map((i) => (
               <li key={i.code} className="flex gap-2">
-                <span className="mt-0.5 shrink-0 rounded bg-warn-500/10 px-1.5 text-xs font-semibold uppercase text-warn-500">
+                <span className="mt-0.5 shrink-0 rounded bg-warn-500/10 px-1.5 text-xs font-semibold uppercase text-status-warn">
                   warn
                 </span>
                 <button
@@ -60,7 +60,12 @@ export function ReviewStep() {
       <Summary m={m} />
       <div className="flex flex-wrap items-center gap-4">
         <PrintMenu movementId={m.id} />
-        <RecordHistoryDialog entityType="movement" entityId={m.id} label={m.movementNumber} size="sm" />
+        <RecordHistoryDialog
+          entityType="movement"
+          entityId={m.id}
+          label={m.movementNumber}
+          size="sm"
+        />
       </div>
       {integrationLog.data && integrationLog.data.length > 0 && (
         <div className="panel p-5">
@@ -68,7 +73,7 @@ export function ReviewStep() {
           <ul className="mt-2 space-y-1.5 text-sm" aria-label="Transmission log">
             {integrationLog.data.map((e) => (
               <li key={e.id} className="flex flex-wrap items-baseline gap-x-3">
-                <span className="font-mono text-xs text-ink-500">
+                <span className="font-mono text-xs text-fg-secondary">
                   {new Date(e.createdAt).toLocaleTimeString("en-CA")}
                 </span>
                 <span className="font-mono text-xs">{e.provider}</span>
@@ -76,14 +81,14 @@ export function ReviewStep() {
                   {e.direction === "outbound" ? "→" : "←"} {e.operation}
                 </span>
                 {e.success ? (
-                  <span className="text-xs text-ok-500">
+                  <span className="text-xs text-status-ok">
                     ok
                     {typeof e.responsePayload?.decision === "string"
                       ? ` · ${e.responsePayload.decision}`
                       : ""}
                   </span>
                 ) : (
-                  <span className="text-xs text-danger-500">
+                  <span className="text-xs text-status-danger">
                     {e.statusCode} · {e.errorMessage}
                   </span>
                 )}
@@ -100,7 +105,7 @@ export function ReviewStep() {
               <li key={a.id}>
                 <span className="font-mono">#{a.amendmentNumber}</span> ·{" "}
                 <span className="capitalize">{a.status}</span> — {a.reason}
-                <ul className="ml-4 text-xs text-ink-500">
+                <ul className="ml-4 text-xs text-fg-secondary">
                   {Object.entries(a.diff).map(([k, v]) => (
                     <li key={k}>
                       {k}: {JSON.stringify(v.before)} → {JSON.stringify(v.after)}
@@ -121,12 +126,9 @@ function Summary({ m }: { m: Movement }) {
   const totalKg = lines.reduce((sum, c) => sum + (c.weightKg ?? 0), 0);
   const pieces = lines.reduce((sum, c) => sum + (c.quantity ?? 0), 0);
   return (
-    <div className="panel grid grid-cols-2 gap-x-6 gap-y-2 p-5 text-sm sm:grid-cols-3">
+    <div className="panel grid grid-cols-1 gap-x-6 gap-y-2 p-5 text-sm sm:grid-cols-3">
       {[
-        [
-          "Crew",
-          m.crew.map((c) => `${c.firstName} ${c.lastName}`).join(", ") || "—",
-        ],
+        ["Crew", m.crew.map((c) => `${c.firstName} ${c.lastName}`).join(", ") || "—"],
         ["Truck", m.truck?.unitNumber ?? "—"],
         ["Trailers", m.trailers.map((t) => t.unitNumber).join(" + ") || "—"],
         ["Shipments", m.isEmpty ? "Empty trip" : String(m.shipments.length)],
@@ -144,7 +146,7 @@ function Summary({ m }: { m: Movement }) {
         ["Released", fmt(m.releasedAt)],
       ].map(([k, v]) => (
         <div key={k}>
-          <div className="text-xs uppercase tracking-wide text-ink-500">{k}</div>
+          <div className="text-xs uppercase tracking-wide text-fg-secondary">{k}</div>
           <div className="font-medium">{v}</div>
         </div>
       ))}

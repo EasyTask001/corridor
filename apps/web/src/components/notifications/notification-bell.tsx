@@ -120,9 +120,11 @@ export function NotificationBell() {
   return (
     <div className="relative" ref={ref}>
       <button
+        type="button"
         aria-label={`Notifications${unread > 0 ? `, ${unread} unread` : ""}`}
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="relative rounded-full p-2 text-ink-500 hover:bg-ink-50 hover:text-ink-950"
+        className="relative inline-flex size-10 items-center justify-center rounded-full text-fg-secondary transition-colors hover:bg-surface-sunken hover:text-fg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring/40"
       >
         <BellIcon />
         {unread > 0 && (
@@ -133,31 +135,34 @@ export function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 z-50 mt-2 w-96 rounded-lg border border-ink-100 bg-white shadow-lg">
-          <div className="flex items-center justify-between border-b border-ink-100 px-4 py-2">
+        <div className="absolute right-0 z-50 mt-2 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border-default bg-surface-overlay shadow-lg">
+          <div className="flex items-center justify-between border-b border-border-default px-4 py-2">
             <span className="text-sm font-medium">Notifications</span>
             {unread > 0 && (
               <button
-                className="text-xs text-ink-500 hover:text-ink-950"
+                type="button"
+                className="min-h-8 text-xs font-medium text-fg-secondary hover:text-fg-primary"
                 onClick={() => markAllRead.mutate()}
               >
                 Mark all read
               </button>
             )}
           </div>
-          <ul className="max-h-96 divide-y divide-ink-100 overflow-y-auto">
-            {!data && <li className="px-4 py-6 text-sm text-ink-500">Loading…</li>}
+          <ul className="max-h-96 divide-y divide-border-default overflow-y-auto">
+            {!data && <li className="px-4 py-6 text-sm text-fg-secondary">Loading…</li>}
             {data?.rows.length === 0 && (
-              <li className="px-4 py-6 text-sm text-ink-500">You&apos;re all caught up.</li>
+              <li className="px-4 py-6 text-sm text-fg-secondary">You&apos;re all caught up.</li>
             )}
             {data?.rows.map((n) => {
               const body = (
                 <div className="px-4 py-3">
-                  <div className={`text-sm ${n.readAt ? "text-ink-500" : "font-medium"}`}>
+                  <div className={`text-sm ${n.readAt ? "text-fg-secondary" : "font-medium"}`}>
                     {n.title}
                   </div>
-                  {n.body && <div className="mt-0.5 text-xs text-ink-500">{n.body}</div>}
-                  <div className="mt-1 text-[11px] text-ink-300">{timeAgo(n.createdAt)}</div>
+                  {n.body && <div className="mt-0.5 text-xs text-fg-secondary">{n.body}</div>}
+                  <div className="mt-1 text-[11px] text-fg-secondary/60">
+                    {timeAgo(n.createdAt)}
+                  </div>
                 </div>
               );
               return (
@@ -169,13 +174,14 @@ export function NotificationBell() {
                         setOpen(false);
                         if (!n.readAt) markRead.mutate({ id: n.id });
                       }}
-                      className="block hover:bg-ink-50"
+                      className="block hover:bg-surface-sunken"
                     >
                       {body}
                     </Link>
                   ) : (
                     <button
-                      className="block w-full text-left hover:bg-ink-50"
+                      type="button"
+                      className="block w-full text-left hover:bg-surface-sunken"
                       onClick={() => !n.readAt && markRead.mutate({ id: n.id })}
                     >
                       {body}
@@ -188,7 +194,7 @@ export function NotificationBell() {
           <Link
             href="/notifications"
             onClick={() => setOpen(false)}
-            className="block border-t border-ink-100 px-4 py-2 text-center text-xs text-ink-500 hover:bg-ink-50 hover:text-ink-950"
+            className="block min-h-10 border-t border-border-default px-4 py-3 text-center text-xs font-medium text-fg-secondary hover:bg-surface-sunken hover:text-fg-primary"
           >
             View all
           </Link>

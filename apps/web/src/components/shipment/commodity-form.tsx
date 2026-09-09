@@ -56,7 +56,7 @@ export function CommodityForm({
     <form
       role="form"
       aria-label={initial ? "Edit commodity line" : "New commodity line"}
-      className="panel grid grid-cols-2 gap-4 p-4 sm:grid-cols-3"
+      className="panel grid grid-cols-1 gap-4 p-4 sm:grid-cols-2 lg:grid-cols-3"
       onSubmit={(e: FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         const fd = new FormData(e.currentTarget);

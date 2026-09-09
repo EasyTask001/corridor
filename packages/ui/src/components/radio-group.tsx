@@ -13,7 +13,7 @@ export function RadioGroupItem({
   return (
     <RadioGroupPrimitive.Item
       className={cn(
-        "flex size-4 shrink-0 items-center justify-center rounded-full border border-border-strong bg-surface-raised transition-colors",
+        "flex size-5 shrink-0 items-center justify-center rounded-full border border-border-strong bg-surface-raised shadow-sm transition-colors",
         "data-[state=checked]:border-accent",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring/40",
         "disabled:cursor-not-allowed disabled:opacity-50",
@@ -21,7 +21,7 @@ export function RadioGroupItem({
       )}
       {...props}
     >
-      <RadioGroupPrimitive.Indicator className="size-2 rounded-full bg-accent" />
+      <RadioGroupPrimitive.Indicator className="size-2.5 rounded-full bg-accent" />
     </RadioGroupPrimitive.Item>
   );
 }

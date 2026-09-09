@@ -11,15 +11,29 @@ export function ResetPasswordForm({ stay = false }: { stay?: boolean }) {
       {stay && <input type="hidden" name="stay" value="on" />}
       <div>
         <Label htmlFor="password">New password</Label>
-        <Input id="password" name="password" type="password" autoComplete="new-password" required minLength={8} />
+        <Input
+          id="password"
+          name="password"
+          type="password"
+          autoComplete="new-password"
+          required
+          minLength={8}
+        />
       </div>
       <div>
         <Label htmlFor="confirm">Confirm new password</Label>
-        <Input id="confirm" name="confirm" type="password" autoComplete="new-password" required minLength={8} />
+        <Input
+          id="confirm"
+          name="confirm"
+          type="password"
+          autoComplete="new-password"
+          required
+          minLength={8}
+        />
       </div>
-      {state?.error && <p className="text-sm text-danger-500">{state.error}</p>}
+      {state?.error && <p className="text-sm text-status-danger">{state.error}</p>}
       {state?.message && (
-        <p role="status" className="rounded-md bg-ok-500/10 px-3 py-2 text-sm text-ok-500">
+        <p role="status" className="rounded-md bg-ok-500/10 px-3 py-2 text-sm text-status-ok">
           {state.message}
         </p>
       )}

@@ -19,7 +19,10 @@ type Batches = Outputs["list"];
 type Template = Outputs["template"];
 type Validation = Outputs["validate"];
 
-const KIND_LABEL: Record<ImportKind, string> = { shipments: "Shipments", commodities: "Commodity lines" };
+const KIND_LABEL: Record<ImportKind, string> = {
+  shipments: "Shipments",
+  commodities: "Commodity lines",
+};
 const when = (d: Date | string | null) =>
   d ? new Date(d).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" }) : "";
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -94,23 +97,26 @@ export function ImportWizard({
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Import from CSV</h1>
-          <p className="text-sm text-ink-500">
+          <p className="text-sm text-fg-secondary">
             Shipments, or commodity lines for shipments that already exist. Every line is checked
             first; only the lines that pass are written.
           </p>
         </div>
-        <Link href="/shipments" className="text-sm text-ink-500 hover:underline">
+        <Link href="/shipments" className="text-sm text-fg-secondary hover:underline">
           Back to shipments
         </Link>
       </header>
 
       {error && (
-        <p role="alert" className="rounded-md bg-danger-500/10 px-3 py-2 text-sm text-danger-500">
+        <p
+          role="alert"
+          className="rounded-md bg-danger-500/10 px-3 py-2 text-sm text-status-danger"
+        >
           {error}
         </p>
       )}
       {notice && (
-        <p role="status" className="rounded-md bg-ok-500/10 px-3 py-2 text-sm text-ok-500">
+        <p role="status" className="rounded-md bg-ok-500/10 px-3 py-2 text-sm text-status-ok">
           {notice}
         </p>
       )}
@@ -120,7 +126,11 @@ export function ImportWizard({
           <div className="grid gap-4 sm:grid-cols-[14rem_1fr_auto]">
             <div>
               <Label htmlFor="importKind">What the file holds</Label>
-              <NativeSelect id="importKind" value={kind} onChange={(e) => setKind(e.target.value as ImportKind)}>
+              <NativeSelect
+                id="importKind"
+                value={kind}
+                onChange={(e) => setKind(e.target.value as ImportKind)}
+              >
                 <option value="shipments">Shipments (ACE and/or ACI)</option>
                 <option value="commodities">Commodity lines</option>
               </NativeSelect>
@@ -142,14 +152,16 @@ export function ImportWizard({
             <div className="flex items-end">
               <Button
                 disabled={!file || validate.isPending}
-                onClick={() => file && validate.mutate({ kind, filename: file.name, content: file.content })}
+                onClick={() =>
+                  file && validate.mutate({ kind, filename: file.name, content: file.content })
+                }
               >
                 {validate.isPending ? "Checking…" : "Validate"}
               </Button>
             </div>
           </div>
           <details className="text-sm">
-            <summary className="cursor-pointer text-ink-500">
+            <summary className="cursor-pointer text-fg-secondary">
               Columns for {KIND_LABEL[kind].toLowerCase()} (
               <a href={headerHref} download={`${kind}-template.csv`} className="underline">
                 download the header row
@@ -157,7 +169,7 @@ export function ImportWizard({
               )
             </summary>
             <table className="mt-2 w-full text-xs">
-              <tbody className="divide-y divide-ink-100">
+              <tbody className="divide-y divide-border-default">
                 {template.columns.map((c) => (
                   <tr key={c.key}>
                     <td className="py-1 pr-3 font-mono">
@@ -165,7 +177,7 @@ export function ImportWizard({
                       {c.required ? " *" : ""}
                     </td>
                     <td className="py-1 pr-3">{c.label}</td>
-                    <td className="py-1 text-ink-500">{c.note ?? ""}</td>
+                    <td className="py-1 text-fg-secondary">{c.note ?? ""}</td>
                   </tr>
                 ))}
               </tbody>
@@ -179,25 +191,29 @@ export function ImportWizard({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="font-medium">{validation.filename}</h2>
-              <p className="text-sm text-ink-500">
+              <p className="text-sm text-fg-secondary">
                 {okCount} ok, {validation.report.errorCount} with errors
-                {validation.unknownColumns.length > 0 && `. Ignored columns: ${validation.unknownColumns.join(", ")}`}
+                {validation.unknownColumns.length > 0 &&
+                  `. Ignored columns: ${validation.unknownColumns.join(", ")}`}
               </p>
             </div>
-            <Button disabled={okCount === 0 || commit.isPending} onClick={() => commit.mutate({ batchId: validation.batchId })}>
+            <Button
+              disabled={okCount === 0 || commit.isPending}
+              onClick={() => commit.mutate({ batchId: validation.batchId })}
+            >
               {commit.isPending ? "Committing…" : `Commit ${plural(okCount, "row")}`}
             </Button>
           </div>
           <div className="max-h-96 overflow-auto">
             <table className="w-full text-sm">
-              <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">
+              <thead className="bg-surface-sunken text-left text-xs uppercase tracking-wide text-fg-secondary">
                 <tr>
                   <th className="px-3 py-2 font-medium">Line</th>
                   <th className="px-3 py-2 font-medium">Row</th>
                   <th className="px-3 py-2 font-medium">Result</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-ink-100">
+              <tbody className="divide-y divide-border-default">
                 {validation.report.rows.map((r) => (
                   <tr key={r.line}>
                     <td className="px-3 py-1.5 font-mono text-xs">{r.line}</td>
@@ -206,7 +222,7 @@ export function ImportWizard({
                       {r.status === "ok" ? (
                         <Badge variant="ok">ok</Badge>
                       ) : (
-                        <ul className="text-xs text-danger-500">
+                        <ul className="text-xs text-status-danger">
                           {r.errors.map((e, i) => (
                             <li key={i}>
                               <span className="font-mono">{e.column}</span>: {e.message}
@@ -226,7 +242,7 @@ export function ImportWizard({
       <section className="panel overflow-x-auto" aria-label="Import batches">
         <h2 className="px-4 py-3 font-medium">Batches</h2>
         <table className="w-full text-sm">
-          <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">
+          <thead className="bg-surface-sunken text-left text-xs uppercase tracking-wide text-fg-secondary">
             <tr>
               <th className="px-3 py-2 font-medium">When</th>
               <th className="px-3 py-2 font-medium">File</th>
@@ -238,30 +254,36 @@ export function ImportWizard({
               <th className="px-3 py-2" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-ink-100">
+          <tbody className="divide-y divide-border-default">
             {batches.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-3 py-5 text-ink-500">
+                <td colSpan={8} className="px-3 py-5 text-fg-secondary">
                   No imports yet.
                 </td>
               </tr>
             )}
             {batches.map((b) => (
               <tr key={b.id}>
-                <td className="px-3 py-2 text-xs text-ink-500">{when(b.createdAt)}</td>
+                <td className="px-3 py-2 text-xs text-fg-secondary">{when(b.createdAt)}</td>
                 <td className="px-3 py-2 font-mono text-xs">{b.filename}</td>
                 <td className="px-3 py-2">{KIND_LABEL[b.kind]}</td>
                 <td className="px-3 py-2 text-right font-mono text-xs">{b.rowCount}</td>
                 <td className="px-3 py-2 text-right font-mono text-xs">{b.okCount}</td>
                 <td className="px-3 py-2 text-right font-mono text-xs">{b.errorCount}</td>
                 <td className="px-3 py-2">
-                  <Badge variant={b.status === "committed" ? "ok" : b.status === "deleted" ? "muted" : "neutral"}>{b.status}</Badge>
+                  <Badge
+                    variant={
+                      b.status === "committed" ? "ok" : b.status === "deleted" ? "muted" : "neutral"
+                    }
+                  >
+                    {b.status}
+                  </Badge>
                 </td>
                 <td className="px-3 py-2 text-right text-xs">
                   {canRun && b.status === "committed" && (
                     <button
                       type="button"
-                      className="text-danger-500 hover:underline disabled:opacity-50"
+                      className="text-status-danger hover:underline disabled:opacity-50"
                       disabled={remove.isPending}
                       onClick={() => remove.mutate({ batchId: b.id })}
                     >

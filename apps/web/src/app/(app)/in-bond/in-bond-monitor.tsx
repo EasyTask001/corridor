@@ -60,7 +60,8 @@ export function InBondMonitor({
   const sendExport = useMutation(trpc.inbond.records.sendExport.mutationOptions(settle));
   const cancel = useMutation(trpc.inbond.records.cancel.mutationOptions(settle));
   const requestStatus = useMutation(trpc.inbond.records.requestStatus.mutationOptions(settle));
-  const busy = sendArrival.isPending || sendExport.isPending || cancel.isPending || requestStatus.isPending;
+  const busy =
+    sendArrival.isPending || sendExport.isPending || cancel.isPending || requestStatus.isPending;
 
   const listed = new Set(data.rows.map((r) => r.shipmentId).filter(Boolean));
   const addable = inBondShipments.filter((s) => !listed.has(s.id));
@@ -68,13 +69,16 @@ export function InBondMonitor({
   return (
     <div className="space-y-4">
       {error && (
-        <p role="alert" className="rounded-md bg-danger-500/10 px-3 py-2 text-sm text-danger-500">
+        <p
+          role="alert"
+          className="rounded-md bg-danger-500/10 px-3 py-2 text-sm text-status-danger"
+        >
           {error}
         </p>
       )}
       <div className="panel overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">
+          <thead className="bg-surface-sunken text-left text-xs uppercase tracking-wide text-fg-secondary">
             <tr>
               <th className="px-3 py-2 font-medium">Shipment</th>
               <th className="px-3 py-2 font-medium">Bond #</th>
@@ -86,10 +90,10 @@ export function InBondMonitor({
               <th />
             </tr>
           </thead>
-          <tbody className="divide-y divide-ink-100">
+          <tbody className="divide-y divide-border-default">
             {data.rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-3 py-5 text-ink-500">
+                <td colSpan={8} className="px-3 py-5 text-fg-secondary">
                   No bonded moves yet. An ACE in-bond shipment opens one on its own; add one below
                   for an external shipment.
                 </td>
@@ -109,7 +113,8 @@ export function InBondMonitor({
                   onArrival={() => sendArrival.mutate({ id: r.id })}
                   onExport={() => sendExport.mutate({ id: r.id })}
                   onCancel={() => {
-                    const reason = window.prompt("Reason for cancelling this in-bond move?") ?? undefined;
+                    const reason =
+                      window.prompt("Reason for cancelling this in-bond move?") ?? undefined;
                     cancel.mutate({ id: r.id, reason: reason || undefined });
                   }}
                   onStatus={() => requestStatus.mutate({ id: r.id })}
@@ -168,15 +173,23 @@ function RecordRow({
     <>
       <tr>
         <td className="px-3 py-2">
-          <button className="font-mono text-xs hover:underline" onClick={onToggle} aria-expanded={expanded}>
+          <button
+            className="font-mono text-xs hover:underline"
+            onClick={onToggle}
+            aria-expanded={expanded}
+          >
             {r.controlNumber ?? "—"}
           </button>
-          <div className="text-[11px] text-ink-500">
+          <div className="text-[11px] text-fg-secondary">
             {r.regime}
-            {r.external ? ` · external${r.originatingCarrierCode ? ` (${r.originatingCarrierCode})` : ""}` : " · ours"}
+            {r.external
+              ? ` · external${r.originatingCarrierCode ? ` (${r.originatingCarrierCode})` : ""}`
+              : " · ours"}
           </div>
         </td>
-        <td className="px-3 py-2 font-mono text-xs">{r.bondNumber ?? <span className="text-ink-300">pending</span>}</td>
+        <td className="px-3 py-2 font-mono text-xs">
+          {r.bondNumber ?? <span className="text-fg-secondary/60">pending</span>}
+        </td>
         <td className="px-3 py-2 font-mono text-xs">{r.entryType}</td>
         <td className="px-3 py-2 font-mono text-xs">
           {r.arrivalPortCode ?? "—"} → {r.exportPortCode ?? "—"}
@@ -185,7 +198,7 @@ function RecordRow({
         <td className="px-3 py-2">
           <Badge variant={STATUS_VARIANT[r.status]}>{IN_BOND_STATUS_LABELS[r.status]}</Badge>
         </td>
-        <td className="px-3 py-2 text-xs text-ink-500">{fmt(r.lastStatusCheckedAt)}</td>
+        <td className="px-3 py-2 text-xs text-fg-secondary">{fmt(r.lastStatusCheckedAt)}</td>
         <td className="px-3 py-2 text-right whitespace-nowrap">
           {canWrite && live && (
             <span className="inline-flex gap-2 text-xs">
@@ -207,7 +220,11 @@ function RecordRow({
               <button className="hover:underline" onClick={onEdit}>
                 Edit
               </button>
-              <button className="text-danger-500 hover:underline" disabled={busy} onClick={onCancel}>
+              <button
+                className="text-status-danger hover:underline"
+                disabled={busy}
+                onClick={onCancel}
+              >
                 Cancel
               </button>
             </span>
@@ -216,7 +233,7 @@ function RecordRow({
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={8} className="bg-ink-50/60 px-3 py-3">
+          <td colSpan={8} className="bg-surface-sunken/60 px-3 py-3">
             <EventDrawer id={r.id} canWrite={canWrite} />
           </td>
         </tr>
@@ -258,15 +275,21 @@ function EventDrawer({ id, canWrite }: { id: string; canWrite: boolean }) {
   };
   return (
     <div className="space-y-2" aria-label="In-bond events">
-      {isLoading && <p className="text-xs text-ink-500">Loading…</p>}
-      {data?.length === 0 && <p className="text-xs text-ink-500">Nothing sent or received yet.</p>}
+      {isLoading && <p className="text-xs text-fg-secondary">Loading…</p>}
+      {data?.length === 0 && (
+        <p className="text-xs text-fg-secondary">Nothing sent or received yet.</p>
+      )}
       <ol className="space-y-1.5 text-sm">
         {data?.map((e) => (
           <li key={e.id} className="flex gap-3">
-            <span className="font-mono text-xs text-ink-500">{fmt(e.occurredAt)}</span>
+            <span className="font-mono text-xs text-fg-secondary">{fmt(e.occurredAt)}</span>
             <span>{describe(e)}</span>
-            <span className="text-xs text-ink-500">
-              {e.actorType === "customs_api" ? "Customs" : e.actorType === "system" ? "System" : (e.actorName ?? "User")}
+            <span className="text-xs text-fg-secondary">
+              {e.actorType === "customs_api"
+                ? "Customs"
+                : e.actorType === "system"
+                  ? "System"
+                  : (e.actorName ?? "User")}
             </span>
           </li>
         ))}
@@ -279,7 +302,12 @@ function EventDrawer({ id, canWrite }: { id: string; canWrite: boolean }) {
             if (body.trim()) addNote.mutate({ id, body: body.trim() });
           }}
         >
-          <Input aria-label="Add in-bond note" value={body} onChange={(e) => setBody(e.target.value)} placeholder="Add a note…" />
+          <Input
+            aria-label="Add in-bond note"
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            placeholder="Add a note…"
+          />
           <Button type="submit" variant="secondary" disabled={addNote.isPending || !body.trim()}>
             Post
           </Button>
@@ -326,13 +354,18 @@ function RecordForm({
   };
   const create = useMutation(trpc.inbond.records.create.mutationOptions(settle));
   const update = useMutation(trpc.inbond.records.update.mutationOptions(settle));
-  const regime = (parent.startsWith("s:") ? shipments : externalShipments).find((o) => `${parent[0]}:${o.id}` === parent)?.regime ?? record?.regime ?? "ACE";
+  const regime =
+    (parent.startsWith("s:") ? shipments : externalShipments).find(
+      (o) => `${parent[0]}:${o.id}` === parent,
+    )?.regime ??
+    record?.regime ??
+    "ACE";
 
   return (
     <form
       role="form"
       aria-label={record ? "Edit in-bond record" : "New in-bond record"}
-      className="panel grid grid-cols-2 gap-4 p-5"
+      className="panel grid grid-cols-1 gap-4 p-5 sm:grid-cols-2"
       onSubmit={(e: FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         const fd = new FormData(e.currentTarget);
@@ -347,7 +380,9 @@ function RecordForm({
         else
           create.mutate({
             ...fields,
-            ...(parent.startsWith("s:") ? { shipmentId: parent.slice(2) } : { externalShipmentId: parent.slice(2) }),
+            ...(parent.startsWith("s:")
+              ? { shipmentId: parent.slice(2) }
+              : { externalShipmentId: parent.slice(2) }),
           });
       }}
     >
@@ -356,7 +391,12 @@ function RecordForm({
         {record ? (
           <p className="font-mono text-sm">{record.controlNumber}</p>
         ) : (
-          <NativeSelect id="ib-parent" value={parent} onChange={(e) => setParent(e.target.value)} required>
+          <NativeSelect
+            id="ib-parent"
+            value={parent}
+            onChange={(e) => setParent(e.target.value)}
+            required
+          >
             <option value="">— select —</option>
             {shipments.length > 0 && (
               <optgroup label="Our in-bond shipments">
@@ -381,7 +421,13 @@ function RecordForm({
       </div>
       <div>
         <Label htmlFor="ib-bond">Bond number (9 digits)</Label>
-        <Input id="ib-bond" name="bondNumber" defaultValue={record?.bondNumber ?? ""} className="font-mono" disabled={!!record?.bondNumber} />
+        <Input
+          id="ib-bond"
+          name="bondNumber"
+          defaultValue={record?.bondNumber ?? ""}
+          className="font-mono"
+          disabled={!!record?.bondNumber}
+        />
       </div>
       <div>
         <Label htmlFor="ib-type">Entry type</Label>
@@ -393,19 +439,40 @@ function RecordForm({
       </div>
       <div>
         <Label htmlFor="ib-arrival">Arrival port</Label>
-        <PortPicker id="ib-arrival" regime={regime} kind={regime === "ACE" ? "port_of_entry" : "cbsa_office"} value={arrival} onSelect={setArrival} />
+        <PortPicker
+          id="ib-arrival"
+          regime={regime}
+          kind={regime === "ACE" ? "port_of_entry" : "cbsa_office"}
+          value={arrival}
+          onSelect={setArrival}
+        />
       </div>
       <div>
         <Label htmlFor="ib-export">Export / destination port</Label>
-        <PortPicker id="ib-export" regime={regime} kind={regime === "ACE" ? "in_bond_destination" : "cbsa_office"} value={exportPort} onSelect={setExportPort} />
+        <PortPicker
+          id="ib-export"
+          regime={regime}
+          kind={regime === "ACE" ? "in_bond_destination" : "cbsa_office"}
+          value={exportPort}
+          onSelect={setExportPort}
+        />
       </div>
       <div>
         <Label htmlFor="ib-firms">FIRMS code</Label>
-        <Input id="ib-firms" name="firmsCode" defaultValue={record?.firmsCode ?? ""} className="font-mono uppercase" maxLength={4} />
+        <Input
+          id="ib-firms"
+          name="firmsCode"
+          defaultValue={record?.firmsCode ?? ""}
+          className="font-mono uppercase"
+          maxLength={4}
+        />
       </div>
-      {error && <p className="col-span-2 text-sm text-danger-500">{error}</p>}
+      {error && <p className="col-span-2 text-sm text-status-danger">{error}</p>}
       <div className="col-span-2 flex gap-2">
-        <Button type="submit" disabled={create.isPending || update.isPending || (!record && !parent)}>
+        <Button
+          type="submit"
+          disabled={create.isPending || update.isPending || (!record && !parent)}
+        >
           {record ? "Save" : "Add record"}
         </Button>
         <Button type="button" variant="secondary" onClick={onClose}>

@@ -9,7 +9,12 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { SHIPMENT_SEARCH_COLUMNS, type Regime, type ShipmentSearchColumn, type ShipmentStatus } from "@corridor/domain";
+import {
+  SHIPMENT_SEARCH_COLUMNS,
+  type Regime,
+  type ShipmentSearchColumn,
+  type ShipmentStatus,
+} from "@corridor/domain";
 import { Button, Card } from "@corridor/ui";
 import { ColumnChooser } from "@/components/list/column-chooser";
 import { ListToolbar } from "@/components/list/list-toolbar";
@@ -30,7 +35,15 @@ const COLUMNS = [
 ] as const;
 type ColumnKey = (typeof COLUMNS)[number]["key"];
 const COLUMN_KEYS = COLUMNS.map((c) => c.key);
-const DEFAULT_COLUMNS: ColumnKey[] = ["controlNumber", "regime", "type", "shipper", "lines", "movement", "status"];
+const DEFAULT_COLUMNS: ColumnKey[] = [
+  "controlNumber",
+  "regime",
+  "type",
+  "shipper",
+  "lines",
+  "movement",
+  "status",
+];
 const DEFAULTS = { columns: DEFAULT_COLUMNS as string[], pageSize: 25, autoRefreshSec: 0 };
 
 const kindOf = (s: { shipmentType: string | null; cargoType: string | null }) =>
@@ -71,7 +84,9 @@ export function ShipmentsList({
     }),
     [status, regime, unassignedOnly, search, searchColumn, prefs.pageSize, page],
   );
-  const list = useQuery(trpc.shipment.list.queryOptions(input, { placeholderData: keepPreviousData }));
+  const list = useQuery(
+    trpc.shipment.list.queryOptions(input, { placeholderData: keepPreviousData }),
+  );
   const { secondsLeft } = useAutoRefresh(prefs.autoRefreshSec, () => list.refetch());
   const bulkRemove = useMutation(
     trpc.shipment.bulkRemove.mutationOptions({
@@ -148,21 +163,33 @@ export function ShipmentsList({
             : []
         }
       >
-        <ColumnChooser columns={COLUMNS} selected={visible} defaults={DEFAULT_COLUMNS} onChange={(cols) => setPrefs({ columns: cols })} />
-        <span className="text-xs text-ink-500">{list.data ? `${list.data.total} total` : ""}</span>
+        <ColumnChooser
+          columns={COLUMNS}
+          selected={visible}
+          defaults={DEFAULT_COLUMNS}
+          onChange={(cols) => setPrefs({ columns: cols })}
+        />
+        <span className="text-xs text-fg-secondary">
+          {list.data ? `${list.data.total} total` : ""}
+        </span>
       </ListToolbar>
       {notice && (
-        <p role="status" className="rounded-md bg-ink-100 px-3 py-2 text-sm">
+        <p role="status" className="rounded-md bg-surface-sunken px-3 py-2 text-sm">
           {notice}
         </p>
       )}
       <Card className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">
+          <thead className="bg-surface-sunken text-left text-xs uppercase tracking-wide text-fg-secondary">
             <tr>
               {canWrite && (
                 <th className="w-8 px-3 py-2">
-                  <input type="checkbox" aria-label="Select all on this page" checked={allOnPage} onChange={toggleAll} />
+                  <input
+                    type="checkbox"
+                    aria-label="Select all on this page"
+                    checked={allOnPage}
+                    onChange={toggleAll}
+                  />
                 </th>
               )}
               {show("controlNumber") && <th className="px-3 py-2 font-medium">Control number</th>}
@@ -176,26 +203,31 @@ export function ShipmentsList({
               {show("updated") && <th className="px-3 py-2 font-medium">Updated</th>}
             </tr>
           </thead>
-          <tbody className="divide-y divide-ink-100">
+          <tbody className="divide-y divide-border-default">
             {list.isLoading && (
               <tr>
-                <td colSpan={10} className="px-3 py-6 text-ink-500">
+                <td colSpan={10} className="px-3 py-6 text-fg-secondary">
                   Loading…
                 </td>
               </tr>
             )}
             {!list.isLoading && rows.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-3 py-6 text-ink-500">
+                <td colSpan={10} className="px-3 py-6 text-fg-secondary">
                   No shipments match these filters.
                 </td>
               </tr>
             )}
             {rows.map((s) => (
-              <tr key={s.id} className={selected.has(s.id) ? "bg-ink-50" : undefined}>
+              <tr key={s.id} className={selected.has(s.id) ? "bg-surface-sunken" : undefined}>
                 {canWrite && (
                   <td className="px-3 py-2">
-                    <input type="checkbox" aria-label={`Select ${s.controlNumber}`} checked={selected.has(s.id)} onChange={() => toggle(s.id)} />
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${s.controlNumber}`}
+                      checked={selected.has(s.id)}
+                      onChange={() => toggle(s.id)}
+                    />
                   </td>
                 )}
                 {show("controlNumber") && (
@@ -203,13 +235,17 @@ export function ShipmentsList({
                     <Link href={`/shipments/${s.id}`} className="hover:underline">
                       {s.controlNumber}
                     </Link>
-                    {s.isPars && <span className="ml-2 text-[10px] uppercase text-ink-500">PARS</span>}
+                    {s.isPars && (
+                      <span className="ml-2 text-[10px] uppercase text-fg-secondary">PARS</span>
+                    )}
                   </td>
                 )}
                 {show("regime") && <td className="px-3 py-2 font-mono text-xs">{s.regime}</td>}
                 {show("type") && <td className="px-3 py-2 capitalize">{kindOf(s)}</td>}
                 {show("shipper") && <td className="px-3 py-2">{s.shipperName ?? "—"}</td>}
-                {show("lines") && <td className="px-3 py-2 text-right font-mono">{s.commodityCount}</td>}
+                {show("lines") && (
+                  <td className="px-3 py-2 text-right font-mono">{s.commodityCount}</td>
+                )}
                 {show("movement") && (
                   <td className="px-3 py-2 font-mono text-xs">
                     {s.movementId ? (
@@ -217,15 +253,22 @@ export function ShipmentsList({
                         {s.movementNumber}
                       </Link>
                     ) : (
-                      <span className="text-ink-500">unassigned</span>
+                      <span className="text-fg-secondary">unassigned</span>
                     )}
                   </td>
                 )}
-                {show("status") && <td className="px-3 py-2 capitalize">{s.status.replace(/_/g, " ")}</td>}
-                {show("entryNumber") && <td className="px-3 py-2 font-mono text-xs">{s.entryNumber ?? "—"}</td>}
+                {show("status") && (
+                  <td className="px-3 py-2 capitalize">{s.status.replace(/_/g, " ")}</td>
+                )}
+                {show("entryNumber") && (
+                  <td className="px-3 py-2 font-mono text-xs">{s.entryNumber ?? "—"}</td>
+                )}
                 {show("updated") && (
-                  <td className="px-3 py-2 text-xs text-ink-500">
-                    {new Date(s.updatedAt).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
+                  <td className="px-3 py-2 text-xs text-fg-secondary">
+                    {new Date(s.updatedAt).toLocaleString("en-CA", {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    })}
                   </td>
                 )}
               </tr>
@@ -233,15 +276,25 @@ export function ShipmentsList({
           </tbody>
         </table>
         {pageCount > 1 && (
-          <div className="flex items-center justify-between border-t border-ink-100 px-3 py-2 text-xs text-ink-500">
+          <div className="flex items-center justify-between border-t border-border-default px-3 py-2 text-xs text-fg-secondary">
             <span>
               Page {page + 1} of {pageCount}
             </span>
             <span className="flex gap-2">
-              <Button variant="ghost" size="xs" disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
+              <Button
+                variant="ghost"
+                size="xs"
+                disabled={page === 0}
+                onClick={() => setPage((p) => p - 1)}
+              >
                 Previous
               </Button>
-              <Button variant="ghost" size="xs" disabled={page + 1 >= pageCount} onClick={() => setPage((p) => p + 1)}>
+              <Button
+                variant="ghost"
+                size="xs"
+                disabled={page + 1 >= pageCount}
+                onClick={() => setPage((p) => p + 1)}
+              >
                 Next
               </Button>
             </span>

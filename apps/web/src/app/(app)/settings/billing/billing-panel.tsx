@@ -31,12 +31,12 @@ function UsageTable({ usage }: { usage: Usage }) {
     <section className="panel p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="font-medium">Usage this period</h2>
-        <span className="text-sm text-ink-500">{periodLabel}</span>
+        <span className="text-sm text-fg-secondary">{periodLabel}</span>
       </div>
       <div className="mt-3 overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="text-left text-xs uppercase tracking-wide text-ink-500">
-            <tr className="border-b border-ink-100">
+          <thead className="text-left text-xs uppercase tracking-wide text-fg-secondary">
+            <tr className="border-b border-border-default">
               <th className="py-2 pr-4 font-medium">Metric</th>
               <th className="py-2 pr-4 text-right font-medium">Used</th>
               <th className="py-2 pr-4 text-right font-medium">Included</th>
@@ -44,20 +44,20 @@ function UsageTable({ usage }: { usage: Usage }) {
               <th className="py-2 text-right font-medium">Projected</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-ink-100">
+          <tbody className="divide-y divide-border-default">
             {rows.map((row) => (
               <tr key={row.label}>
                 <td className="py-2 pr-4">
                   {row.label}
                   {row.included !== null && row.unitUsd > 0 && (
-                    <span className="text-ink-500">
+                    <span className="text-fg-secondary">
                       {" "}
                       · {usd(row.unitUsd)} {row.unit}
                     </span>
                   )}
                 </td>
                 <td className="py-2 pr-4 text-right tabular-nums">{count(row.used)}</td>
-                <td className="py-2 pr-4 text-right tabular-nums text-ink-500">
+                <td className="py-2 pr-4 text-right tabular-nums text-fg-secondary">
                   {row.included === null ? "Unlimited" : count(row.included)}
                 </td>
                 <td className="py-2 pr-4 text-right tabular-nums">
@@ -72,14 +72,14 @@ function UsageTable({ usage }: { usage: Usage }) {
         </table>
       </div>
       <div className="mt-3 flex flex-wrap items-baseline justify-between gap-2 text-sm">
-        <span className="text-ink-500">
+        <span className="text-fg-secondary">
           {count(usage.totals.movements_transmitted)} manifests transmitted ·{" "}
           {count(usage.totals.ai_suggestions)} AI suggestions (not charged)
         </span>
         <span className="font-medium">
           Projected overage {usd(usage.projectedOverageUsd)}
           {usage.projectedOverageUsd === 0 && (
-            <span className="font-normal text-ink-500"> — within plan</span>
+            <span className="font-normal text-fg-secondary"> — within plan</span>
           )}
         </span>
       </div>
@@ -118,21 +118,23 @@ export function BillingPanel({
 
   return (
     <div className="space-y-6">
-      {notice && <p className="rounded-md bg-ok-500/10 px-3 py-2 text-sm text-ok-500">{notice}</p>}
+      {notice && (
+        <p className="rounded-md bg-ok-500/10 px-3 py-2 text-sm text-status-ok">{notice}</p>
+      )}
 
       <section className="panel flex flex-wrap items-center justify-between gap-4 p-5">
         <div>
-          <div className="text-xs font-medium uppercase tracking-wide text-ink-500">
+          <div className="text-xs font-medium uppercase tracking-wide text-fg-secondary">
             Current plan
           </div>
           <div className="mt-1 text-2xl font-semibold capitalize">
             {status.plan}{" "}
-            <span className="text-base font-normal text-ink-500">
+            <span className="text-base font-normal text-fg-secondary">
               · {status.status.replace("_", " ")}
             </span>
           </div>
           {status.subscription?.currentPeriodEnd && (
-            <div className="text-sm text-ink-500">
+            <div className="text-sm text-fg-secondary">
               {status.subscription.cancelAtPeriodEnd ? "Ends" : "Renews"}{" "}
               {new Date(status.subscription.currentPeriodEnd).toLocaleDateString("en-CA", {
                 dateStyle: "medium",
@@ -160,16 +162,16 @@ export function BillingPanel({
           return (
             <div
               key={p.plan}
-              className={`panel flex flex-col p-5 ${current ? "border-ink-950" : ""}`}
+              className={`panel flex flex-col p-5 ${current ? "border-accent" : ""}`}
             >
               <div className="flex items-baseline justify-between">
                 <h2 className="font-medium">{p.name}</h2>
                 <span className="text-lg font-semibold">
                   ${p.monthlyUsd}
-                  <span className="text-xs font-normal text-ink-500">/mo</span>
+                  <span className="text-xs font-normal text-fg-secondary">/mo</span>
                 </span>
               </div>
-              <ul className="mt-3 flex-1 space-y-1 text-sm text-ink-700">
+              <ul className="mt-3 flex-1 space-y-1 text-sm text-fg-primary">
                 {p.features.map((f) => (
                   <li key={f}>· {f}</li>
                 ))}
@@ -188,7 +190,7 @@ export function BillingPanel({
         })}
       </section>
       {(checkout.error || portal.error) && (
-        <p className="text-sm text-danger-500">
+        <p className="text-sm text-status-danger">
           {checkout.error?.message ?? portal.error?.message}
         </p>
       )}

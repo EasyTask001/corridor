@@ -91,7 +91,7 @@ export function SsoForm({ plan, initial }: { plan: SubscriptionPlan; initial: Ss
           <h2 className="text-lg font-semibold">Single sign-on (SAML)</h2>
           <Badge variant="solid">Enterprise</Badge>
         </header>
-        <p className="text-sm text-ink-500">
+        <p className="text-sm text-fg-secondary">
           Let your team sign in with your identity provider (Okta, Entra ID, Google Workspace) and
           switch off passwords for your domains. Configuring it needs the Enterprise plan.
         </p>
@@ -110,12 +110,12 @@ export function SsoForm({ plan, initial }: { plan: SubscriptionPlan; initial: Ss
                 ? " Password sign-in is refused for those domains until you remove it."
                 : ""}
             </Alert>
-            {remove.error && <p className="text-sm text-danger-500">{remove.error.message}</p>}
-            {saved && <p className="text-sm text-ok-500">{saved}</p>}
+            {remove.error && <p className="text-sm text-status-danger">{remove.error.message}</p>}
+            {saved && <p className="text-sm text-status-ok">{saved}</p>}
             {removeButton}
           </>
         )}
-        <Link href="/settings/billing" className="text-sm font-medium text-ink-950 underline">
+        <Link href="/settings/billing" className="text-sm font-medium text-fg-primary underline">
           Compare plans
         </Link>
       </section>
@@ -141,7 +141,7 @@ export function SsoForm({ plan, initial }: { plan: SubscriptionPlan; initial: Ss
         <h2 className="text-lg font-semibold">Single sign-on (SAML)</h2>
         <StatusBadge config={config} />
       </header>
-      <p className="text-sm text-ink-500">
+      <p className="text-sm text-fg-secondary">
         Register your identity provider&apos;s metadata and the email domains it owns. Corridor
         never sees the SAML assertion — your IdP posts it straight to Supabase Auth.
       </p>
@@ -155,11 +155,11 @@ export function SsoForm({ plan, initial }: { plan: SubscriptionPlan; initial: Ss
 
       {config && (
         <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-          <dt className="text-ink-500">Provider</dt>
+          <dt className="text-fg-secondary">Provider</dt>
           <dd className="font-mono text-xs">{config.providerId}</dd>
-          <dt className="text-ink-500">Domains</dt>
+          <dt className="text-fg-secondary">Domains</dt>
           <dd>{config.domains.join(", ")}</dd>
-          <dt className="text-ink-500">Password sign-in</dt>
+          <dt className="text-fg-secondary">Password sign-in</dt>
           <dd>
             {config.enforced
               ? "Refused for these domains — sign-in and sign-up both require SSO"
@@ -177,7 +177,7 @@ export function SsoForm({ plan, initial }: { plan: SubscriptionPlan; initial: Ss
             placeholder="https://idp.example.com/app/metadata"
             onChange={(event) => setMetadataUrl(event.target.value)}
           />
-          <p className="mt-1 text-xs text-ink-500">
+          <p className="mt-1 text-xs text-fg-secondary">
             Or paste the metadata XML below — one or the other, not both.
           </p>
         </div>
@@ -210,18 +210,18 @@ export function SsoForm({ plan, initial }: { plan: SubscriptionPlan; initial: Ss
             type="checkbox"
             checked={enforced}
             onChange={(event) => setEnforced(event.target.checked)}
-            className="size-4 rounded border-ink-100"
+            className="size-4 rounded border-border-default"
           />
           Require SSO — refuse password sign-in and sign-up for these domains
         </label>
-        <p className="-mt-2 text-xs text-ink-500">
+        <p className="-mt-2 text-xs text-fg-secondary">
           Enforcement applies to new sign-ins; people already signed in keep their session until it
           expires.
         </p>
 
-        {configure.error && <p className="text-sm text-danger-500">{configure.error.message}</p>}
-        {remove.error && <p className="text-sm text-danger-500">{remove.error.message}</p>}
-        {saved && <p className="text-sm text-ok-500">{saved}</p>}
+        {configure.error && <p className="text-sm text-status-danger">{configure.error.message}</p>}
+        {remove.error && <p className="text-sm text-status-danger">{remove.error.message}</p>}
+        {saved && <p className="text-sm text-status-ok">{saved}</p>}
 
         <div className="flex gap-3">
           <Button type="submit" disabled={configure.isPending}>

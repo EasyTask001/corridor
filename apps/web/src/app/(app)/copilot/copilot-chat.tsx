@@ -37,14 +37,16 @@ function CitationList({
   }
   const dedupedRegulations = [...byDocument.values()].sort((a, b) => b.similarity - a.similarity);
   return (
-    <div className="mt-2 space-y-1.5 border-t border-ink-100 pt-2">
-      <div className="text-[11px] font-medium uppercase tracking-wide text-ink-500">Sources</div>
+    <div className="mt-2 space-y-1.5 border-t border-border-default pt-2">
+      <div className="text-[11px] font-medium uppercase tracking-wide text-fg-secondary">
+        Sources
+      </div>
       {dedupedRegulations.map((r) => (
         <div
           key={`${r.regulationDocumentId}-${r.content.slice(0, 20)}`}
-          className="text-xs text-ink-500"
+          className="text-xs text-fg-secondary"
         >
-          <span className="rounded bg-ink-100 px-1.5 py-0.5 font-mono text-[10px] text-ink-700">
+          <span className="rounded bg-surface-sunken px-1.5 py-0.5 font-mono text-[10px] text-fg-primary">
             {r.jurisdiction}
           </span>{" "}
           {r.url ? (
@@ -52,21 +54,21 @@ function CitationList({
               href={r.url}
               target="_blank"
               rel="noreferrer"
-              className="font-medium text-ink-950 hover:underline"
+              className="font-medium text-fg-primary hover:underline"
             >
               {r.source} — {r.title}
             </a>
           ) : (
-            <span className="font-medium text-ink-950">
+            <span className="font-medium text-fg-primary">
               {r.source} — {r.title}
             </span>
           )}{" "}
-          <span className="text-ink-300">({Math.round(r.similarity * 100)}% match)</span>
+          <span className="text-fg-secondary/60">({Math.round(r.similarity * 100)}% match)</span>
         </div>
       ))}
       {orgKnowledge.map((k) => (
-        <div key={k.id} className="text-xs text-ink-500">
-          <span className="rounded bg-signal-500/10 px-1.5 py-0.5 font-mono text-[10px] text-signal-600">
+        <div key={k.id} className="text-xs text-fg-secondary">
+          <span className="rounded bg-signal-500/10 px-1.5 py-0.5 font-mono text-[10px] text-status-signal">
             your org
           </span>{" "}
           <span className="italic">{k.content}</span>
@@ -100,17 +102,17 @@ export function CopilotChat({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {!regulationsIngested && (
-        <p className="mb-3 rounded-md bg-warn-500/10 px-3 py-2 text-sm text-warn-500">
+        <p className="mb-3 rounded-md bg-warn-500/10 px-3 py-2 text-sm text-status-warn">
           No regulations have been ingested yet — answers will rely only on tool lookups and
           organization notes. Run the ingestion step (part of <code>pnpm db:seed</code>) to enable
           citations.
         </p>
       )}
 
-      <div className="flex-1 space-y-4 overflow-y-auto rounded-lg border border-ink-100 bg-white p-4">
+      <div className="flex-1 space-y-4 overflow-y-auto rounded-lg border border-border-default bg-surface-raised p-4">
         {messages.length === 0 && (
           <div className="space-y-3">
-            <p className="text-sm text-ink-500">
+            <p className="text-sm text-fg-secondary">
               Ask about crossing requirements, a specific movement, a driver&apos;s documents, or an
               HS code.{" "}
               {regulationsIngested && `${regulationCount} regulation summaries are indexed.`}
@@ -146,7 +148,7 @@ export function CopilotChat({
             >
               <div
                 data-message-role={m.role}
-                className={`max-w-[80%] rounded-lg px-4 py-2.5 text-sm ${m.role === "user" ? "bg-ink-950 text-white" : "bg-ink-50 text-ink-950"}`}
+                className={`max-w-[80%] rounded-lg px-4 py-2.5 text-sm ${m.role === "user" ? "bg-accent text-accent-fg" : "bg-surface-sunken text-fg-primary"}`}
               >
                 {m.parts.map((p, i) =>
                   p.type === "text" ? (
@@ -156,7 +158,7 @@ export function CopilotChat({
                   ) : p.type.startsWith("tool-") ? (
                     <div
                       key={i}
-                      className="mt-1 rounded bg-ink-100/60 px-2 py-1 font-mono text-[11px] text-ink-500"
+                      className="mt-1 rounded bg-surface-sunken/60 px-2 py-1 font-mono text-[11px] text-fg-secondary"
                     >
                       🔧 {p.type.replace("tool-", "")}
                       {"state" in p && p.state === "output-available" ? " — done" : "…"}
@@ -173,7 +175,7 @@ export function CopilotChat({
             </div>
           );
         })}
-        {busy && <p className="text-xs text-ink-300">Thinking…</p>}
+        {busy && <p className="text-xs text-fg-secondary/60">Thinking…</p>}
       </div>
 
       <form

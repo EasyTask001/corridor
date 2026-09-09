@@ -27,13 +27,13 @@ export default async function InBondPage({
   ]);
 
   const chip = (active: boolean) =>
-    `rounded-full border px-3 py-1 text-xs ${active ? "border-ink-950 bg-ink-950 text-white" : "border-ink-100 bg-white text-ink-700 hover:bg-ink-50"}`;
+    `rounded-full border px-3 py-1 text-xs ${active ? "border-accent bg-accent text-accent-fg" : "border-border-default bg-surface-raised text-fg-primary hover:bg-surface-sunken"}`;
 
   return (
     <div className="space-y-4">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">In-bond</h1>
-        <p className="text-sm text-ink-500">
+        <p className="text-sm text-fg-secondary">
           Bonded moves (IT / TE / IE) from arrival to export, for our shipments and for goods
           another carrier filed.
         </p>
@@ -55,7 +55,11 @@ export default async function InBondPage({
             .map((s) => ({ id: s.id, label: s.controlNumber, regime: s.regime }))}
           externalShipments={external.rows
             .filter((x) => x.status === "open" && !x.recordId)
-            .map((x) => ({ id: x.id, label: x.controlNumber ?? x.inBondNumber ?? "", regime: x.regime }))}
+            .map((x) => ({
+              id: x.id,
+              label: x.controlNumber ?? x.inBondNumber ?? "",
+              regime: x.regime,
+            }))}
         />
       ) : (
         <ExternalShipments initial={external} canWrite={canWrite} />

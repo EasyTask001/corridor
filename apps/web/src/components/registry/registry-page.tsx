@@ -22,6 +22,7 @@ import {
   Textarea,
   type DataTableColumnDef,
 } from "@corridor/ui";
+import { X } from "lucide-react";
 import { useTRPC } from "@/lib/trpc/client";
 import { RecordHistoryDialog } from "@/components/record-history";
 import { ColumnChooser } from "@/components/list/column-chooser";
@@ -77,7 +78,8 @@ function formToPayload(form: HTMLFormElement, fields: FieldDef[]) {
       for (let i = 0; i < (f.max ?? 10); i++) {
         if (!fd.has(`${f.name}.${i}.${f.fields?.[0]?.name}`)) continue;
         const row: Record<string, unknown> = {};
-        for (const sub of f.fields ?? []) row[sub.name] = scalarValue(fd, `${f.name}.${i}.${sub.name}`, sub);
+        for (const sub of f.fields ?? [])
+          row[sub.name] = scalarValue(fd, `${f.name}.${i}.${sub.name}`, sub);
         if (Object.values(row).some((v) => v !== null && v !== "")) rows.push(row);
       }
       out[f.name] = rows;
@@ -96,17 +98,17 @@ function formToPayload(form: HTMLFormElement, fields: FieldDef[]) {
 }
 
 export function ExpiryChip({ value }: { value: unknown }) {
-  if (!value) return <span className="text-ink-300">—</span>;
+  if (!value) return <span className="text-fg-secondary/60">—</span>;
   const iso = String(value).slice(0, 10);
   const days = daysBetween(todayIso(), iso);
   const cls =
     days < 0
-      ? "bg-danger-500/10 text-danger-500"
+      ? "bg-danger-500/10 text-status-danger"
       : days <= 14
-        ? "bg-danger-500/10 text-danger-500"
+        ? "bg-danger-500/10 text-status-danger"
         : days <= 60
-          ? "bg-warn-500/10 text-warn-500"
-          : "text-ink-700";
+          ? "bg-warn-500/10 text-status-warn"
+          : "text-fg-primary";
   const hint = days < 0 ? `${-days}d overdue` : days <= 60 ? `${days}d` : "";
   return (
     <span
@@ -145,7 +147,7 @@ function renderCell(cfg: RegistryConfig, r: Row, key: string): ReactNode {
         return (
           <span>
             <span className="font-mono text-xs">{String(v ?? "")}</span>
-            <span className="ml-1.5 text-xs text-ink-500">
+            <span className="ml-1.5 text-xs text-fg-secondary">
               {EQUIPMENT_TYPE_LABELS[v as EquipmentType] ?? ""}
             </span>
           </span>
@@ -176,7 +178,10 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const columnKeys = useMemo(() => cfg.columns.map((c) => c.key), [cfg]);
-  const prefDefaults = useMemo(() => ({ columns: columnKeys, pageSize: 25, autoRefreshSec: 0 }), [columnKeys]);
+  const prefDefaults = useMemo(
+    () => ({ columns: columnKeys, pageSize: 25, autoRefreshSec: 0 }),
+    [columnKeys],
+  );
   const [prefs, setPrefs] = useListPrefs(kind, prefDefaults, columnKeys);
   const [editing, setEditing] = useState<Row | "new" | null>(null);
   /** Drivers get a second tab; every other registry only has its fields. */
@@ -335,27 +340,27 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
             {canWrite && (
               <>
                 <Button
-                variant="ghost"
-                size="xs"
-                className="mr-3 px-0 py-0"
-                onClick={() => {
-                  setError(null);
-                  setTab("details");
-                  setEditing(row.original);
-                }}
-              >
-                Edit
-              </Button>
-              {row.original.status !== "archived" && (
-                <Button
                   variant="ghost"
                   size="xs"
-                  className="px-0 py-0 text-danger-500 hover:text-danger-500 hover:underline"
-                  onClick={() => archive.mutate({ id: row.original.id })}
+                  className="mr-3 px-0 py-0"
+                  onClick={() => {
+                    setError(null);
+                    setTab("details");
+                    setEditing(row.original);
+                  }}
                 >
-                  Archive
+                  Edit
                 </Button>
-              )}
+                {row.original.status !== "archived" && (
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    className="px-0 py-0 text-status-danger hover:text-status-danger hover:underline"
+                    onClick={() => archive.mutate({ id: row.original.id })}
+                  >
+                    Archive
+                  </Button>
+                )}
               </>
             )}
           </span>
@@ -370,7 +375,7 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{cfg.title}</h1>
-          <p className="text-sm text-ink-500">
+          <p className="text-sm text-fg-secondary">
             {data ? `${data.total} ${data.total === 1 ? "record" : "records"}` : " "}
           </p>
         </div>
@@ -393,7 +398,7 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
                 target="_blank"
                 rel="noopener"
                 data-testid="registry-export-link"
-                className="font-medium text-ink-950 underline underline-offset-2"
+                className="font-medium text-fg-primary underline underline-offset-2"
               >
                 Download {exportUrl.format.toUpperCase()}
               </a>
@@ -438,14 +443,27 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
         bulkActions={
           canWrite
             ? [
-                { label: "Activate selected", onClick: () => bulkStatus.mutate({ ids: [...selected], status: "active" }), disabled: bulkStatus.isPending },
-                { label: "Deactivate selected", onClick: () => bulkStatus.mutate({ ids: [...selected], status: "inactive" }), disabled: bulkStatus.isPending },
-                { label: "Archive selected", tone: "danger", onClick: () => bulkStatus.mutate({ ids: [...selected], status: "archived" }), disabled: bulkStatus.isPending },
+                {
+                  label: "Activate selected",
+                  onClick: () => bulkStatus.mutate({ ids: [...selected], status: "active" }),
+                  disabled: bulkStatus.isPending,
+                },
+                {
+                  label: "Deactivate selected",
+                  onClick: () => bulkStatus.mutate({ ids: [...selected], status: "inactive" }),
+                  disabled: bulkStatus.isPending,
+                },
+                {
+                  label: "Archive selected",
+                  tone: "danger",
+                  onClick: () => bulkStatus.mutate({ ids: [...selected], status: "archived" }),
+                  disabled: bulkStatus.isPending,
+                },
               ]
             : []
         }
       >
-        <label className="flex items-center gap-1.5 text-xs text-ink-500">
+        <label className="flex items-center gap-1.5 text-xs text-fg-secondary">
           <input
             type="checkbox"
             checked={includeArchived}
@@ -456,7 +474,12 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
           />
           Show archived
         </label>
-        <ColumnChooser columns={cfg.columns} selected={prefs.columns} defaults={columnKeys} onChange={(cols) => setPrefs({ columns: cols })} />
+        <ColumnChooser
+          columns={cfg.columns}
+          selected={prefs.columns}
+          defaults={columnKeys}
+          onChange={(cols) => setPrefs({ columns: cols })}
+        />
       </ListToolbar>
 
       <Card className="overflow-x-auto">
@@ -476,20 +499,33 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
 
       {editing && (
         <div
-          className="fixed inset-0 z-40 flex justify-end bg-ink-950/40"
+          className="fixed inset-0 z-40 flex justify-end bg-ink-950/50 backdrop-blur-[2px]"
           onClick={() => setEditing(null)}
         >
           <form
             role="dialog"
+            aria-modal="true"
             aria-label={editing === "new" ? `New ${cfg.singular}` : `Edit ${cfg.singular}`}
             onClick={(e) => e.stopPropagation()}
             onSubmit={submit}
-            className="flex h-full w-full max-w-xl flex-col overflow-y-auto bg-white shadow-xl"
+            className="flex h-full w-full max-w-xl flex-col overflow-y-auto bg-surface-overlay shadow-xl"
           >
-            <div className="border-b border-ink-100 px-6 py-4">
-              <h2 className="text-lg font-semibold">
-                {editing === "new" ? `New ${cfg.singular.toLowerCase()}` : cfg.displayName(editing)}
-              </h2>
+            <div className="border-b border-border-default px-4 py-4 sm:px-6">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-lg font-semibold">
+                  {editing === "new"
+                    ? `New ${cfg.singular.toLowerCase()}`
+                    : cfg.displayName(editing)}
+                </h2>
+                <button
+                  type="button"
+                  aria-label={`Close ${cfg.singular.toLowerCase()} editor`}
+                  className="inline-flex size-11 shrink-0 items-center justify-center rounded-lg text-fg-secondary transition-colors hover:bg-surface-subtle hover:text-fg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:size-9"
+                  onClick={() => setEditing(null)}
+                >
+                  <X className="size-5" aria-hidden="true" />
+                </button>
+              </div>
               {/* Travel documents hang off a saved driver, so the tab only
                   appears once there is a driver id to hang them on. */}
               {kind === "drivers" && editing !== "new" && (
@@ -502,8 +538,8 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
                       className={cn(
                         "border-b-2 pb-1",
                         tab === t
-                          ? "border-ink-900 font-medium"
-                          : "border-transparent text-ink-500",
+                          ? "border-accent font-medium"
+                          : "border-transparent text-fg-secondary",
                       )}
                     >
                       {t === "details" ? "Details" : "Travel documents"}
@@ -517,71 +553,71 @@ export function RegistryPage({ kind, canWrite }: { kind: RegistryKind; canWrite:
                 <DriverDocumentsPanel driverId={editing.id} canWrite={canWrite} />
               </div>
             ) : (
-            <div className="grid flex-1 grid-cols-2 gap-4 px-6 py-5">
-              {cfg.fields.map((f) => {
-                const id = `${kind}-${f.name}`;
-                const initial = editing === "new" ? "" : (getPath(editing, f.name) ?? "");
-                if (f.type === "repeater") {
+              <div className="grid flex-1 grid-cols-1 gap-4 px-4 py-5 sm:grid-cols-2 sm:px-6">
+                {cfg.fields.map((f) => {
+                  const id = `${kind}-${f.name}`;
+                  const initial = editing === "new" ? "" : (getPath(editing, f.name) ?? "");
+                  if (f.type === "repeater") {
+                    return (
+                      <Repeater
+                        key={f.name}
+                        idPrefix={id}
+                        field={f}
+                        initial={
+                          Array.isArray(initial) ? (initial as Record<string, unknown>[]) : []
+                        }
+                      />
+                    );
+                  }
+                  const value =
+                    f.type === "date" && initial ? String(initial).slice(0, 10) : String(initial);
+                  const cls = cn(f.mono && "font-mono", f.uppercase && "uppercase");
+                  const options = optionsFor(f);
                   return (
-                    <Repeater
-                      key={f.name}
-                      idPrefix={id}
-                      field={f}
-                      initial={
-                        Array.isArray(initial) ? (initial as Record<string, unknown>[]) : []
-                      }
-                    />
+                    <div key={f.name} className={f.span === 2 ? "sm:col-span-2" : ""}>
+                      <Label htmlFor={id}>
+                        {f.label}
+                        {f.required && <span className="text-status-danger"> *</span>}
+                      </Label>
+                      {f.type === "select" || f.type === "boolean" ? (
+                        <NativeSelect
+                          id={id}
+                          name={f.name}
+                          defaultValue={value || options[0]?.value}
+                          className={cls}
+                        >
+                          {options.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </NativeSelect>
+                      ) : f.type === "textarea" ? (
+                        <Textarea
+                          id={id}
+                          name={f.name}
+                          defaultValue={value}
+                          rows={3}
+                          className={cls}
+                        />
+                      ) : (
+                        <Input
+                          id={id}
+                          name={f.name}
+                          type={f.type ?? "text"}
+                          defaultValue={value}
+                          required={f.required}
+                          placeholder={f.placeholder}
+                          className={cls}
+                        />
+                      )}
+                    </div>
                   );
-                }
-                const value =
-                  f.type === "date" && initial ? String(initial).slice(0, 10) : String(initial);
-                const cls = cn(f.mono && "font-mono", f.uppercase && "uppercase");
-                const options = optionsFor(f);
-                return (
-                  <div key={f.name} className={f.span === 2 ? "col-span-2" : ""}>
-                    <Label htmlFor={id}>
-                      {f.label}
-                      {f.required && <span className="text-danger-500"> *</span>}
-                    </Label>
-                    {f.type === "select" || f.type === "boolean" ? (
-                      <NativeSelect
-                        id={id}
-                        name={f.name}
-                        defaultValue={value || options[0]?.value}
-                        className={cls}
-                      >
-                        {options.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </NativeSelect>
-                    ) : f.type === "textarea" ? (
-                      <Textarea
-                        id={id}
-                        name={f.name}
-                        defaultValue={value}
-                        rows={3}
-                        className={cls}
-                      />
-                    ) : (
-                      <Input
-                        id={id}
-                        name={f.name}
-                        type={f.type ?? "text"}
-                        defaultValue={value}
-                        required={f.required}
-                        placeholder={f.placeholder}
-                        className={cls}
-                      />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                })}
+              </div>
             )}
-            <div className="flex items-center justify-between gap-3 border-t border-ink-100 px-6 py-4">
-              <p className="text-sm text-danger-500">{error}</p>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-default px-4 py-4 sm:px-6">
+              <p className="text-sm text-status-danger">{error}</p>
               <div className="flex gap-2">
                 <Button type="button" variant="secondary" onClick={() => setEditing(null)}>
                   {tab === "documents" ? "Close" : "Cancel"}
@@ -618,10 +654,10 @@ function Repeater({
   const [count, setCount] = useState(initial.length);
   const rows = Array.from({ length: count }, (_, i) => initial[i] ?? {});
   return (
-    <fieldset className={f.span === 2 ? "col-span-2" : ""}>
-      <legend className="mb-1 block text-xs font-medium uppercase tracking-wide text-ink-500">
+    <fieldset className={f.span === 2 ? "sm:col-span-2" : ""}>
+      <legend className="mb-1 block text-xs font-medium uppercase tracking-wide text-fg-secondary">
         {f.label}
-        <span className="ml-1.5 font-normal normal-case tracking-normal text-ink-300">
+        <span className="ml-1.5 font-normal normal-case tracking-normal text-fg-secondary/60">
           {count}/{max}
         </span>
       </legend>
@@ -652,7 +688,7 @@ function Repeater({
               variant="ghost"
               size="xs"
               aria-label={`Remove ${f.label.toLowerCase()} ${i + 1}`}
-              className="mb-1.5 px-1 text-danger-500 hover:text-danger-500"
+              className="mb-1.5 px-1 text-status-danger hover:text-status-danger"
               onClick={() => setCount((c) => c - 1)}
             >
               Remove

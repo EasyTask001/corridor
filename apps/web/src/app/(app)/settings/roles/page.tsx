@@ -20,7 +20,7 @@ export default async function RolesPage() {
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Roles</h1>
-        <p className="text-sm text-ink-500">
+        <p className="text-sm text-fg-secondary">
           Create organization-specific roles without granting permissions you do not hold.
         </p>
       </header>

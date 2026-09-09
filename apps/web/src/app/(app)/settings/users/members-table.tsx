@@ -59,7 +59,7 @@ export function MembersTable({
             e.currentTarget.reset();
           }}
         >
-          <div className="min-w-64 flex-1">
+          <div className="w-full min-w-0 flex-1 sm:min-w-64">
             <label className="label" htmlFor="invite-email">
               Invite by email
             </label>
@@ -80,11 +80,13 @@ export function MembersTable({
           <button type="submit" disabled={invite.isPending} className="btn-primary">
             {invite.isPending ? "Inviting…" : "Send invite"}
           </button>
-          {invite.error && <p className="w-full text-sm text-danger-500">{invite.error.message}</p>}
+          {invite.error && (
+            <p className="w-full text-sm text-status-danger">{invite.error.message}</p>
+          )}
           {inviteLink && (
-            <p className="w-full text-sm text-ink-500">
+            <p className="w-full text-sm text-fg-secondary">
               Invite link (email delivery arrives in Phase 5):{" "}
-              <code className="rounded bg-ink-100 px-1.5 py-0.5 text-xs">{inviteLink}</code>
+              <code className="rounded bg-surface-sunken px-1.5 py-0.5 text-xs">{inviteLink}</code>
             </p>
           )}
         </form>
@@ -92,7 +94,7 @@ export function MembersTable({
 
       <div className="panel overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">
+          <thead className="bg-surface-sunken text-left text-xs uppercase tracking-wide text-fg-secondary">
             <tr>
               <th className="px-4 py-2 font-medium">Member</th>
               <th className="px-4 py-2 font-medium">Role</th>
@@ -100,7 +102,7 @@ export function MembersTable({
               {canManage && <th className="px-4 py-2" />}
             </tr>
           </thead>
-          <tbody className="divide-y divide-ink-100">
+          <tbody className="divide-y divide-border-default">
             {members.map((m) => {
               const isSelf = m.userId === currentUserId;
               return (
@@ -108,7 +110,7 @@ export function MembersTable({
                   <td className="px-4 py-2">
                     <div className="font-medium">{m.displayName ?? m.invitedEmail ?? "—"}</div>
                     {m.displayName && m.invitedEmail && (
-                      <div className="text-xs text-ink-500">{m.invitedEmail}</div>
+                      <div className="text-xs text-fg-secondary">{m.invitedEmail}</div>
                     )}
                   </td>
                   <td className="px-4 py-2">
@@ -137,7 +139,7 @@ export function MembersTable({
                     <td className="px-4 py-2 text-right">
                       {!isSelf && m.status !== "invited" && (
                         <button
-                          className="mr-3 text-xs text-ink-500 hover:text-ink-950"
+                          className="mr-3 text-xs text-fg-secondary hover:text-fg-primary"
                           onClick={() =>
                             setStatus.mutate({
                               memberId: m.id,
@@ -150,7 +152,7 @@ export function MembersTable({
                       )}
                       {!isSelf && (
                         <button
-                          className="text-xs text-danger-500 hover:underline"
+                          className="text-xs text-status-danger hover:underline"
                           onClick={() => remove.mutate({ memberId: m.id })}
                         >
                           Remove
@@ -170,9 +172,9 @@ export function MembersTable({
 
 function StatusBadge({ status }: { status: Member["status"] }) {
   const cls = {
-    active: "bg-ok-500/10 text-ok-500",
-    invited: "bg-warn-500/10 text-warn-500",
-    suspended: "bg-danger-500/10 text-danger-500",
+    active: "bg-ok-500/10 text-status-ok",
+    invited: "bg-warn-500/10 text-status-warn",
+    suspended: "bg-danger-500/10 text-status-danger",
   }[status];
   return <span className={`rounded px-2 py-0.5 text-xs font-medium ${cls}`}>{status}</span>;
 }

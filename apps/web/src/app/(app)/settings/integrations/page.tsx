@@ -20,7 +20,7 @@ export default async function IntegrationsPage() {
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Integrations</h1>
-        <p className="text-sm text-ink-500">
+        <p className="text-sm text-fg-secondary">
           Customs gateways, reference data and billing. Gateway credentials are encrypted into
           Supabase Vault on save: the fields below are write-only, the stored values are never
           returned to this page, and only the server reads them — at transmit time, in production.

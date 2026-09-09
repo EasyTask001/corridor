@@ -35,10 +35,10 @@ export function HazmatFields({
     <fieldset className="col-span-2 space-y-3 sm:col-span-3">
       <legend className="label">Dangerous goods</legend>
       {entries.length === 0 && (
-        <p className="text-sm text-ink-500">No dangerous goods declared on this line.</p>
+        <p className="text-sm text-fg-secondary">No dangerous goods declared on this line.</p>
       )}
       {entries.map((e, i) => (
-        <div key={i} className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div key={i} className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Field label={`UN code ${i + 1}`} htmlFor={`unCode-${i}`}>
             <input
               id={`unCode-${i}`}
@@ -80,7 +80,7 @@ export function HazmatFields({
               {!disabled && (
                 <button
                   type="button"
-                  className="text-xs text-danger-500 hover:underline"
+                  className="text-xs text-status-danger hover:underline"
                   onClick={() => onChange(entries.filter((_, j) => j !== i))}
                 >
                   Remove
@@ -93,7 +93,7 @@ export function HazmatFields({
       {!disabled && entries.length < MAX_HAZMAT && (
         <button
           type="button"
-          className="text-xs text-ink-500 hover:text-ink-950"
+          className="text-xs text-fg-secondary hover:text-fg-primary"
           onClick={() => onChange([...entries, emptyHazmat()])}
         >
           + Add dangerous goods

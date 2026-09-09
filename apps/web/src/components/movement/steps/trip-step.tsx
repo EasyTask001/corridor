@@ -49,7 +49,7 @@ export function TripStep() {
 
   return (
     <form
-      className="grid max-w-2xl grid-cols-2 gap-4"
+      className="grid max-w-2xl grid-cols-1 gap-4 sm:grid-cols-2"
       onSubmit={(e: FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         const fd = new FormData(e.currentTarget);
@@ -72,7 +72,7 @@ export function TripStep() {
       <Field label="Regime">
         <div className="pt-1.5">
           <RegimeBadge regime={m.regime} />
-          <span className="ml-2 text-sm text-ink-500">
+          <span className="ml-2 text-sm text-fg-secondary">
             {m.regime === "ACE" ? "US CBP (southbound)" : "Canada CBSA (northbound)"}
           </span>
         </div>
@@ -130,14 +130,9 @@ export function TripStep() {
       </Field>
       <Field label="Load">
         <label className="flex items-center gap-2 pt-1.5 text-sm">
-          <input
-            type="checkbox"
-            name="isEmpty"
-            defaultChecked={m.isEmpty}
-            disabled={!editable}
-          />
+          <input type="checkbox" name="isEmpty" defaultChecked={m.isEmpty} disabled={!editable} />
           {m.regime === "ACE" ? "Empty trailer" : "Empty trip"}
-          <span className="text-xs text-ink-500">(filed with no shipments)</span>
+          <span className="text-xs text-fg-secondary">(filed with no shipments)</span>
         </label>
       </Field>
       <Field label="Instruments of international traffic" htmlFor="iitIndicator">
@@ -158,7 +153,7 @@ export function TripStep() {
       {m.regime === "ACI" && (
         <fieldset className="col-span-2">
           <legend className="label">CBSA trip flags</legend>
-          <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+          <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 text-sm sm:grid-cols-2">
             {ACI_FLAG_KEYS.map((k) => (
               <label key={k} className="flex items-center gap-2">
                 <input type="checkbox" name={k} defaultChecked={m[k]} disabled={!editable} />

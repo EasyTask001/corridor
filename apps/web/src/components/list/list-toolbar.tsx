@@ -52,14 +52,18 @@ export function ListToolbar({
   children?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 text-sm" role="toolbar" aria-label="List tools">
-      <div className="flex items-center gap-1">
+    <div
+      className="flex flex-wrap items-center gap-2 rounded-xl border border-border-default bg-surface-raised p-2 text-sm shadow-sm"
+      role="toolbar"
+      aria-label="List tools"
+    >
+      <div className="flex w-full min-w-0 items-center gap-1 sm:w-auto">
         {searchColumns && searchColumns.length > 0 && (
           <NativeSelect
             aria-label="Match on"
             value={searchColumn ?? ""}
             onChange={(e) => onSearchColumn?.(e.target.value)}
-            className="w-40"
+            className="w-32 shrink-0 sm:w-40"
           >
             <option value="">All columns</option>
             {searchColumns.map((c) => (
@@ -74,10 +78,15 @@ export function ListToolbar({
           placeholder={searchPlaceholder}
           value={search}
           onChange={(e) => onSearch(e.target.value)}
-          className="w-64"
+          className="min-w-0 flex-1 sm:w-64"
         />
       </div>
-      <NativeSelect aria-label="Rows per page" value={String(pageSize)} onChange={(e) => onPageSize(Number(e.target.value))} className="w-28">
+      <NativeSelect
+        aria-label="Rows per page"
+        value={String(pageSize)}
+        onChange={(e) => onPageSize(Number(e.target.value))}
+        className="w-28"
+      >
         {PAGE_SIZES.map((n) => (
           <option key={n} value={n}>
             {n} rows
@@ -97,20 +106,24 @@ export function ListToolbar({
         ))}
       </NativeSelect>
       {autoRefreshSec > 0 && secondsLeft !== undefined && (
-        <span className="font-mono text-xs text-ink-500" aria-live="off">
+        <span className="font-mono text-xs text-fg-secondary" aria-live="off">
           {secondsLeft}s
         </span>
       )}
       {children}
       {selectedCount > 0 && (
-        <span className="ml-auto flex items-center gap-2 rounded-md bg-ink-100 px-2 py-1 text-xs" role="group" aria-label="Selected rows">
+        <span
+          className="flex w-full flex-wrap items-center gap-2 rounded-lg bg-surface-sunken px-2 py-1 text-xs sm:ml-auto sm:w-auto"
+          role="group"
+          aria-label="Selected rows"
+        >
           <span className="font-medium">{selectedCount} selected</span>
           {bulkActions.map((a) => (
             <Button
               key={a.label}
               variant="ghost"
               size="xs"
-              className={a.tone === "danger" ? "text-danger-500 hover:text-danger-500" : ""}
+              className={a.tone === "danger" ? "text-status-danger hover:text-status-danger" : ""}
               disabled={a.disabled}
               onClick={a.onClick}
             >

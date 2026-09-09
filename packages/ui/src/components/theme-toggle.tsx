@@ -37,11 +37,15 @@ export function ThemeToggle({ className }: { className?: string }) {
         setTheme(next);
       }}
       className={cn(
-        "inline-flex size-7 shrink-0 items-center justify-center rounded-md text-fg-secondary transition-colors hover:bg-surface-sunken hover:text-fg-primary",
+        "inline-flex size-11 shrink-0 items-center justify-center rounded-md text-fg-secondary transition-colors hover:bg-surface-sunken hover:text-fg-primary lg:size-9 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring/40",
         className,
       )}
     >
-      {theme === "dark" ? <Sun className="size-4" aria-hidden /> : <Moon className="size-4" aria-hidden />}
+      {theme === "dark" ? (
+        <Sun className="size-4" aria-hidden />
+      ) : (
+        <Moon className="size-4" aria-hidden />
+      )}
     </button>
   );
 }

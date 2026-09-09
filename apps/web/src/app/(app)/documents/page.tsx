@@ -27,7 +27,7 @@ export default async function DocumentsPage({
     <div className="space-y-4">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Documents</h1>
-        <p className="text-sm text-ink-500">
+        <p className="text-sm text-fg-secondary">
           Upload bills of lading, commercial invoices and rate confirmations. Corridor extracts the
           shipment data (
           {capabilities.extractor === "model" ? capabilities.model : "mock extractor"}), you confirm

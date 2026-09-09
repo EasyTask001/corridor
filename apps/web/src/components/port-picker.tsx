@@ -74,12 +74,12 @@ export function PortPicker({
         onBlur={() => setTimeout(() => setOpen(false), 150)}
       />
       {open && (results.data?.length ?? 0) > 0 && (
-        <ul className="absolute z-10 mt-1 max-h-56 w-full overflow-auto rounded-md border border-ink-100 bg-white text-sm shadow-lg">
+        <ul className="absolute z-10 mt-1 max-h-56 w-full overflow-auto rounded-md border border-border-default bg-surface-raised text-sm shadow-lg">
           {results.data!.map((port) => (
             <li key={port.id}>
               <button
                 type="button"
-                className="block w-full px-3 py-1.5 text-left hover:bg-ink-50"
+                className="block w-full px-3 py-1.5 text-left hover:bg-surface-sunken"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => {
                   setQuery(labelOf(port));

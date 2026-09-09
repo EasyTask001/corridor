@@ -26,7 +26,7 @@ export function CrewStep() {
     <div className="max-w-3xl space-y-4">
       <div className="panel overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">
+          <thead className="bg-surface-sunken text-left text-xs uppercase tracking-wide text-fg-secondary">
             <tr>
               <th className="px-3 py-2 font-medium">Name</th>
               <th className="px-3 py-2 font-medium">Role</th>
@@ -35,10 +35,10 @@ export function CrewStep() {
               <th />
             </tr>
           </thead>
-          <tbody className="divide-y divide-ink-100">
+          <tbody className="divide-y divide-border-default">
             {m.crew.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-3 py-5 text-ink-500">
+                <td colSpan={5} className="px-3 py-5 text-fg-secondary">
                   Nobody is on this crossing yet.
                 </td>
               </tr>
@@ -49,7 +49,7 @@ export function CrewStep() {
                   <div className="font-medium">
                     {c.firstName} {c.lastName}
                   </div>
-                  <div className="text-xs text-ink-500">
+                  <div className="text-xs text-fg-secondary">
                     {c.personType === "passenger" ? "Passenger" : "Driver"}
                     {c.citizenship ? ` · ${c.citizenship}` : ""}
                     {c.hazmatEndorsement ? " · hazmat" : ""}
@@ -99,10 +99,8 @@ export function CrewStep() {
                 <td className="px-3 py-2 text-right">
                   {editable && (
                     <button
-                      className="text-xs text-danger-500 hover:underline"
-                      onClick={() =>
-                        removeCrew.mutate({ movementId: m.id, driverId: c.driverId })
-                      }
+                      className="text-xs text-status-danger hover:underline"
+                      onClick={() => removeCrew.mutate({ movementId: m.id, driverId: c.driverId })}
                     >
                       Remove
                     </button>
@@ -119,7 +117,7 @@ export function CrewStep() {
           <Field label="Add to crew" htmlFor="addCrew">
             <select
               id="addCrew"
-              className="input w-72"
+              className="input w-full sm:w-72"
               value={adding}
               onChange={(e) => setAdding(e.target.value)}
             >

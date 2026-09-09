@@ -80,14 +80,16 @@ export function AlertsList({ canManage }: { canManage: boolean }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div className="flex gap-1 rounded-md bg-ink-100 p-0.5">
+        <div className="flex gap-1 rounded-md bg-surface-sunken p-0.5">
           {TABS.map((t, i) => (
             <button
               key={t.label}
               onClick={() => setTab(i)}
               className={cn(
                 "rounded px-3 py-1 text-sm",
-                i === tab ? "bg-white font-medium shadow-sm" : "text-ink-500 hover:text-ink-950",
+                i === tab
+                  ? "bg-surface-raised font-medium shadow-sm"
+                  : "text-fg-secondary hover:text-fg-primary",
               )}
             >
               {t.label}
@@ -101,10 +103,10 @@ export function AlertsList({ canManage }: { canManage: boolean }) {
         )}
       </div>
 
-      <div className="panel divide-y divide-ink-100">
-        {isLoading && <p className="px-5 py-6 text-sm text-ink-500">Loading…</p>}
+      <div className="panel divide-y divide-border-default">
+        {isLoading && <p className="px-5 py-6 text-sm text-fg-secondary">Loading…</p>}
         {!isLoading && data?.rows.length === 0 && (
-          <p className="px-5 py-6 text-sm text-ink-500">Nothing here — all clear.</p>
+          <p className="px-5 py-6 text-sm text-fg-secondary">Nothing here — all clear.</p>
         )}
         {data?.rows.map((a) => {
           const link = entityLink(a);
@@ -115,10 +117,12 @@ export function AlertsList({ canManage }: { canManage: boolean }) {
               </div>
               <div className="min-w-0 flex-1">
                 <div className="font-medium">{a.title}</div>
-                {a.description && <p className="mt-0.5 text-sm text-ink-500">{a.description}</p>}
-                <div className="mt-1.5 flex flex-wrap gap-x-4 text-xs text-ink-500">
+                {a.description && (
+                  <p className="mt-0.5 text-sm text-fg-secondary">{a.description}</p>
+                )}
+                <div className="mt-1.5 flex flex-wrap gap-x-4 text-xs text-fg-secondary">
                   {link && (
-                    <Link href={link.href} className="underline hover:text-ink-950">
+                    <Link href={link.href} className="underline hover:text-fg-primary">
                       {link.label}
                     </Link>
                   )}

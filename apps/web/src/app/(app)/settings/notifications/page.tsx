@@ -11,7 +11,7 @@ export default async function NotificationSettingsPage() {
     <div className="max-w-2xl space-y-4">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Notifications</h1>
-        <p className="text-sm text-ink-500">
+        <p className="text-sm text-fg-secondary">
           Choose what you get notified about and how. In-app notifications always appear in your
           bell; email is opt-in per event.
         </p>

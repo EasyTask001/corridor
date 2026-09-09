@@ -16,7 +16,7 @@ export default async function AuditPage() {
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Audit log</h1>
-        <p className="text-sm text-ink-500">
+        <p className="text-sm text-fg-secondary">
           An append-only record of sensitive organization and operational changes.
         </p>
       </header>

@@ -11,7 +11,7 @@ export function Checkbox({ className, ...props }: CheckboxProps) {
   return (
     <CheckboxPrimitive.Root
       className={cn(
-        "flex size-4 shrink-0 items-center justify-center rounded border border-border-strong bg-surface-raised transition-colors",
+        "flex size-5 shrink-0 items-center justify-center rounded border border-border-strong bg-surface-raised shadow-sm transition-colors",
         "data-[state=checked]:border-accent data-[state=checked]:bg-accent",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring/40",
         "disabled:cursor-not-allowed disabled:opacity-50",
@@ -20,7 +20,7 @@ export function Checkbox({ className, ...props }: CheckboxProps) {
       {...props}
     >
       <CheckboxPrimitive.Indicator className="text-accent-fg">
-        <Check className="size-3" aria-hidden />
+        <Check className="size-3.5" aria-hidden />
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   );

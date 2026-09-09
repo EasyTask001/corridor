@@ -85,7 +85,7 @@ export function DriverDocumentsPanel({
   return (
     <div className="space-y-4">
       <table className="w-full text-sm">
-        <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">
+        <thead className="bg-surface-sunken text-left text-xs uppercase tracking-wide text-fg-secondary">
           <tr>
             <th className="px-2 py-2 font-medium">Document</th>
             <th className="px-2 py-2 font-medium">Number</th>
@@ -93,17 +93,17 @@ export function DriverDocumentsPanel({
             <th />
           </tr>
         </thead>
-        <tbody className="divide-y divide-ink-100">
+        <tbody className="divide-y divide-border-default">
           {isLoading && (
             <tr>
-              <td colSpan={4} className="px-2 py-4 text-ink-500">
+              <td colSpan={4} className="px-2 py-4 text-fg-secondary">
                 Loading…
               </td>
             </tr>
           )}
           {data?.length === 0 && (
             <tr>
-              <td colSpan={4} className="px-2 py-4 text-ink-500">
+              <td colSpan={4} className="px-2 py-4 text-fg-secondary">
                 No travel documents on file.
               </td>
             </tr>
@@ -112,7 +112,7 @@ export function DriverDocumentsPanel({
             <tr key={d.id}>
               <td className="px-2 py-2">
                 {DRIVER_DOCUMENT_LABELS[d.documentType]}
-                {d.isPrimary && <span className="ml-1 text-xs text-ink-500">· primary</span>}
+                {d.isPrimary && <span className="ml-1 text-xs text-fg-secondary">· primary</span>}
               </td>
               <td className="px-2 py-2 font-mono text-xs">{d.documentNumber}</td>
               <td className="px-2 py-2">
@@ -145,7 +145,7 @@ export function DriverDocumentsPanel({
                       type="button"
                       variant="ghost"
                       size="xs"
-                      className="px-0 py-0 text-danger-500 hover:text-danger-500 hover:underline"
+                      className="px-0 py-0 text-status-danger hover:text-status-danger hover:underline"
                       onClick={() => remove.mutate({ driverId, id: d.id })}
                     >
                       Remove
@@ -160,7 +160,7 @@ export function DriverDocumentsPanel({
 
       {canWrite &&
         (draft ? (
-          <div className="grid grid-cols-2 gap-3 rounded border border-ink-100 p-3">
+          <div className="grid grid-cols-1 gap-3 rounded-lg border border-border-default p-3 sm:grid-cols-2">
             <div>
               <Label htmlFor="doc-type">Document type</Label>
               <NativeSelect
@@ -233,7 +233,7 @@ export function DriverDocumentsPanel({
               Primary travel document
             </label>
             <div className="col-span-2 flex items-center justify-between gap-3">
-              <p className="text-sm text-danger-500">{error}</p>
+              <p className="text-sm text-status-danger">{error}</p>
               <div className="flex gap-2">
                 <Button type="button" variant="secondary" onClick={() => setDraft(null)}>
                   Cancel

@@ -56,17 +56,21 @@ export default async function MovementsPage({
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Movements</h1>
-          <p className="text-sm text-ink-500">ACE (US-bound) and ACI (Canada-bound) e-manifests.</p>
+          <p className="text-sm text-fg-secondary">
+            ACE (US-bound) and ACI (Canada-bound) e-manifests.
+          </p>
         </div>
         {canWrite && (
-          <div className="flex items-center gap-2">
-            <form action={createMovement}>
+          <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-end">
+            <form action={createMovement} className="contents sm:block">
               <input type="hidden" name="regime" value="ACE" />
-              <Button>New ACE movement</Button>
+              <Button className="w-full">New ACE movement</Button>
             </form>
-            <form action={createMovement}>
+            <form action={createMovement} className="contents sm:block">
               <input type="hidden" name="regime" value="ACI" />
-              <Button variant="signal">New ACI movement</Button>
+              <Button variant="signal" className="w-full">
+                New ACI movement
+              </Button>
             </form>
             <Link href="/movements/new" className={buttonVariants({ variant: "secondary" })}>
               New movement…
@@ -79,7 +83,7 @@ export default async function MovementsPage({
       <div className="flex flex-wrap items-center gap-2">
         <Link
           href={href({ status: undefined })}
-          className={`rounded-full border px-3 py-1 text-xs ${!status ? "border-ink-950 bg-ink-950 text-white" : "border-ink-100 bg-white text-ink-700 hover:bg-ink-50"}`}
+          className={`rounded-full border px-3 py-1 text-xs ${!status ? "border-accent bg-accent text-accent-fg" : "border-border-default bg-surface-raised text-fg-primary hover:bg-surface-sunken"}`}
         >
           All
         </Link>
@@ -87,17 +91,17 @@ export default async function MovementsPage({
           <Link
             key={s}
             href={href({ status: s })}
-            className={`rounded-full border px-3 py-1 text-xs capitalize ${status === s ? "border-ink-950 bg-ink-950 text-white" : "border-ink-100 bg-white text-ink-700 hover:bg-ink-50"}`}
+            className={`rounded-full border px-3 py-1 text-xs capitalize ${status === s ? "border-accent bg-accent text-accent-fg" : "border-border-default bg-surface-raised text-fg-primary hover:bg-surface-sunken"}`}
           >
             {s} <span className="ml-1 font-mono opacity-70">{board[s] ?? 0}</span>
           </Link>
         ))}
-        <span className="mx-2 h-4 w-px bg-ink-100" />
+        <span className="mx-2 h-4 w-px bg-surface-sunken" />
         {(["ACE", "ACI"] as const).map((r) => (
           <Link
             key={r}
             href={href({ regime: regime === r ? undefined : r })}
-            className={`rounded-full border px-3 py-1 font-mono text-xs ${regime === r ? "border-ink-950 bg-ink-950 text-white" : "border-ink-100 bg-white text-ink-700 hover:bg-ink-50"}`}
+            className={`rounded-full border px-3 py-1 font-mono text-xs ${regime === r ? "border-accent bg-accent text-accent-fg" : "border-border-default bg-surface-raised text-fg-primary hover:bg-surface-sunken"}`}
           >
             {r}
           </Link>

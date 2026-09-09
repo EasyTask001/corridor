@@ -67,7 +67,7 @@ export function NotificationsList({ initial }: { initial: List }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <label className="flex items-center gap-2 text-sm text-ink-700">
+        <label className="flex items-center gap-2 text-sm text-fg-primary">
           <input
             type="checkbox"
             checked={unreadOnly}
@@ -83,15 +83,17 @@ export function NotificationsList({ initial }: { initial: List }) {
           Mark all read
         </button>
       </div>
-      <div className="panel divide-y divide-ink-100">
-        {data.rows.length === 0 && <p className="px-4 py-6 text-sm text-ink-500">Nothing here.</p>}
+      <div className="panel divide-y divide-border-default">
+        {data.rows.length === 0 && (
+          <p className="px-4 py-6 text-sm text-fg-secondary">Nothing here.</p>
+        )}
         {data.rows.map((n) => (
           <div
             key={n.id}
             className={`flex items-start gap-3 px-4 py-3 ${n.readAt ? "" : "bg-signal-500/5"}`}
           >
             <div className="min-w-0 flex-1">
-              <div className={`text-sm ${n.readAt ? "text-ink-700" : "font-medium"}`}>
+              <div className={`text-sm ${n.readAt ? "text-fg-primary" : "font-medium"}`}>
                 {n.linkPath ? (
                   <Link
                     href={n.linkPath as never}
@@ -104,8 +106,8 @@ export function NotificationsList({ initial }: { initial: List }) {
                   n.title
                 )}
               </div>
-              {n.body && <div className="mt-0.5 text-sm text-ink-500">{n.body}</div>}
-              <div className="mt-1 text-xs text-ink-300">
+              {n.body && <div className="mt-0.5 text-sm text-fg-secondary">{n.body}</div>}
+              <div className="mt-1 text-xs text-fg-secondary/60">
                 {new Date(n.createdAt).toLocaleString("en-CA", {
                   dateStyle: "medium",
                   timeStyle: "short",
@@ -114,7 +116,7 @@ export function NotificationsList({ initial }: { initial: List }) {
             </div>
             {!n.readAt && (
               <button
-                className="shrink-0 text-xs text-ink-500 hover:text-ink-950"
+                className="shrink-0 text-xs text-fg-secondary hover:text-fg-primary"
                 onClick={() => markRead.mutate({ id: n.id })}
               >
                 Mark read

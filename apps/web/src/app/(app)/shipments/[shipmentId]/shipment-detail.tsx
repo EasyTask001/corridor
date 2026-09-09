@@ -61,7 +61,7 @@ export function ShipmentDetail({
     <div className="space-y-5">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="text-sm text-ink-500">
+          <div className="text-sm text-fg-secondary">
             <Link href="/shipments" className="hover:underline">
               Shipments
             </Link>{" "}
@@ -69,13 +69,20 @@ export function ShipmentDetail({
           </div>
           <h1 className="mt-1 flex items-center gap-3 text-2xl font-semibold tracking-tight">
             <span className="font-mono">{s.controlNumber}</span>
-            <span className="rounded bg-ink-100 px-2 py-0.5 text-xs uppercase">{s.regime}</span>
-            <span className="rounded bg-ink-100 px-2 py-0.5 text-xs capitalize">
+            <span className="rounded bg-surface-sunken px-2 py-0.5 text-xs uppercase">
+              {s.regime}
+            </span>
+            <span className="rounded bg-surface-sunken px-2 py-0.5 text-xs capitalize">
               {s.status.replace(/_/g, " ")}
             </span>
-            <RecordHistoryDialog entityType="shipment" entityId={s.id} label={s.controlNumber} size="sm" />
+            <RecordHistoryDialog
+              entityType="shipment"
+              entityId={s.id}
+              label={s.controlNumber}
+              size="sm"
+            />
           </h1>
-          <p className="mt-1 text-sm text-ink-500">
+          <p className="mt-1 text-sm text-fg-secondary">
             {s.movement ? (
               <>
                 On{" "}
@@ -91,7 +98,7 @@ export function ShipmentDetail({
         </div>
         {editable && s.status === "draft" && (
           <button
-            className="btn-secondary text-danger-500"
+            className="btn-secondary text-status-danger"
             disabled={remove.isPending}
             onClick={() => remove.mutate({ id: s.id })}
           >
@@ -101,7 +108,10 @@ export function ShipmentDetail({
       </header>
 
       {error && (
-        <p role="alert" className="rounded-md bg-danger-500/10 px-3 py-2 text-sm text-danger-500">
+        <p
+          role="alert"
+          className="rounded-md bg-danger-500/10 px-3 py-2 text-sm text-status-danger"
+        >
           {error}
         </p>
       )}
@@ -142,35 +152,35 @@ export function ShipmentDetail({
         <h2 className="font-medium">Commodities</h2>
         <ul className="mt-3 space-y-1 text-sm">
           {s.commodities.length === 0 && (
-            <li className="text-ink-500">No commodity lines on this shipment.</li>
+            <li className="text-fg-secondary">No commodity lines on this shipment.</li>
           )}
           {s.commodities.map((c) => (
             <li
               key={c.id}
-              className="flex flex-wrap items-baseline gap-x-3 border-b border-ink-100 py-1.5"
+              className="flex flex-wrap items-baseline gap-x-3 border-b border-border-default py-1.5"
             >
               <span className="font-mono text-xs">{c.lineNumber}.</span>
               <span className="font-medium">{c.commodityDescription}</span>
-              <span className="text-xs text-ink-500">
+              <span className="text-xs text-fg-secondary">
                 {c.hsCode ?? "no HS"} · {c.weightKg ?? "—"} kg · {c.quantity ?? "—"}{" "}
                 {c.quantityUnit ?? ""}
                 {c.valueAmount != null ? ` · ${c.valueAmount} ${c.valueCurrency ?? ""}` : ""}
               </span>
               {c.hazmat.length > 0 && (
-                <span className="rounded bg-warn-500/10 px-1.5 text-xs text-warn-500">
+                <span className="rounded bg-warn-500/10 px-1.5 text-xs text-status-warn">
                   {c.hazmat.map((h) => h.unCode).join(", ")}
                 </span>
               )}
               {editable && (
                 <span className="ml-auto text-xs">
                   <button
-                    className="mr-3 text-ink-500 hover:text-ink-950"
+                    className="mr-3 text-fg-secondary hover:text-fg-primary"
                     onClick={() => setEditingLine(c.id)}
                   >
                     Edit
                   </button>
                   <button
-                    className="text-danger-500 hover:underline"
+                    className="text-status-danger hover:underline"
                     onClick={() => removeCommodity.mutate({ shipmentId: s.id, id: c.id })}
                   >
                     Remove

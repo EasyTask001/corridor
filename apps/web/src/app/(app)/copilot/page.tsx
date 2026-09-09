@@ -13,7 +13,7 @@ export default async function CopilotPage() {
     return (
       <div className="max-w-xl">
         <h1 className="text-2xl font-semibold tracking-tight">Compliance copilot</h1>
-        <p className="mt-2 text-sm text-ink-500">
+        <p className="mt-2 text-sm text-fg-secondary">
           The compliance copilot is not available for your role. Ask an owner or admin to grant
           &ldquo;Use the compliance copilot&rdquo;.
         </p>
@@ -31,7 +31,7 @@ export default async function CopilotPage() {
     <div className="flex h-[calc(100vh-8rem)] flex-col">
       <header className="mb-4">
         <h1 className="text-2xl font-semibold tracking-tight">Compliance copilot</h1>
-        <p className="text-sm text-ink-500">
+        <p className="text-sm text-fg-secondary">
           Answers cite ingested CBP/CBSA guidance and your organization&apos;s own movement notes,
           and can look up live movement, driver and tariff data.
           {capabilities.mode === "mock" && " Running in mock mode (no AI provider configured)."}

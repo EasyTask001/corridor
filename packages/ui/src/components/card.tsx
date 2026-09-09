@@ -5,14 +5,17 @@ import { cn } from "../lib/cn";
 export function Card({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
-      className={cn("rounded-xl border border-border-default bg-surface-raised shadow-sm", className)}
+      className={cn(
+        "rounded-xl border border-border-default bg-surface-raised shadow-sm",
+        className,
+      )}
       {...props}
     />
   );
 }
 
 export function CardHeader({ className, ...props }: ComponentProps<"div">) {
-  return <div className={cn("border-b border-border-default px-4 py-3", className)} {...props} />;
+  return <div className={cn("border-b border-border-default px-5 py-4", className)} {...props} />;
 }
 
 export function CardTitle({ className, ...props }: ComponentProps<"h3">) {
@@ -20,17 +23,19 @@ export function CardTitle({ className, ...props }: ComponentProps<"h3">) {
 }
 
 export function CardDescription({ className, ...props }: ComponentProps<"p">) {
-  return <p className={cn("text-xs text-fg-secondary", className)} {...props} />;
+  return (
+    <p className={cn("mt-0.5 text-sm leading-relaxed text-fg-secondary", className)} {...props} />
+  );
 }
 
 export function CardContent({ className, ...props }: ComponentProps<"div">) {
-  return <div className={cn("px-4 py-3", className)} {...props} />;
+  return <div className={cn("px-5 py-4", className)} {...props} />;
 }
 
 export function CardFooter({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
-      className={cn("flex items-center gap-2 border-t border-border-default px-4 py-3", className)}
+      className={cn("flex items-center gap-2 border-t border-border-default px-5 py-4", className)}
       {...props}
     />
   );

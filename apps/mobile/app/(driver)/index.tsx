@@ -23,7 +23,7 @@ export default function DriverBoard() {
   if (loading && !data) {
     return (
       <View style={[styles.screen, { alignItems: "center", justifyContent: "center" }]}>
-        <ActivityIndicator />
+        <ActivityIndicator color={colors.accent} />
       </View>
     );
   }
@@ -32,6 +32,7 @@ export default function DriverBoard() {
     <FlatList
       style={styles.screen}
       contentContainerStyle={styles.content}
+      contentInsetAdjustmentBehavior="automatic"
       data={data?.rows ?? []}
       keyExtractor={(m) => m.id}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void refetch()} />}
@@ -39,18 +40,29 @@ export default function DriverBoard() {
         <View style={{ gap: 8 }}>
           <View style={styles.row}>
             <Text style={styles.h1}>{membership?.organizationName ?? "Corridor"}</Text>
-            <Link
-              href="/(driver)/notifications"
-              style={{ color: colors.accent, fontWeight: "600" }}
-            >
-              Alerts
+            <Link href="/(driver)/notifications" asChild>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Open notifications"
+                hitSlop={8}
+                style={({ pressed }) => [
+                  { minHeight: 44, justifyContent: "center", paddingHorizontal: 4 },
+                  pressed && styles.buttonPressed,
+                ]}
+              >
+                <Text style={{ color: colors.accent, fontWeight: "600" }}>Alerts</Text>
+              </Pressable>
             </Link>
           </View>
           <Text style={styles.muted}>
             {online ? "Online" : "Offline"}
             {pending > 0 ? ` · ${pending} change${pending === 1 ? "" : "s"} waiting to sync` : ""}
           </Text>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? (
+            <Text style={styles.error} accessibilityLiveRegion="polite">
+              {error}
+            </Text>
+          ) : null}
         </View>
       }
       ListEmptyComponent={
@@ -61,7 +73,11 @@ export default function DriverBoard() {
       ListFooterComponent={
         <Pressable
           accessibilityRole="button"
-          style={[styles.buttonSecondary, { marginTop: 24 }]}
+          style={({ pressed }) => [
+            styles.buttonSecondary,
+            { marginTop: 24 },
+            pressed && styles.buttonSecondaryPressed,
+          ]}
           onPress={() => void signOut()}
         >
           <Text style={styles.buttonSecondaryText}>Sign out</Text>
@@ -70,7 +86,9 @@ export default function DriverBoard() {
       renderItem={({ item }) => (
         <Pressable
           accessibilityRole="button"
-          style={styles.panel}
+          accessibilityLabel={`Open movement ${item.movementNumber}`}
+          accessibilityHint="Shows movement details and paperwork actions"
+          style={({ pressed }) => [styles.panel, pressed && styles.panelPressed]}
           onPress={() => router.push(`/(driver)/movement/${item.id}`)}
         >
           <View style={styles.row}>
@@ -80,12 +98,14 @@ export default function DriverBoard() {
             </View>
           </View>
           <Text style={styles.muted}>
-            {item.regime} ·{" "}
-            {item.port?.name ?? item.port?.code ?? "crossing not set"}
+            {item.regime} · {item.port?.name ?? item.port?.code ?? "crossing not set"}
           </Text>
           <Text style={styles.muted}>
             {item.truckUnit ? `Truck ${item.truckUnit}` : "No truck"}
             {item.trailerUnit ? ` · Trailer ${item.trailerUnit}` : ""}
+          </Text>
+          <Text style={{ color: colors.accent, fontSize: 14, fontWeight: "600" }}>
+            View movement →
           </Text>
         </Pressable>
       )}

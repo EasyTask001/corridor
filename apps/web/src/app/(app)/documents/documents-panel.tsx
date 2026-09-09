@@ -25,11 +25,11 @@ const TYPE_LABEL: Record<DocumentType, string> = {
 
 export function StatusChip({ status }: { status: List["rows"][number]["uploadStatus"] }) {
   const cls: Record<string, string> = {
-    uploaded: "bg-ink-100 text-ink-500",
-    processing: "bg-signal-500/15 text-signal-600",
-    extracted: "bg-warn-500/15 text-warn-500",
-    failed: "bg-danger-500/10 text-danger-500",
-    applied: "bg-ok-500/10 text-ok-500",
+    uploaded: "bg-surface-sunken text-fg-secondary",
+    processing: "bg-signal-500/15 text-status-signal",
+    extracted: "bg-warn-500/15 text-status-warn",
+    failed: "bg-danger-500/10 text-status-danger",
+    applied: "bg-ok-500/10 text-status-ok",
   };
   const label: Record<string, string> = {
     uploaded: "queued",
@@ -176,7 +176,7 @@ export function DocumentsPanel({
               ))}
             </select>
           </div>
-          <div className="min-w-64">
+          <div className="w-full min-w-0 sm:w-auto sm:min-w-64">
             <label className="label" htmlFor="movementId">
               Attach to movement (optional)
             </label>
@@ -208,12 +208,12 @@ export function DocumentsPanel({
               className="text-sm"
             />
           </div>
-          <p className="w-full text-xs text-ink-500">
+          <p className="w-full text-xs text-fg-secondary">
             PDF, images or text up to 25 MB. Drop files anywhere on this box.
-            {busy && <span className="ml-2 text-signal-600">Uploading {busy}…</span>}
+            {busy && <span className="ml-2 text-status-signal">Uploading {busy}…</span>}
           </p>
           {error && (
-            <p role="alert" className="w-full text-sm text-danger-500">
+            <p role="alert" className="w-full text-sm text-status-danger">
               {error}
             </p>
           )}
@@ -222,7 +222,7 @@ export function DocumentsPanel({
 
       <div className="panel overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">
+          <thead className="bg-surface-sunken text-left text-xs uppercase tracking-wide text-fg-secondary">
             <tr>
               <th className="px-4 py-2 font-medium">Document</th>
               <th className="px-4 py-2 font-medium">Type</th>
@@ -234,23 +234,23 @@ export function DocumentsPanel({
               <th />
             </tr>
           </thead>
-          <tbody className="divide-y divide-ink-100">
+          <tbody className="divide-y divide-border-default">
             {data.rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-6 text-ink-500">
+                <td colSpan={8} className="px-4 py-6 text-fg-secondary">
                   No documents yet.
                 </td>
               </tr>
             )}
             {data.rows.map((d) => (
-              <tr key={d.id} className="hover:bg-ink-50">
+              <tr key={d.id} className="hover:bg-surface-sunken">
                 <td className="px-4 py-2">
                   <Link href={`/documents/${d.id}`} className="font-medium hover:underline">
                     {d.originalFilename}
                   </Link>
                   {d.extractionError && (
                     <div
-                      className="max-w-md truncate text-xs text-danger-500"
+                      className="max-w-md truncate text-xs text-status-danger"
                       title={d.extractionError}
                     >
                       {d.extractionError}
@@ -260,7 +260,7 @@ export function DocumentsPanel({
                 <td className="px-4 py-2 text-xs">
                   {TYPE_LABEL[d.detectedType ?? d.documentType]}
                   {d.detectedType && d.detectedType !== d.documentType && (
-                    <span className="ml-1 text-ink-500">(detected)</span>
+                    <span className="ml-1 text-fg-secondary">(detected)</span>
                   )}
                 </td>
                 <td className="px-4 py-2">
@@ -269,7 +269,9 @@ export function DocumentsPanel({
                 <td className="px-4 py-2 font-mono text-xs">
                   {d.extractionConfidence != null ? (
                     <span
-                      className={d.extractionConfidence < 0.7 ? "text-warn-500" : "text-ok-500"}
+                      className={
+                        d.extractionConfidence < 0.7 ? "text-status-warn" : "text-status-ok"
+                      }
                     >
                       {Math.round(d.extractionConfidence * 100)}%
                     </span>
@@ -287,7 +289,7 @@ export function DocumentsPanel({
                     "—"
                   )}
                 </td>
-                <td className="whitespace-nowrap px-4 py-2 text-xs text-ink-500">
+                <td className="whitespace-nowrap px-4 py-2 text-xs text-fg-secondary">
                   {new Date(d.createdAt).toLocaleString("en-CA", {
                     dateStyle: "medium",
                     timeStyle: "short",
@@ -302,7 +304,7 @@ export function DocumentsPanel({
                   )}
                   {canUpload && d.uploadStatus === "failed" && (
                     <button
-                      className="ml-2 text-ink-500 hover:text-ink-950"
+                      className="ml-2 text-fg-secondary hover:text-fg-primary"
                       onClick={() => retry.mutate({ documentId: d.id })}
                     >
                       Retry
@@ -310,7 +312,7 @@ export function DocumentsPanel({
                   )}
                   {canUpload && d.uploadStatus !== "applied" && (
                     <button
-                      className="ml-3 text-danger-500 hover:underline"
+                      className="ml-3 text-status-danger hover:underline"
                       onClick={() => remove.mutate({ id: d.id })}
                     >
                       Delete

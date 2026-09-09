@@ -13,7 +13,7 @@ export default async function AlertsPage() {
     <div className="space-y-4">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Compliance alerts</h1>
-        <p className="text-sm text-ink-500">
+        <p className="text-sm text-fg-secondary">
           Rule-based checks on driver, truck and trailer documents. Alerts resolve automatically
           when the underlying document is renewed.
         </p>

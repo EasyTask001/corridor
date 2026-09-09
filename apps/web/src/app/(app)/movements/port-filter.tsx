@@ -5,13 +5,7 @@ import type { Regime } from "@corridor/domain";
 import { PortPicker } from "@/components/port-picker";
 
 /** Filters the movements list by port. Selecting a port pushes `?portId=`. */
-export function MovementsPortFilter({
-  regime,
-  active,
-}: {
-  regime?: Regime;
-  active: boolean;
-}) {
+export function MovementsPortFilter({ regime, active }: { regime?: Regime; active: boolean }) {
   const router = useRouter();
 
   const apply = (portId: string | null) => {
@@ -33,7 +27,7 @@ export function MovementsPortFilter({
       {active && (
         <button
           type="button"
-          className="text-xs text-ink-500 hover:underline"
+          className="text-xs text-fg-secondary hover:underline"
           onClick={() => apply(null)}
         >
           Clear port filter

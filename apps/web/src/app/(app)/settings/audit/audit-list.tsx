@@ -25,7 +25,7 @@ const auditColumns: DataTableColumnDef<AuditEntry>[] = (() => {
       id: "time",
       header: "Time",
       cell: ({ row }) => row.original.createdAt.toLocaleString("en-CA"),
-      meta: { className: "whitespace-nowrap text-xs text-ink-500" },
+      meta: { className: "whitespace-nowrap text-xs text-fg-secondary" },
     }),
     helper.accessor(
       (entry) => entry.actorName ?? (entry.actorId ? entry.actorId.slice(0, 8) : "System"),
@@ -43,7 +43,7 @@ const auditColumns: DataTableColumnDef<AuditEntry>[] = (() => {
         <>
           <span>{row.original.entityType}</span>
           {row.original.entityId && (
-            <span className="ml-2 font-mono text-xs text-ink-500">
+            <span className="ml-2 font-mono text-xs text-fg-secondary">
               {row.original.entityId.slice(0, 12)}
             </span>
           )}
@@ -57,13 +57,13 @@ const auditColumns: DataTableColumnDef<AuditEntry>[] = (() => {
       cell: ({ row }) =>
         row.original.before || row.original.after ? (
           <details>
-            <summary className="cursor-pointer text-xs text-ink-500">View</summary>
+            <summary className="cursor-pointer text-xs text-fg-secondary">View</summary>
             <pre className="mt-2 max-w-lg overflow-auto rounded bg-ink-950 p-3 text-xs text-ink-100">
               {JSON.stringify({ before: row.original.before, after: row.original.after }, null, 2)}
             </pre>
           </details>
         ) : (
-          <span className="text-ink-500">—</span>
+          <span className="text-fg-secondary">—</span>
         ),
     }),
   ]);
@@ -103,7 +103,7 @@ export function AuditList({ initial }: { initial: AuditResult }) {
       </form>
 
       <Card className="overflow-x-auto">
-        <div className="border-b border-ink-100 px-4 py-3 text-xs text-ink-500">
+        <div className="border-b border-border-default px-4 py-3 text-xs text-fg-secondary">
           Showing {data.rows.length} of {data.total} events
         </div>
         <DataTable

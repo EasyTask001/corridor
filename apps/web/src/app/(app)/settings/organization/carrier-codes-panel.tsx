@@ -35,40 +35,43 @@ export function CarrierCodesPanel({ initial }: { initial: CarrierCode[] }) {
   );
 
   const { data: codes = initial } = useQuery({ ...listOpts, initialData: initial });
-  const byRegime = { ACE: codes.filter((c) => c.regime === "ACE"), ACI: codes.filter((c) => c.regime === "ACI") };
+  const byRegime = {
+    ACE: codes.filter((c) => c.regime === "ACE"),
+    ACI: codes.filter((c) => c.regime === "ACI"),
+  };
 
   return (
     <div className="panel space-y-4 p-6">
       <div>
         <h2 className="font-medium">Carrier codes</h2>
-        <p className="text-sm text-ink-500">
+        <p className="text-sm text-fg-secondary">
           Every ACE/ACI code this fleet files manifests under, one default per regime.
         </p>
       </div>
 
-      {error && <p className="text-sm text-danger-500">{error}</p>}
+      {error && <p className="text-sm text-status-danger">{error}</p>}
 
       {(["ACE", "ACI"] as const).map((regime) => (
         <div key={regime} className="space-y-2">
-          <div className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+          <div className="text-xs font-semibold uppercase tracking-wide text-fg-secondary">
             {regime}
           </div>
-          <ul className="divide-y divide-ink-100 rounded-md border border-ink-100">
+          <ul className="divide-y divide-border-default rounded-md border border-border-default">
             {byRegime[regime].length === 0 && (
-              <li className="px-3 py-2 text-sm text-ink-500">No codes yet.</li>
+              <li className="px-3 py-2 text-sm text-fg-secondary">No codes yet.</li>
             )}
             {byRegime[regime].map((c) => (
               <li key={c.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
                 <div className="flex items-center gap-2">
                   <span className="font-mono font-medium">{c.code}</span>
-                  {c.label && <span className="text-ink-500">{c.label}</span>}
+                  {c.label && <span className="text-fg-secondary">{c.label}</span>}
                   {c.isDefault && <Badge variant="ok">Default</Badge>}
                 </div>
                 <div className="flex items-center gap-3">
                   {!c.isDefault && (
                     <button
                       type="button"
-                      className="text-xs text-ink-500 hover:underline"
+                      className="text-xs text-fg-secondary hover:underline"
                       disabled={setDefault.isPending}
                       onClick={() => setDefault.mutate({ id: c.id })}
                     >
@@ -77,7 +80,7 @@ export function CarrierCodesPanel({ initial }: { initial: CarrierCode[] }) {
                   )}
                   <button
                     type="button"
-                    className="text-xs text-danger-500 hover:underline"
+                    className="text-xs text-status-danger hover:underline"
                     disabled={remove.isPending}
                     onClick={() => remove.mutate({ id: c.id })}
                   >

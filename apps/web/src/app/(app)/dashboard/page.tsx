@@ -42,7 +42,7 @@ export default async function DashboardPage() {
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">{org.name}</h1>
-        <p className="text-sm text-ink-500">
+        <p className="text-sm text-fg-secondary">
           Signed in as {me.user.displayName ?? me.user.email} ·{" "}
           {me.memberships.find((m) => m.organizationId === me.activeOrganizationId)?.roleName}
         </p>
@@ -51,19 +51,19 @@ export default async function DashboardPage() {
       {alerts && (
         <Link
           href="/alerts"
-          className={`panel flex items-center justify-between p-5 transition-colors hover:bg-ink-50 ${
+          className={`panel flex flex-col items-start justify-between gap-4 p-5 transition-colors hover:bg-surface-sunken sm:flex-row sm:items-center ${
             alerts.critical > 0 ? "border-danger-500/40" : ""
           }`}
         >
           <div>
-            <div className="text-xs font-medium uppercase tracking-wide text-ink-500">
+            <div className="text-xs font-medium uppercase tracking-wide text-fg-secondary">
               Compliance alerts
             </div>
             <div className="mt-1 text-2xl font-semibold">
               {alerts.total === 0 ? "All clear" : `${alerts.total} open`}
             </div>
           </div>
-          <div className="flex gap-6 text-sm">
+          <div className="flex w-full justify-between gap-6 text-sm sm:w-auto">
             <Stat label="Critical" value={alerts.critical} tone="danger" />
             <Stat label="Warning" value={alerts.warning} tone="warn" />
             <Stat label="Info" value={alerts.info} />
@@ -78,15 +78,18 @@ export default async function DashboardPage() {
               <Link
                 key={regime}
                 href={`/movements?regime=${regime}`}
-                className="panel p-4 transition-colors hover:bg-ink-50"
+                className="panel p-4 transition-colors hover:bg-surface-sunken"
               >
-                <div className="text-xs font-medium uppercase tracking-wide text-ink-500">
+                <div className="text-xs font-medium uppercase tracking-wide text-fg-secondary">
                   {regime} this month
                 </div>
-                <div className="mt-1 text-2xl font-semibold" data-testid={`tile-${regime.toLowerCase()}`}>
+                <div
+                  className="mt-1 text-2xl font-semibold"
+                  data-testid={`tile-${regime.toLowerCase()}`}
+                >
                   {stats.thisMonth[regime]}
                 </div>
-                <div className="text-xs text-ink-500">
+                <div className="text-xs text-fg-secondary">
                   {regime === "ACE" ? "US-bound" : "Canada-bound"} manifests created in {monthLabel}
                 </div>
               </Link>
@@ -98,8 +101,12 @@ export default async function DashboardPage() {
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {registries.map((r) => (
-          <Link key={r.href} href={r.href} className="panel p-4 transition-colors hover:bg-ink-50">
-            <div className="text-xs font-medium uppercase tracking-wide text-ink-500">
+          <Link
+            key={r.href}
+            href={r.href}
+            className="panel p-4 transition-colors hover:bg-surface-sunken"
+          >
+            <div className="text-xs font-medium uppercase tracking-wide text-fg-secondary">
               {r.label}
             </div>
             <div className="mt-1 text-2xl font-semibold">{r.total}</div>
@@ -115,7 +122,7 @@ export default async function DashboardPage() {
           { label: "Plan", value: `${org.subscriptionPlan} · ${org.subscriptionStatus}` },
         ].map((s) => (
           <div key={s.label} className="panel p-4">
-            <div className="text-xs font-medium uppercase tracking-wide text-ink-500">
+            <div className="text-xs font-medium uppercase tracking-wide text-fg-secondary">
               {s.label}
             </div>
             <div className="mt-1 font-mono text-lg">{s.value}</div>
@@ -127,12 +134,12 @@ export default async function DashboardPage() {
         <section className="panel overflow-x-auto" aria-label="Recent shipments">
           <div className="flex items-center justify-between px-4 py-3">
             <h2 className="font-medium">Recent shipments</h2>
-            <Link href="/shipments" className="text-xs text-ink-500 hover:underline">
+            <Link href="/shipments" className="text-xs text-fg-secondary hover:underline">
               All shipments
             </Link>
           </div>
           <table className="w-full text-sm">
-            <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">
+            <thead className="bg-surface-sunken text-left text-xs uppercase tracking-wide text-fg-secondary">
               <tr>
                 <th className="px-3 py-2 font-medium">Control number</th>
                 <th className="px-3 py-2 font-medium">Status</th>
@@ -141,7 +148,7 @@ export default async function DashboardPage() {
                 <th className="px-3 py-2 font-medium">Updated</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-ink-100">
+            <tbody className="divide-y divide-border-default">
               {stats.recentShipments.map((s) => (
                 <tr key={s.id}>
                   <td className="px-3 py-2 font-mono text-xs">
@@ -152,8 +159,11 @@ export default async function DashboardPage() {
                   <td className="px-3 py-2 capitalize">{s.status.replace(/_/g, " ")}</td>
                   <td className="px-3 py-2 font-mono text-xs">{s.entryNumber ?? "—"}</td>
                   <td className="px-3 py-2 font-mono text-xs">{s.movementNumber ?? "—"}</td>
-                  <td className="px-3 py-2 text-xs text-ink-500">
-                    {new Date(s.updatedAt).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
+                  <td className="px-3 py-2 text-xs text-fg-secondary">
+                    {new Date(s.updatedAt).toLocaleString("en-CA", {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    })}
                   </td>
                 </tr>
               ))}
@@ -168,14 +178,14 @@ export default async function DashboardPage() {
 function Stat({ label, value, tone }: { label: string; value: number; tone?: "danger" | "warn" }) {
   const cls =
     tone === "danger" && value > 0
-      ? "text-danger-500"
+      ? "text-status-danger"
       : tone === "warn" && value > 0
-        ? "text-warn-500"
-        : "text-ink-500";
+        ? "text-status-warn"
+        : "text-fg-secondary";
   return (
     <div className="text-right">
       <div className={`text-xl font-semibold ${cls}`}>{value}</div>
-      <div className="text-xs text-ink-500">{label}</div>
+      <div className="text-xs text-fg-secondary">{label}</div>
     </div>
   );
 }

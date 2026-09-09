@@ -1,5 +1,5 @@
 import { Link, useLocalSearchParams } from "expo-router";
-import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { trpc } from "../../../src/lib/trpc";
 import { useAsync } from "../../../src/lib/use-async";
 import { colors, styles } from "../../../src/lib/theme";
@@ -18,7 +18,7 @@ export default function MovementScreen() {
   if (loading && !data) {
     return (
       <View style={[styles.screen, { alignItems: "center", justifyContent: "center" }]}>
-        <ActivityIndicator />
+        <ActivityIndicator color={colors.accent} />
       </View>
     );
   }
@@ -26,7 +26,19 @@ export default function MovementScreen() {
   if (error || !data) {
     return (
       <View style={[styles.screen, styles.content]}>
-        <Text style={styles.error}>{error ?? "Movement not found"}</Text>
+        <Text style={styles.error} accessibilityLiveRegion="assertive">
+          {error ?? "Movement not found"}
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          style={({ pressed }) => [
+            styles.buttonSecondary,
+            pressed && styles.buttonSecondaryPressed,
+          ]}
+          onPress={() => void refetch()}
+        >
+          <Text style={styles.buttonSecondaryText}>Try again</Text>
+        </Pressable>
       </View>
     );
   }
@@ -38,6 +50,7 @@ export default function MovementScreen() {
     <ScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
+      contentInsetAdjustmentBehavior="automatic"
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void refetch()} />}
     >
       <View style={styles.panel}>
@@ -59,29 +72,33 @@ export default function MovementScreen() {
           <Text style={styles.body}>Customs ref: {movement.customsReferenceNumber}</Text>
         ) : null}
         <Text style={styles.muted}>
-          {crew.length > 0
-            ? crew.map((c) => `${c.firstName} ${c.lastName}`).join(", ")
-            : "No crew"}
+          {crew.length > 0 ? crew.map((c) => `${c.firstName} ${c.lastName}`).join(", ") : "No crew"}
           {truck ? ` · Truck ${truck.unitNumber}` : ""}
-          {trailers.length > 0
-            ? ` · Trailer ${trailers.map((t) => t.unitNumber).join(" + ")}`
-            : ""}
+          {trailers.length > 0 ? ` · Trailer ${trailers.map((t) => t.unitNumber).join(" + ")}` : ""}
         </Text>
       </View>
 
       <View style={styles.panel}>
         <Text style={styles.h2}>Paperwork</Text>
-        <Link
-          href={`/(driver)/movement/${movement.id}/capture`}
-          style={{ color: colors.accent, fontWeight: "600", paddingVertical: 6 }}
-        >
-          Photograph a document
+        <Text style={styles.muted}>Choose the next step for this load.</Text>
+        <Link href={`/(driver)/movement/${movement.id}/capture`} asChild>
+          <Pressable
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
+          >
+            <Text style={styles.buttonText}>Photograph a document</Text>
+          </Pressable>
         </Link>
-        <Link
-          href={`/(driver)/movement/${movement.id}/pod`}
-          style={{ color: colors.accent, fontWeight: "600", paddingVertical: 6 }}
-        >
-          Capture proof of delivery
+        <Link href={`/(driver)/movement/${movement.id}/pod`} asChild>
+          <Pressable
+            accessibilityRole="button"
+            style={({ pressed }) => [
+              styles.buttonSecondary,
+              pressed && styles.buttonSecondaryPressed,
+            ]}
+          >
+            <Text style={styles.buttonSecondaryText}>Capture proof of delivery</Text>
+          </Pressable>
         </Link>
       </View>
 

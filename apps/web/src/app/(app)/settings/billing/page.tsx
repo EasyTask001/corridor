@@ -30,7 +30,7 @@ export default async function BillingPage({
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Billing</h1>
-        <p className="text-sm text-ink-500">
+        <p className="text-sm text-fg-secondary">
           Payments are handled by Stripe Checkout and the Billing Portal — card details never touch
           Corridor.
           {plans.mode === "mock" &&

@@ -34,7 +34,7 @@ export function ExternalShipments({ initial, canWrite }: { initial: List; canWri
     <div className="space-y-4">
       <div className="panel overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">
+          <thead className="bg-surface-sunken text-left text-xs uppercase tracking-wide text-fg-secondary">
             <tr>
               <th className="px-3 py-2 font-medium">Control #</th>
               <th className="px-3 py-2 font-medium">Bond #</th>
@@ -46,10 +46,10 @@ export function ExternalShipments({ initial, canWrite }: { initial: List; canWri
               <th />
             </tr>
           </thead>
-          <tbody className="divide-y divide-ink-100">
+          <tbody className="divide-y divide-border-default">
             {data.rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-3 py-5 text-ink-500">
+                <td colSpan={8} className="px-3 py-5 text-fg-secondary">
                   No external shipments recorded.
                 </td>
               </tr>
@@ -61,7 +61,9 @@ export function ExternalShipments({ initial, canWrite }: { initial: List; canWri
                 <td className="px-3 py-2 font-mono text-xs">{x.originatingCarrierCode ?? "—"}</td>
                 <td className="px-3 py-2 font-mono text-xs">{x.regime}</td>
                 <td className="px-3 py-2">{x.description ?? "—"}</td>
-                <td className="px-3 py-2 text-xs">{x.recordStatus ? x.recordStatus.replace(/_/g, " ") : "not on monitor"}</td>
+                <td className="px-3 py-2 text-xs">
+                  {x.recordStatus ? x.recordStatus.replace(/_/g, " ") : "not on monitor"}
+                </td>
                 <td className="px-3 py-2">
                   <Badge variant={x.status === "open" ? "ok" : "muted"}>{x.status}</Badge>
                 </td>
@@ -96,7 +98,7 @@ export function ExternalShipments({ initial, canWrite }: { initial: List; canWri
         <form
           role="form"
           aria-label={editing === "new" ? "New external shipment" : "Edit external shipment"}
-          className="panel grid grid-cols-2 gap-4 p-5"
+          className="panel grid grid-cols-1 gap-4 p-5 sm:grid-cols-2"
           onSubmit={(e: FormEvent<HTMLFormElement>) => {
             e.preventDefault();
             const fd = new FormData(e.currentTarget);
@@ -106,7 +108,8 @@ export function ExternalShipments({ initial, canWrite }: { initial: List; canWri
               originatingCarrierCode: String(fd.get("originatingCarrierCode") ?? "").trim() || null,
               description: String(fd.get("description") ?? "").trim() || null,
             };
-            if (editing === "new") create.mutate({ regime: fd.get("regime") as "ACE" | "ACI", ...fields });
+            if (editing === "new")
+              create.mutate({ regime: fd.get("regime") as "ACE" | "ACI", ...fields });
             else update.mutate({ id: editing.id, ...fields });
           }}
         >
@@ -121,21 +124,41 @@ export function ExternalShipments({ initial, canWrite }: { initial: List; canWri
           )}
           <div>
             <Label htmlFor="xs-control">Originating control number</Label>
-            <Input id="xs-control" name="controlNumber" defaultValue={editing === "new" ? "" : (editing.controlNumber ?? "")} className="font-mono uppercase" />
+            <Input
+              id="xs-control"
+              name="controlNumber"
+              defaultValue={editing === "new" ? "" : (editing.controlNumber ?? "")}
+              className="font-mono uppercase"
+            />
           </div>
           <div>
             <Label htmlFor="xs-bond">In-bond number</Label>
-            <Input id="xs-bond" name="inBondNumber" defaultValue={editing === "new" ? "" : (editing.inBondNumber ?? "")} className="font-mono" />
+            <Input
+              id="xs-bond"
+              name="inBondNumber"
+              defaultValue={editing === "new" ? "" : (editing.inBondNumber ?? "")}
+              className="font-mono"
+            />
           </div>
           <div>
             <Label htmlFor="xs-carrier">Originating carrier code</Label>
-            <Input id="xs-carrier" name="originatingCarrierCode" defaultValue={editing === "new" ? "" : (editing.originatingCarrierCode ?? "")} className="font-mono uppercase" maxLength={4} />
+            <Input
+              id="xs-carrier"
+              name="originatingCarrierCode"
+              defaultValue={editing === "new" ? "" : (editing.originatingCarrierCode ?? "")}
+              className="font-mono uppercase"
+              maxLength={4}
+            />
           </div>
           <div className="col-span-2">
             <Label htmlFor="xs-desc">Description</Label>
-            <Input id="xs-desc" name="description" defaultValue={editing === "new" ? "" : (editing.description ?? "")} />
+            <Input
+              id="xs-desc"
+              name="description"
+              defaultValue={editing === "new" ? "" : (editing.description ?? "")}
+            />
           </div>
-          {error && <p className="col-span-2 text-sm text-danger-500">{error}</p>}
+          {error && <p className="col-span-2 text-sm text-status-danger">{error}</p>}
           <div className="col-span-2 flex gap-2">
             <Button type="submit" disabled={create.isPending || update.isPending}>
               {editing === "new" ? "Add external shipment" : "Save"}

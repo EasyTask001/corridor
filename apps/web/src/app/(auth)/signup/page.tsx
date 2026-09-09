@@ -14,12 +14,12 @@ export default async function SignupPage({
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Create your account</h1>
-        <p className="mt-1 text-sm text-ink-500">You&apos;ll set up your carrier next.</p>
+        <p className="mt-1 text-sm text-fg-secondary">You&apos;ll set up your carrier next.</p>
       </div>
       <SignupForm next={next ?? "/onboarding"} />
-      <p className="text-sm text-ink-500">
+      <p className="text-sm text-fg-secondary">
         Already have an account?{" "}
-        <Link href="/login" className="font-medium text-ink-950 underline">
+        <Link href="/login" className="font-medium text-fg-primary underline">
           Sign in
         </Link>
       </p>

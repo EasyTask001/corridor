@@ -11,7 +11,10 @@ import { useMutation } from "@tanstack/react-query";
 import { useTRPC } from "@/lib/trpc/client";
 
 type Kind = "driver_sheet" | "manifest_summary";
-const LABEL: Record<Kind, string> = { driver_sheet: "Driver sheet", manifest_summary: "Manifest summary" };
+const LABEL: Record<Kind, string> = {
+  driver_sheet: "Driver sheet",
+  manifest_summary: "Manifest summary",
+};
 
 export function PrintMenu({ movementId }: { movementId: string }) {
   const trpc = useTRPC();
@@ -24,7 +27,9 @@ export function PrintMenu({ movementId }: { movementId: string }) {
       onSuccess: (r) => {
         setError(null);
         const ok = r.results.filter((x) => x.ok).length;
-        setMailed(`Sent to ${ok} of ${r.results.length} address${r.results.length === 1 ? "" : "es"}${r.results[0]?.mode === "mock" ? " (mock mail)" : ""}.`);
+        setMailed(
+          `Sent to ${ok} of ${r.results.length} address${r.results.length === 1 ? "" : "es"}${r.results[0]?.mode === "mock" ? " (mock mail)" : ""}.`,
+        );
       },
       onError: (e) => setError(e.message),
     }),
@@ -61,10 +66,13 @@ export function PrintMenu({ movementId }: { movementId: string }) {
         <h3 className="font-medium">Paperwork</h3>
         <div className="flex flex-wrap gap-2">
           {(["driver_sheet", "manifest_summary"] as const).map((kind) => (
-            <span key={kind} className="inline-flex overflow-hidden rounded-md border border-ink-100">
+            <span
+              key={kind}
+              className="inline-flex overflow-hidden rounded-md border border-border-default"
+            >
               <button
                 type="button"
-                className="px-3 py-1.5 text-sm hover:bg-ink-50 disabled:opacity-50"
+                className="px-3 py-1.5 text-sm hover:bg-surface-sunken disabled:opacity-50"
                 disabled={generate.isPending}
                 onClick={() => run(kind, "print")}
               >
@@ -72,7 +80,7 @@ export function PrintMenu({ movementId }: { movementId: string }) {
               </button>
               <button
                 type="button"
-                className="border-l border-ink-100 px-3 py-1.5 text-sm hover:bg-ink-50 disabled:opacity-50"
+                className="border-l border-border-default px-3 py-1.5 text-sm hover:bg-surface-sunken disabled:opacity-50"
                 disabled={generate.isPending}
                 onClick={() => run(kind, "download")}
                 aria-label={`Download ${LABEL[kind]} PDF`}
@@ -83,16 +91,22 @@ export function PrintMenu({ movementId }: { movementId: string }) {
           ))}
         </div>
       </div>
-      {generate.isPending && <p className="mt-2 text-xs text-ink-500">Rendering…</p>}
-      {error && <p className="mt-2 text-xs text-danger-500">{error}</p>}
+      {generate.isPending && <p className="mt-2 text-xs text-fg-secondary">Rendering…</p>}
+      {error && <p className="mt-2 text-xs text-status-danger">{error}</p>}
       {last && !generate.isPending && (
         <>
-          <p className="mt-2 text-xs text-ink-500">
+          <p className="mt-2 text-xs text-fg-secondary">
             {LABEL[last.kind]} ready:{" "}
-            <a href={last.url} className="underline" target="_blank" rel="noopener" data-testid="pdf-link">
+            <a
+              href={last.url}
+              className="underline"
+              target="_blank"
+              rel="noopener"
+              data-testid="pdf-link"
+            >
               open PDF
             </a>
-            <span className="ml-1 text-ink-300">(link valid for one minute)</span>
+            <span className="ml-1 text-fg-secondary/60">(link valid for one minute)</span>
           </p>
           <form
             className="mt-3 flex flex-wrap items-end gap-2"
@@ -120,7 +134,7 @@ export function PrintMenu({ movementId }: { movementId: string }) {
             <button className="btn-secondary" disabled={email.isPending || !mailTo.trim()}>
               {email.isPending ? "Sending…" : "Send"}
             </button>
-            {mailed && <span className="text-xs text-ok-500">{mailed}</span>}
+            {mailed && <span className="text-xs text-status-ok">{mailed}</span>}
           </form>
         </>
       )}

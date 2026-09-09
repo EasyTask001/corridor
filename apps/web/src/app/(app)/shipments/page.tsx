@@ -52,16 +52,16 @@ export default async function ShipmentsPage({
     return s ? `/shipments?${s}` : "/shipments";
   };
   const chip = (active: boolean) =>
-    `rounded-full border px-3 py-1 text-xs capitalize ${active ? "border-ink-950 bg-ink-950 text-white" : "border-ink-100 bg-white text-ink-700 hover:bg-ink-50"}`;
+    `rounded-full border px-3 py-1 text-xs capitalize ${active ? "border-accent bg-accent text-accent-fg" : "border-border-default bg-surface-raised text-fg-primary hover:bg-surface-sunken"}`;
 
   return (
     <div className="space-y-4">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Shipments</h1>
-          <p className="text-sm text-ink-500">
-            Every customs filing, whether or not it is on a truck yet. Add one from a movement&apos;s
-            Shipments step, or import a file.
+          <p className="text-sm text-fg-secondary">
+            Every customs filing, whether or not it is on a truck yet. Add one from a
+            movement&apos;s Shipments step, or import a file.
           </p>
         </div>
         <Link href="/shipments/import" className={buttonVariants({ variant: "secondary" })}>
@@ -78,7 +78,7 @@ export default async function ShipmentsPage({
             {s.replace(/_/g, " ")}
           </Link>
         ))}
-        <span className="mx-2 h-4 w-px bg-ink-100" />
+        <span className="mx-2 h-4 w-px bg-surface-sunken" />
         {(["ACE", "ACI"] as const).map((r) => (
           <Link
             key={r}

@@ -74,7 +74,11 @@ export default function CaptureScreen() {
   };
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={styles.content}
+      contentInsetAdjustmentBehavior="automatic"
+    >
       <View style={styles.panel}>
         <Text style={styles.h2}>Document type</Text>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
@@ -82,12 +86,13 @@ export default function CaptureScreen() {
             <Pressable
               key={t.value}
               accessibilityRole="button"
+              accessibilityState={{ selected: t.value === docType }}
               onPress={() => setDocType(t.value)}
-              style={[
+              style={({ pressed }) => [
                 styles.badge,
-                t.value === docType
-                  ? { borderColor: colors.accent, backgroundColor: "#eaf0ff" }
-                  : null,
+                { minHeight: 44 },
+                t.value === docType && styles.badgeSelected,
+                pressed && styles.buttonPressed,
               ]}
             >
               <Text style={styles.badgeText}>{t.label}</Text>
@@ -101,7 +106,8 @@ export default function CaptureScreen() {
         {asset ? (
           <Image
             source={{ uri: asset.uri }}
-            style={{ width: "100%", height: 260, borderRadius: 8, backgroundColor: colors.bg }}
+            accessibilityLabel="Selected document preview"
+            style={{ width: "100%", height: 260, borderRadius: 12, backgroundColor: colors.bg }}
             resizeMode="contain"
           />
         ) : (
@@ -111,26 +117,42 @@ export default function CaptureScreen() {
         )}
         <Pressable
           accessibilityRole="button"
-          style={styles.button}
+          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
           onPress={() => void pick("camera")}
         >
           <Text style={styles.buttonText}>Take photo</Text>
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          style={styles.buttonSecondary}
+          style={({ pressed }) => [
+            styles.buttonSecondary,
+            pressed && styles.buttonSecondaryPressed,
+          ]}
           onPress={() => void pick("library")}
         >
           <Text style={styles.buttonSecondaryText}>Choose from library</Text>
         </Pressable>
       </View>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {status ? <Text style={[styles.muted, { color: colors.ok }]}>{status}</Text> : null}
+      {error ? (
+        <Text style={styles.error} accessibilityLiveRegion="assertive">
+          {error}
+        </Text>
+      ) : null}
+      {status ? (
+        <Text style={styles.success} accessibilityLiveRegion="polite">
+          {status}
+        </Text>
+      ) : null}
 
       <Pressable
         accessibilityRole="button"
-        style={[styles.button, !asset || busy ? { opacity: 0.5 } : null]}
+        accessibilityState={{ disabled: !asset || busy, busy }}
+        style={({ pressed }) => [
+          styles.button,
+          pressed && styles.buttonPressed,
+          (!asset || busy) && styles.buttonDisabled,
+        ]}
         disabled={!asset || busy}
         onPress={() => void upload()}
       >
@@ -138,7 +160,7 @@ export default function CaptureScreen() {
       </Pressable>
       <Pressable
         accessibilityRole="button"
-        style={styles.buttonSecondary}
+        style={({ pressed }) => [styles.buttonSecondary, pressed && styles.buttonSecondaryPressed]}
         onPress={() => router.back()}
       >
         <Text style={styles.buttonSecondaryText}>Done</Text>

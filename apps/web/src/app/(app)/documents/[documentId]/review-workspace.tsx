@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { TriangleAlert } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@corridor/api";
@@ -47,7 +48,7 @@ function Conf({ value }: { value: number }) {
   const low = value < LOW_CONFIDENCE_THRESHOLD;
   return (
     <span
-      className={`rounded px-1.5 py-0.5 font-mono text-[11px] ${low ? "bg-warn-500/15 text-warn-500" : "bg-ok-500/10 text-ok-500"}`}
+      className={`rounded px-1.5 py-0.5 font-mono text-[11px] ${low ? "bg-warn-500/15 text-status-warn" : "bg-ok-500/10 text-status-ok"}`}
       title={low ? "Low confidence — verify against the document" : "Confidence"}
     >
       {Math.round(value * 100)}%
@@ -186,7 +187,7 @@ function ReviewForm({
     <div className="space-y-5">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="text-sm text-ink-500">
+          <div className="text-sm text-fg-secondary">
             <Link href="/documents" className="hover:underline">
               Documents
             </Link>{" "}
@@ -195,7 +196,7 @@ function ReviewForm({
           <h1 className="mt-1 flex items-center gap-3 text-2xl font-semibold tracking-tight">
             {doc.originalFilename} <StatusChip status={doc.uploadStatus} />
           </h1>
-          <p className="mt-1 text-sm text-ink-500">
+          <p className="mt-1 text-sm text-fg-secondary">
             {doc.detectedType
               ? `Detected: ${doc.detectedType.replace("_", " ")}`
               : `Declared: ${doc.documentType}`}
@@ -232,13 +233,16 @@ function ReviewForm({
       </header>
 
       {inFlight && (
-        <p className="panel flex items-center gap-2 p-4 text-sm text-signal-600">
+        <p className="panel flex items-center gap-2 p-4 text-sm text-status-signal">
           <span className="h-2 w-2 animate-pulse rounded-full bg-signal-500" aria-hidden />
           Extracting shipment data — this page updates automatically.
         </p>
       )}
       {doc.uploadStatus === "failed" && (
-        <p role="alert" className="rounded-md bg-danger-500/10 px-3 py-2 text-sm text-danger-500">
+        <p
+          role="alert"
+          className="rounded-md bg-danger-500/10 px-3 py-2 text-sm text-status-danger"
+        >
           {doc.extractionError}
         </p>
       )}
@@ -254,15 +258,15 @@ function ReviewForm({
               return (
                 <div key={role} className="panel p-4">
                   <div className="flex items-center justify-between">
-                    <h2 className="text-xs font-medium uppercase tracking-wide text-ink-500">
+                    <h2 className="text-xs font-medium uppercase tracking-wide text-fg-secondary">
                       {role}
                     </h2>
                     <Conf value={p.confidence} />
                   </div>
                   <div className="mt-1 font-medium">
-                    {p.name ?? <span className="text-danger-500">not found</span>}
+                    {p.name ?? <span className="text-status-danger">not found</span>}
                   </div>
-                  <div className="text-xs text-ink-500">{p.address ?? ""}</div>
+                  <div className="text-xs text-fg-secondary">{p.address ?? ""}</div>
                   <label className="label mt-3" htmlFor={`${role}-partner`}>
                     Match to partner
                   </label>
@@ -284,15 +288,17 @@ function ReviewForm({
               );
             })}
             <div className="panel p-4 text-sm">
-              <h2 className="text-xs font-medium uppercase tracking-wide text-ink-500">Document</h2>
+              <h2 className="text-xs font-medium uppercase tracking-wide text-fg-secondary">
+                Document
+              </h2>
               <dl className="mt-1 grid grid-cols-[6rem_1fr] gap-y-1">
-                <dt className="text-ink-500">Number</dt>
+                <dt className="text-fg-secondary">Number</dt>
                 <dd className="font-mono">{extracted.documentNumber ?? "—"}</dd>
-                <dt className="text-ink-500">Date</dt>
+                <dt className="text-fg-secondary">Date</dt>
                 <dd className="font-mono">{extracted.documentDate ?? "—"}</dd>
-                <dt className="text-ink-500">Broker</dt>
+                <dt className="text-fg-secondary">Broker</dt>
                 <dd>{extracted.broker?.name ?? "—"}</dd>
-                <dt className="text-ink-500">Totals</dt>
+                <dt className="text-fg-secondary">Totals</dt>
                 <dd className="font-mono text-xs">
                   {extracted.totals
                     ? `${extracted.totals.weightKg ?? "?"} kg · ${extracted.totals.pieceCount ?? "?"} pcs · ${extracted.totals.valueAmount ?? "?"} ${extracted.totals.valueCurrency ?? ""}`
@@ -300,9 +306,15 @@ function ReviewForm({
                 </dd>
               </dl>
               {extracted.notes.length > 0 && (
-                <ul className="mt-3 space-y-1 text-xs text-warn-500" aria-label="Extractor notes">
+                <ul
+                  className="mt-3 space-y-1 text-xs text-status-warn"
+                  aria-label="Extractor notes"
+                >
                   {extracted.notes.map((n, i) => (
-                    <li key={i}>⚠ {n}</li>
+                    <li key={i} className="flex items-start gap-1.5">
+                      <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                      <span>{n}</span>
+                    </li>
                   ))}
                 </ul>
               )}
@@ -314,13 +326,13 @@ function ReviewForm({
               <div className="flex items-center justify-between">
                 <h2
                   id="rate-con-heading"
-                  className="text-xs font-medium uppercase tracking-wide text-ink-500"
+                  className="text-xs font-medium uppercase tracking-wide text-fg-secondary"
                 >
                   Rate confirmation
                 </h2>
                 <Conf value={extracted.rateConfirmation.confidence} />
               </div>
-              <p className="mt-1 text-xs text-ink-500">
+              <p className="mt-1 text-xs text-fg-secondary">
                 Load tender — read-only. Rate confirmations carry no commodity detail, so nothing
                 here is applied to a movement.
               </p>
@@ -342,7 +354,7 @@ function ReviewForm({
                   ] as const
                 ).map(([label, value]) => (
                   <div key={label}>
-                    <dt className="text-xs text-ink-500">{label}</dt>
+                    <dt className="text-xs text-fg-secondary">{label}</dt>
                     <dd className="font-mono text-xs">{value || "—"}</dd>
                   </div>
                 ))}
@@ -352,7 +364,7 @@ function ReviewForm({
 
           <section className="panel overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">
+              <thead className="bg-surface-sunken text-left text-xs uppercase tracking-wide text-fg-secondary">
                 <tr>
                   <th className="px-3 py-2 font-medium">#</th>
                   <th className="px-3 py-2 font-medium">Commodity</th>
@@ -368,7 +380,7 @@ function ReviewForm({
                   {canReview && <th />}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-ink-100">
+              <tbody className="divide-y divide-border-default">
                 {lines.map((l, i) => {
                   const low = l.confidence < LOW_CONFIDENCE_THRESHOLD;
                   const cls = `input px-2 py-1 text-xs ${low ? "border-warn-500/60" : ""}`;
@@ -478,7 +490,7 @@ function ReviewForm({
                       {canReview && (
                         <td className="px-3 py-1.5 text-right">
                           <button
-                            className="text-xs text-danger-500 hover:underline"
+                            className="text-xs text-status-danger hover:underline"
                             onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))}
                           >
                             Remove
@@ -491,9 +503,9 @@ function ReviewForm({
               </tbody>
             </table>
             {canReview && (
-              <div className="border-t border-ink-100 px-3 py-2">
+              <div className="border-t border-border-default px-3 py-2">
                 <button
-                  className="text-xs text-ink-500 hover:text-ink-950"
+                  className="text-xs text-fg-secondary hover:text-fg-primary"
                   onClick={() =>
                     setLines((ls) => [
                       ...ls,
@@ -520,7 +532,7 @@ function ReviewForm({
 
           {canReview && doc.uploadStatus !== "applied" && (
             <section className="panel flex flex-wrap items-end gap-3 p-4">
-              <div className="min-w-64">
+              <div className="w-full min-w-0 sm:w-auto sm:min-w-64">
                 <label className="label" htmlFor="applyMovement">
                   Apply to movement
                 </label>
@@ -560,18 +572,18 @@ function ReviewForm({
                   : `Confirm & create a shipment with ${lines.length} line${lines.length === 1 ? "" : "s"}`}
               </button>
               {error && (
-                <p role="alert" className="w-full text-sm text-danger-500">
+                <p role="alert" className="w-full text-sm text-status-danger">
                   {error}
                 </p>
               )}
-              <p className="w-full text-xs text-ink-500">
+              <p className="w-full text-xs text-fg-secondary">
                 You are confirming this data as the reviewer. Low-confidence fields are highlighted;
                 check them against the original before applying.
               </p>
             </section>
           )}
           {doc.uploadStatus === "applied" && doc.appliedMovementId && (
-            <p className="text-sm text-ok-500">
+            <p className="text-sm text-status-ok">
               Applied to{" "}
               <Link href={`/movements/${doc.appliedMovementId}`} className="underline">
                 movement

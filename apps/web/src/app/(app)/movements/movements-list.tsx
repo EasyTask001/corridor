@@ -7,14 +7,24 @@
  */
 import { useMemo, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { MOVEMENT_SEARCH_COLUMNS, type MovementSearchColumn, type MovementStatus, type Regime } from "@corridor/domain";
+import {
+  MOVEMENT_SEARCH_COLUMNS,
+  type MovementSearchColumn,
+  type MovementStatus,
+  type Regime,
+} from "@corridor/domain";
 import { Card } from "@corridor/ui";
 import { ColumnChooser } from "@/components/list/column-chooser";
 import { ListToolbar } from "@/components/list/list-toolbar";
 import { useAutoRefresh } from "@/components/list/use-auto-refresh";
 import { useListPrefs } from "@/components/list/use-list-prefs";
 import { useTRPC } from "@/lib/trpc/client";
-import { MOVEMENT_COLUMNS, MovementsTable, type MovementColumnKey, type MovementRow } from "./movements-table";
+import {
+  MOVEMENT_COLUMNS,
+  MovementsTable,
+  type MovementColumnKey,
+  type MovementRow,
+} from "./movements-table";
 
 const COLUMN_KEYS = MOVEMENT_COLUMNS.map((c) => c.key);
 const DEFAULT_COLUMNS: MovementColumnKey[] = [...COLUMN_KEYS];
@@ -53,7 +63,9 @@ export function MovementsList({
     }),
     [status, regime, portId, search, searchColumn, prefs.pageSize, page],
   );
-  const list = useQuery(trpc.movement.list.queryOptions(input, { placeholderData: keepPreviousData }));
+  const list = useQuery(
+    trpc.movement.list.queryOptions(input, { placeholderData: keepPreviousData }),
+  );
   const { secondsLeft } = useAutoRefresh(prefs.autoRefreshSec, () => list.refetch());
 
   const rows: MovementRow[] = (list.data?.rows ?? []).map((m) => ({
@@ -100,7 +112,9 @@ export function MovementsList({
           defaults={DEFAULT_COLUMNS}
           onChange={(cols) => setPrefs({ columns: cols })}
         />
-        <span className="text-xs text-ink-500">{list.data ? `${list.data.total} total` : ""}</span>
+        <span className="text-xs text-fg-secondary">
+          {list.data ? `${list.data.total} total` : ""}
+        </span>
       </ListToolbar>
       <Card className="overflow-x-auto">
         <MovementsTable

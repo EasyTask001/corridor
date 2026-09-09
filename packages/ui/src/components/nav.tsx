@@ -12,11 +12,11 @@ import { cn } from "../lib/cn";
  * stays framework-agnostic.
  */
 export const navItemVariants = cva(
-  "flex items-center gap-2.5 rounded-md px-3 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring/40",
+  "flex min-h-11 items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors lg:min-h-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring/40",
   {
     variants: {
       active: {
-        true: "bg-surface-sunken font-medium text-fg-primary",
+        true: "bg-accent/10 font-medium text-accent",
         false: "text-fg-secondary hover:bg-surface-sunken/60 hover:text-fg-primary",
       },
     },
@@ -37,7 +37,7 @@ export function NavItemContent({
 }) {
   return (
     <span className={cn("flex min-w-0 flex-1 items-center gap-2.5", className)}>
-      <Icon className="size-4 shrink-0" aria-hidden />
+      <Icon className="size-[1.125rem] shrink-0" strokeWidth={1.8} aria-hidden />
       <span className="truncate">{children}</span>
     </span>
   );
@@ -67,7 +67,7 @@ export function NavGroup({
           aria-hidden
         />
       </CollapsiblePrimitive.Trigger>
-      <CollapsiblePrimitive.Content className="space-y-0.5 overflow-hidden pl-6">
+      <CollapsiblePrimitive.Content className="mt-1 space-y-0.5 overflow-hidden pl-5">
         {children}
       </CollapsiblePrimitive.Content>
     </CollapsiblePrimitive.Root>

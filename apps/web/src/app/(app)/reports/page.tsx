@@ -16,9 +16,9 @@ export default async function ReportsPage() {
     <div className="space-y-4">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Reports</h1>
-        <p className="text-sm text-ink-500">
-          The crossing log with the columns you need, or a question about volume, cargo and
-          customs outcomes.
+        <p className="text-sm text-fg-secondary">
+          The crossing log with the columns you need, or a question about volume, cargo and customs
+          outcomes.
         </p>
       </header>
       <Tabs defaultValue="crossings">

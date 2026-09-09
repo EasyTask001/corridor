@@ -18,7 +18,14 @@ type Fields = {
   timezone: string;
 };
 
-type AddressFields = { line1: string; line2: string; city: string; region: string; postalCode: string; country: string };
+type AddressFields = {
+  line1: string;
+  line2: string;
+  city: string;
+  region: string;
+  postalCode: string;
+  country: string;
+};
 
 const FIELDS: { key: keyof Fields; label: string; mono?: boolean }[] = [
   { key: "name", label: "Display name" },
@@ -84,7 +91,8 @@ export function OrganizationForm({
     trpc.organization.update.mutationOptions({ onSuccess: () => setSaved(true) }),
   );
 
-  const cls = (mono?: boolean) => `input ${mono ? "font-mono" : ""} ${readOnly ? "bg-ink-50" : ""}`;
+  const cls = (mono?: boolean) =>
+    `input ${mono ? "font-mono" : ""} ${readOnly ? "bg-surface-sunken" : ""}`;
 
   return (
     <form
@@ -107,7 +115,8 @@ export function OrganizationForm({
         if (JSON.stringify(cleanAddress) !== JSON.stringify(initialAddress ?? {}))
           payload.billingAddress = cleanAddress;
         const emails = dispatch.map((d) => d.trim().toLowerCase()).filter(Boolean);
-        if (JSON.stringify(emails) !== JSON.stringify(initialDispatch)) payload.dispatchEmails = emails;
+        if (JSON.stringify(emails) !== JSON.stringify(initialDispatch))
+          payload.dispatchEmails = emails;
         update.mutate(payload);
       }}
     >
@@ -149,7 +158,9 @@ export function OrganizationForm({
       </fieldset>
 
       <fieldset>
-        <legend className="label">Dispatch e-mail (driver sheets and entry notices, up to five)</legend>
+        <legend className="label">
+          Dispatch e-mail (driver sheets and entry notices, up to five)
+        </legend>
         <div className="grid gap-2 sm:grid-cols-2">
           {dispatch.map((value, i) => (
             <input
@@ -175,7 +186,7 @@ export function OrganizationForm({
             onChange={(e) => setSimpleDriverSheet(e.target.checked)}
           />
           Simple driver sheet
-          <span className="text-xs text-ink-500">(print without commodity lines)</span>
+          <span className="text-xs text-fg-secondary">(print without commodity lines)</span>
         </label>
         <label className="flex items-center gap-2 text-sm">
           <input
@@ -185,26 +196,26 @@ export function OrganizationForm({
             onChange={(e) => setIncludePars(e.target.checked)}
           />
           Include PARS in cargo control numbers
-          <span className="text-xs text-ink-500">(ACI PARS shipments)</span>
+          <span className="text-xs text-fg-secondary">(ACI PARS shipments)</span>
         </label>
       </div>
 
       {billing && (
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-1 rounded-md bg-ink-50 px-4 py-3 text-sm sm:grid-cols-4">
+        <dl className="grid grid-cols-1 gap-x-6 gap-y-2 rounded-lg bg-surface-sunken px-4 py-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
           <div>
-            <dt className="text-xs uppercase tracking-wide text-ink-500">Plan</dt>
+            <dt className="text-xs uppercase tracking-wide text-fg-secondary">Plan</dt>
             <dd className="font-medium capitalize">{billing.plan}</dd>
           </div>
           <div>
-            <dt className="text-xs uppercase tracking-wide text-ink-500">Status</dt>
+            <dt className="text-xs uppercase tracking-wide text-fg-secondary">Status</dt>
             <dd className="font-medium capitalize">{billing.status.replace(/_/g, " ")}</dd>
           </div>
           <div>
-            <dt className="text-xs uppercase tracking-wide text-ink-500">Seats</dt>
+            <dt className="text-xs uppercase tracking-wide text-fg-secondary">Seats</dt>
             <dd className="font-medium">{billing.subscription?.seats ?? "—"}</dd>
           </div>
           <div>
-            <dt className="text-xs uppercase tracking-wide text-ink-500">Renews</dt>
+            <dt className="text-xs uppercase tracking-wide text-fg-secondary">Renews</dt>
             <dd className="font-medium">
               {billing.subscription?.currentPeriodEnd
                 ? new Date(billing.subscription.currentPeriodEnd).toLocaleDateString("en-CA")
@@ -214,8 +225,8 @@ export function OrganizationForm({
         </dl>
       )}
 
-      {update.error && <p className="text-sm text-danger-500">{update.error.message}</p>}
-      {saved && <p className="text-sm text-ok-500">Saved.</p>}
+      {update.error && <p className="text-sm text-status-danger">{update.error.message}</p>}
+      {saved && <p className="text-sm text-status-ok">Saved.</p>}
       {!readOnly && (
         <button type="submit" disabled={update.isPending} className="btn-primary">
           {update.isPending ? "Saving…" : "Save changes"}

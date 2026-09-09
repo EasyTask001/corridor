@@ -28,32 +28,31 @@ export function SealsStep() {
       ? location
       : (m.trailers[0]?.id ?? "truck");
 
-  const units: Array<{ key: string; title: string; hint: string; slots: number; seals: Seal[] }> =
-    [
-      ...(m.truck
-        ? [
-            {
-              key: "truck",
-              title: m.truck.unitNumber,
-              hint: "Tractor",
-              slots: TRUCK_SLOTS,
-              seals: truckSeals,
-            },
-          ]
-        : []),
-      ...m.trailers.map((t, i) => ({
-        key: t.id,
-        title: t.unitNumber,
-        hint: `Trailer ${i + 1}`,
-        slots: TRAILER_SLOTS,
-        seals: t.seals,
-      })),
-    ];
+  const units: Array<{ key: string; title: string; hint: string; slots: number; seals: Seal[] }> = [
+    ...(m.truck
+      ? [
+          {
+            key: "truck",
+            title: m.truck.unitNumber,
+            hint: "Tractor",
+            slots: TRUCK_SLOTS,
+            seals: truckSeals,
+          },
+        ]
+      : []),
+    ...m.trailers.map((t, i) => ({
+      key: t.id,
+      title: t.unitNumber,
+      hint: `Trailer ${i + 1}`,
+      slots: TRAILER_SLOTS,
+      seals: t.seals,
+    })),
+  ];
 
   return (
     <div className="max-w-3xl space-y-4">
       {units.length === 0 ? (
-        <p className="panel px-4 py-4 text-sm text-ink-500">
+        <p className="panel px-4 py-4 text-sm text-fg-secondary">
           Assign a truck or hitch a trailer before recording seals.
         </p>
       ) : (
@@ -62,10 +61,12 @@ export function SealsStep() {
             <li key={u.key} className="panel p-4" aria-label={`${u.hint} ${u.title}`}>
               <div className="flex items-baseline justify-between">
                 <div>
-                  <span className="text-xs uppercase tracking-wide text-ink-500">{u.hint}</span>
+                  <span className="text-xs uppercase tracking-wide text-fg-secondary">
+                    {u.hint}
+                  </span>
                   <div className="font-mono font-medium">{u.title}</div>
                 </div>
-                <span className="font-mono text-xs text-ink-500">
+                <span className="font-mono text-xs text-fg-secondary">
                   {u.seals.length}/{u.slots}
                 </span>
               </div>
@@ -76,14 +77,16 @@ export function SealsStep() {
                     <li
                       key={s?.id ?? `empty-${i}`}
                       className={`flex items-center justify-between rounded-md border px-3 py-1.5 text-sm ${
-                        s ? "border-ink-100 bg-white" : "border-dashed border-ink-100 bg-ink-50"
+                        s
+                          ? "border-border-default bg-surface-raised"
+                          : "border-dashed border-border-default bg-surface-sunken"
                       }`}
                     >
                       {s ? (
                         <>
                           <div>
                             <span className="font-mono font-medium">{s.sealNumber}</span>
-                            <span className="ml-2 text-xs text-ink-500">
+                            <span className="ml-2 text-xs text-fg-secondary">
                               {s.sealType ?? ""}
                               {s.appliedBy ? ` · ${s.appliedBy}` : ""}
                             </span>
@@ -91,7 +94,7 @@ export function SealsStep() {
                           {editable && (
                             <button
                               type="button"
-                              className="text-xs text-danger-500 hover:underline"
+                              className="text-xs text-status-danger hover:underline"
                               onClick={() => removeSeal.mutate({ movementId: m.id, id: s.id })}
                             >
                               Remove
@@ -99,7 +102,7 @@ export function SealsStep() {
                           )}
                         </>
                       ) : (
-                        <span className="text-xs text-ink-300">Slot {i + 1} open</span>
+                        <span className="text-xs text-fg-secondary/60">Slot {i + 1} open</span>
                       )}
                     </li>
                   );

@@ -25,12 +25,21 @@ export function ColumnPicker<K extends string>({
   };
   return (
     <details className="relative text-sm">
-      <summary className="cursor-pointer select-none rounded-md border border-ink-100 bg-white px-3 py-2 text-ink-700 hover:bg-ink-50">
+      <summary className="cursor-pointer select-none rounded-md border border-border-default bg-surface-raised px-3 py-2 text-fg-primary hover:bg-surface-sunken">
         Columns ({selected.length} of {columns.length})
       </summary>
-      <div className="absolute z-20 mt-1 w-72 rounded-md border border-ink-100 bg-white p-3 shadow-lg" role="group" aria-label="Report columns">
+      <div
+        className="absolute right-0 z-20 mt-1 w-[min(18rem,calc(100vw-2rem))] rounded-lg border border-border-default bg-surface-overlay p-3 shadow-lg"
+        role="group"
+        aria-label="Report columns"
+      >
         <div className="mb-2 flex items-center justify-between text-xs">
-          <Button variant="link" size="xs" className="px-0" onClick={() => onChange(columns.map((c) => c.key))}>
+          <Button
+            variant="link"
+            size="xs"
+            className="px-0"
+            onClick={() => onChange(columns.map((c) => c.key))}
+          >
             Select all
           </Button>
           <Button variant="link" size="xs" className="px-0" onClick={() => onChange(defaults)}>

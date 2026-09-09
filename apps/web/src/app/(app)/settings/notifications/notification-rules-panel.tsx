@@ -31,7 +31,7 @@ export function NotificationRulesPanel({ initial }: { initial: Rules }) {
   };
 
   return (
-    <div className="panel divide-y divide-ink-100">
+    <div className="panel divide-y divide-border-default">
       {data.map((rule) => (
         <div
           key={rule.eventType}
@@ -39,7 +39,7 @@ export function NotificationRulesPanel({ initial }: { initial: Rules }) {
         >
           <div className="min-w-0">
             <div className="font-medium">{rule.label}</div>
-            <div className="text-sm text-ink-500">{rule.description}</div>
+            <div className="text-sm text-fg-secondary">{rule.description}</div>
           </div>
           <div className="flex shrink-0 items-center gap-4 text-sm">
             <label className="flex items-center gap-1.5">

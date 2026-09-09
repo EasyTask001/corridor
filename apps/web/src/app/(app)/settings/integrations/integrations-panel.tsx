@@ -166,19 +166,19 @@ export function IntegrationsPanel({
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h2 className="font-medium">{p.name}</h2>
-                  <p className="text-xs text-ink-500">{p.desc}</p>
+                  <p className="text-xs text-fg-secondary">{p.desc}</p>
                 </div>
                 <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
                   {p.credentials && cfg?.hasCredentials && (
-                    <span className="rounded bg-ok-500/10 px-2 py-0.5 text-xs font-semibold uppercase text-ok-500">
+                    <span className="rounded bg-ok-500/10 px-2 py-0.5 text-xs font-semibold uppercase text-status-ok">
                       Credentials stored
                     </span>
                   )}
                   <span
                     className={`rounded px-2 py-0.5 text-xs font-semibold uppercase ${
                       cfg?.status === "disabled"
-                        ? "bg-ink-100 text-ink-500"
-                        : "bg-ok-500/10 text-ok-500"
+                        ? "bg-surface-sunken text-fg-secondary"
+                        : "bg-ok-500/10 text-status-ok"
                     }`}
                   >
                     {cfg?.status ?? "default"}
@@ -192,7 +192,7 @@ export function IntegrationsPanel({
                   </Link>
                 </p>
               ) : (
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
                     <label className="label" htmlFor={`${p.key}-env`}>
                       Environment
@@ -275,11 +275,11 @@ export function IntegrationsPanel({
                     </>
                   )}
                   {p.credentials && (
-                    <fieldset className="col-span-2 space-y-2 rounded border border-ink-100 p-3">
-                      <legend className="px-1 text-xs font-medium uppercase tracking-wide text-ink-500">
+                    <fieldset className="col-span-2 space-y-2 rounded border border-border-default p-3">
+                      <legend className="px-1 text-xs font-medium uppercase tracking-wide text-fg-secondary">
                         Gateway credentials
                       </legend>
-                      <p className="text-xs text-ink-500">
+                      <p className="text-xs text-fg-secondary">
                         Encrypted into Supabase Vault on save and never sent back to this page.
                         Leave a field blank to keep its stored value; fill one to replace just that
                         field. Use “Clear credentials” to remove all three.
@@ -347,7 +347,7 @@ export function IntegrationsPanel({
                     <button className="btn-primary" disabled={upsert.isPending}>
                       Save
                     </button>
-                    {saved === p.key && <span className="text-sm text-ok-500">Saved.</span>}
+                    {saved === p.key && <span className="text-sm text-status-ok">Saved.</span>}
                     {p.mock && (
                       <button
                         type="button"
@@ -362,13 +362,13 @@ export function IntegrationsPanel({
                     )}
                     {tested[p.key] && (
                       <span
-                        className={`text-sm ${tested[p.key]!.startsWith("Failed") ? "text-danger-500" : "text-ok-500"}`}
+                        className={`text-sm ${tested[p.key]!.startsWith("Failed") ? "text-status-danger" : "text-status-ok"}`}
                       >
                         {tested[p.key]}
                       </span>
                     )}
                     {cfg?.lastPolledAt && (
-                      <span className="text-xs text-ink-500">
+                      <span className="text-xs text-fg-secondary">
                         last polled {new Date(cfg.lastPolledAt).toLocaleString("en-CA")}
                       </span>
                     )}
@@ -384,10 +384,10 @@ export function IntegrationsPanel({
         <div className="panel overflow-x-auto">
           <div className="flex items-center justify-between px-4 py-3">
             <h2 className="font-medium">Integration log</h2>
-            <span className="text-xs text-ink-500">live · last 50</span>
+            <span className="text-xs text-fg-secondary">live · last 50</span>
           </div>
           <table className="w-full text-sm">
-            <thead className="bg-ink-50 text-left text-xs uppercase tracking-wide text-ink-500">
+            <thead className="bg-surface-sunken text-left text-xs uppercase tracking-wide text-fg-secondary">
               <tr>
                 <th className="px-4 py-2 font-medium">When</th>
                 <th className="px-4 py-2 font-medium">Provider</th>
@@ -396,25 +396,27 @@ export function IntegrationsPanel({
                 <th className="px-4 py-2 font-medium">Result</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-ink-100">
+            <tbody className="divide-y divide-border-default">
               {eventsQ.data.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-5 text-ink-500">
+                  <td colSpan={5} className="px-4 py-5 text-fg-secondary">
                     No integration calls yet.
                   </td>
                 </tr>
               )}
               {eventsQ.data.map((e) => (
                 <tr key={e.id}>
-                  <td className="whitespace-nowrap px-4 py-2 text-xs text-ink-500">
+                  <td className="whitespace-nowrap px-4 py-2 text-xs text-fg-secondary">
                     {new Date(e.createdAt).toLocaleTimeString("en-CA")}
                   </td>
                   <td className="px-4 py-2 font-mono text-xs">{e.provider}</td>
                   <td className="px-4 py-2 text-xs">
-                    <span className="text-ink-500">{e.direction === "outbound" ? "→" : "←"}</span>{" "}
+                    <span className="text-fg-secondary">
+                      {e.direction === "outbound" ? "→" : "←"}
+                    </span>{" "}
                     {e.operation}
                     {e.durationMs != null && (
-                      <span className="ml-1 text-ink-300">{e.durationMs}ms</span>
+                      <span className="ml-1 text-fg-secondary/60">{e.durationMs}ms</span>
                     )}
                   </td>
                   <td className="px-4 py-2 font-mono text-xs">
@@ -428,11 +430,11 @@ export function IntegrationsPanel({
                   </td>
                   <td className="px-4 py-2 text-xs">
                     {e.success ? (
-                      <span className="text-ok-500">
+                      <span className="text-status-ok">
                         ok{e.statusCode ? ` ${e.statusCode}` : ""}
                       </span>
                     ) : (
-                      <span className="text-danger-500" title={e.errorMessage ?? ""}>
+                      <span className="text-status-danger" title={e.errorMessage ?? ""}>
                         {e.statusCode ?? "error"} · {e.errorMessage}
                       </span>
                     )}
@@ -456,14 +458,14 @@ export function IntegrationsPanel({
           </div>
           <div className="mt-3 flex flex-wrap gap-2 text-xs">
             {Object.entries(statsQ.data).map(([k, v]) => (
-              <span key={k} className="rounded bg-ink-100 px-2 py-0.5 font-mono">
+              <span key={k} className="rounded bg-surface-sunken px-2 py-0.5 font-mono">
                 {k} {v}
               </span>
             ))}
           </div>
           <ul className="mt-3 max-h-96 space-y-2 overflow-y-auto text-xs">
             {jobsQ.data.map((j) => (
-              <li key={j.id} className="rounded border border-ink-100 p-2">
+              <li key={j.id} className="rounded border border-border-default p-2">
                 <div className="flex justify-between font-mono">
                   <span>
                     #{j.id} {j.jobType}
@@ -471,20 +473,20 @@ export function IntegrationsPanel({
                   <span
                     className={
                       j.status === "failed"
-                        ? "text-danger-500"
+                        ? "text-status-danger"
                         : j.status === "succeeded"
-                          ? "text-ok-500"
-                          : "text-ink-500"
+                          ? "text-status-ok"
+                          : "text-fg-secondary"
                     }
                   >
                     {j.status}
                   </span>
                 </div>
-                <div className="text-ink-500">
+                <div className="text-fg-secondary">
                   run {new Date(j.runAt).toLocaleTimeString("en-CA")} · attempt {j.attempts}/
                   {j.maxAttempts}
                 </div>
-                {j.lastError && <div className="text-danger-500">{j.lastError}</div>}
+                {j.lastError && <div className="text-status-danger">{j.lastError}</div>}
               </li>
             ))}
           </ul>

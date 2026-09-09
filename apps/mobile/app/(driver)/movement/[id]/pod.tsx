@@ -97,18 +97,25 @@ export default function PodScreen() {
   };
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={styles.content}
+      contentInsetAdjustmentBehavior="automatic"
+    >
       <View style={styles.panel}>
         <Text style={styles.h2}>Consignee signature</Text>
         <Text style={styles.muted}>Have the receiver sign inside the box.</Text>
         <View
+          accessible
+          accessibilityRole="image"
+          accessibilityLabel={empty ? "Empty signature pad" : "Signature captured"}
           onLayout={(event: LayoutChangeEvent) => setWidth(event.nativeEvent.layout.width)}
           style={{
             height: PAD_HEIGHT,
             borderWidth: 1,
             borderColor: colors.border,
-            borderRadius: 8,
-            backgroundColor: "#fff",
+            borderRadius: 12,
+            backgroundColor: colors.panel,
             overflow: "hidden",
           }}
           {...responder.panHandlers}
@@ -119,19 +126,38 @@ export default function PodScreen() {
         </View>
         <Pressable
           accessibilityRole="button"
-          style={styles.buttonSecondary}
+          accessibilityState={{ disabled: empty }}
+          disabled={empty}
+          style={({ pressed }) => [
+            styles.buttonSecondary,
+            pressed && styles.buttonSecondaryPressed,
+            empty && styles.buttonDisabled,
+          ]}
           onPress={() => setStrokes([])}
         >
           <Text style={styles.buttonSecondaryText}>Clear</Text>
         </Pressable>
       </View>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {status ? <Text style={[styles.muted, { color: colors.ok }]}>{status}</Text> : null}
+      {error ? (
+        <Text style={styles.error} accessibilityLiveRegion="assertive">
+          {error}
+        </Text>
+      ) : null}
+      {status ? (
+        <Text style={styles.success} accessibilityLiveRegion="polite">
+          {status}
+        </Text>
+      ) : null}
 
       <Pressable
         accessibilityRole="button"
-        style={[styles.button, empty || busy ? { opacity: 0.5 } : null]}
+        accessibilityState={{ disabled: empty || busy, busy }}
+        style={({ pressed }) => [
+          styles.button,
+          pressed && styles.buttonPressed,
+          (empty || busy) && styles.buttonDisabled,
+        ]}
         disabled={empty || busy}
         onPress={() => void submit()}
       >
@@ -143,7 +169,7 @@ export default function PodScreen() {
       </Pressable>
       <Pressable
         accessibilityRole="button"
-        style={styles.buttonSecondary}
+        style={({ pressed }) => [styles.buttonSecondary, pressed && styles.buttonSecondaryPressed]}
         onPress={() => router.back()}
       >
         <Text style={styles.buttonSecondaryText}>Done</Text>

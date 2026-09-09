@@ -89,7 +89,7 @@ export function Timeline({
 
   return (
     <aside className="flex h-full flex-col">
-      <h2 className="text-xs font-medium uppercase tracking-wide text-ink-500">Timeline</h2>
+      <h2 className="text-xs font-medium uppercase tracking-wide text-fg-secondary">Timeline</h2>
       <ol className="mt-3 flex-1 space-y-3 overflow-y-auto pr-1" aria-label="Movement timeline">
         {events.map((e) => {
           const a = ACTOR[e.actorType];
@@ -100,15 +100,15 @@ export function Timeline({
                 <div
                   className={
                     e.eventType === "note"
-                      ? "text-ink-700"
+                      ? "text-fg-primary"
                       : e.eventType === "customs_event"
-                        ? "text-ink-950"
+                        ? "text-fg-primary"
                         : "font-medium"
                   }
                 >
                   {describe(e)}
                 </div>
-                <div className="text-xs text-ink-500">
+                <div className="text-xs text-fg-secondary">
                   {a.label}
                   {e.actorName ? ` · ${e.actorName}` : ""} ·{" "}
                   {new Date(e.occurredAt).toLocaleString("en-CA", {
@@ -123,7 +123,7 @@ export function Timeline({
       </ol>
       {canNote && (
         <form
-          className="mt-3 flex gap-2 border-t border-ink-100 pt-3"
+          className="mt-3 flex gap-2 border-t border-border-default pt-3"
           onSubmit={(e) => {
             e.preventDefault();
             if (body.trim()) addNote.mutate({ movementId, body: body.trim() });

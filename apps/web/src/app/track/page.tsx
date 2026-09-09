@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Route } from "lucide-react";
 import { TRPCReactProvider } from "@/lib/trpc/client";
 import { TrackForm } from "./track-form";
 
@@ -11,13 +12,19 @@ export const metadata: Metadata = { title: "Track a PAPS / PARS" };
  */
 export default function TrackPage() {
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-lg flex-col justify-center gap-6 p-6">
+    <main className="relative mx-auto flex min-h-dvh w-full max-w-xl flex-col justify-center gap-6 overflow-hidden p-4 sm:p-6">
       <div>
-        <Link href="/login" className="text-sm text-ink-500 hover:underline">
-          ← Corridor
+        <Link
+          href="/login"
+          className="mb-8 inline-flex items-center gap-2 text-sm font-semibold text-fg-primary"
+        >
+          <span className="flex size-8 items-center justify-center rounded-lg bg-accent text-accent-fg shadow-sm">
+            <Route className="size-4" aria-hidden />
+          </span>
+          Corridor
         </Link>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight">Check a PAPS / PARS</h1>
-        <p className="mt-1 text-sm text-ink-500">
+        <h1 className="text-3xl font-semibold tracking-tight">Check a PAPS / PARS</h1>
+        <p className="mt-2 max-w-lg text-sm leading-relaxed text-fg-secondary">
           Enter the carrier code and the control number printed on the shipment paperwork.
         </p>
       </div>
@@ -25,9 +32,8 @@ export default function TrackPage() {
       <TRPCReactProvider>
         <TrackForm />
       </TRPCReactProvider>
-      <p className="text-xs text-ink-500">
-        Ten lookups a minute. This page shows the customs status, port, entry number and times
-        only.
+      <p className="px-1 text-xs leading-relaxed text-fg-secondary">
+        Ten lookups a minute. This page shows the customs status, port, entry number and times only.
       </p>
     </main>
   );
