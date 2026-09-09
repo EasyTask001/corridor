@@ -137,13 +137,27 @@ export async function seed() {
     }
 
     const orgId = await ensureOrg(DEMO_ORG);
+    async function orgRoleId(orgId: string, name: string) {
+      const [existing] = await sql<{ id: string }[]>`
+        select id from public.roles where organization_id = ${orgId} and name = ${name} limit 1`;
+      if (existing) return existing.id;
+      const [created] = await sql<{ id: string }[]>`
+        insert into public.roles (organization_id, name, is_system)
+        values (${orgId}, ${name}, false) returning id`;
+      await sql`
+        insert into public.role_permissions (role_id, permission_id)
+        select ${created!.id}, permission_id from public.role_permissions
+        where role_id = ${roleId(name)}
+        on conflict do nothing`;
+      return created!.id;
+    }
     const demoUserIds = new Map<string, string>();
     for (const u of DEMO_USERS) {
       const userId = await ensureUser(admin, u);
       demoUserIds.set(u.email, userId);
       await sql`
         insert into public.organization_members (organization_id, user_id, role_id, status)
-        values (${orgId}, ${userId}, ${roleId(u.role)}, 'active')
+        values (${orgId}, ${userId}, ${await orgRoleId(orgId, u.role)}, 'active')
         on conflict (organization_id, user_id) where user_id is not null
         do update set role_id = excluded.role_id, status = 'active'`;
     }
@@ -152,7 +166,7 @@ export async function seed() {
     const otherUserId = await ensureUser(admin, OTHER_USER);
     await sql`
       insert into public.organization_members (organization_id, user_id, role_id, status)
-      values (${otherOrgId}, ${otherUserId}, ${roleId(OTHER_USER.role)}, 'active')
+      values (${otherOrgId}, ${otherUserId}, ${await orgRoleId(otherOrgId, OTHER_USER.role)}, 'active')
       on conflict (organization_id, user_id) where user_id is not null
       do update set role_id = excluded.role_id, status = 'active'`;
 
