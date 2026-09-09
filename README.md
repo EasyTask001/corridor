@@ -100,18 +100,19 @@ Pull requests and issues use the templates in `.github/`.
 
 ## Documentation
 
-| File                      | What it is                                                  |
-| ------------------------- | ----------------------------------------------------------- |
-| `CHANGELOG.md`            | Unreleased and shipped changes, Keep a Changelog format     |
-| `CONTRIBUTING.md`         | Workflow, code standards, release process                   |
-| `SECURITY.md`             | How to report a vulnerability; the security architecture    |
-| `SUPPORT.md`              | Where to look and where to ask                              |
-| `CODE_OF_CONDUCT.md`      | Contributor Covenant 2.1                                    |
-| `CLAUDE.md`               | Repo-wide rules for AI agents, including schema design      |
-| `docs/security-review.md` | Standing security review with evidence and open findings    |
-| `docs/plans/`             | Historical implementation plans (a record, not living docs) |
-| `apps/mobile/README.md`   | The Expo driver app                                         |
-| `load/README.md`          | k6 load tests                                               |
+| File                      | What it is                                                   |
+| ------------------------- | ------------------------------------------------------------ |
+| `CHANGELOG.md`            | Unreleased and shipped changes, Keep a Changelog format      |
+| `CONTRIBUTING.md`         | Workflow, code standards, release process                    |
+| `SECURITY.md`             | How to report a vulnerability; the security architecture     |
+| `SUPPORT.md`              | Where to look and where to ask                               |
+| `CODE_OF_CONDUCT.md`      | Contributor Covenant 2.1                                     |
+| `CLAUDE.md`               | Repo-wide rules for AI agents, including schema design       |
+| `docs/security-review.md` | Standing security review with evidence and open findings     |
+| `docs/user-manual/`       | End-user guide: movements, shipments, crew, customs, reports |
+| `docs/plans/`             | Historical implementation plans (a record, not living docs)  |
+| `apps/mobile/README.md`   | The Expo driver app                                          |
+| `load/README.md`          | k6 load tests                                                |
 
 ## License
 

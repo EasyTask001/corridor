@@ -26,13 +26,14 @@ citations can be exercised without a key.
 ```
 apps/web/src/
 ├── app/
-│   ├── (app)/        # authenticated shell: movements, documents, alerts, reports,
-│   │                 # copilot, parties, notifications, settings/*
+│   ├── (app)/        # authenticated shell: dashboard, movements, shipments, documents,
+│   │                 # in-bond, pars-rns, alerts, reports, copilot, parties, notifications,
+│   │                 # resources, help, settings/*
 │   ├── (auth)/       # login / signup, plus the password sign-in server action
 │   ├── auth/         # Supabase auth callback + confirm routes
 │   ├── invite/[token]/, onboarding/
-│   ├── api/          # trpc, copilot/chat, jobs/{process,expiry-scan},
-│   │                 # realtime/token, webhooks/{stripe,supabase-auth}, health
+│   ├── api/          # trpc, copilot/chat, auth/sso, jobs/{process,expiry-scan,notices-sync},
+│   │                 # pdf/[id], realtime/token, webhooks/{stripe,supabase-auth,customs}, health
 │   ├── globals.css   # imports @corridor/ui/tokens.css
 │   └── layout.tsx
 ├── components/       # app-specific components (app-shell, movement/, documents/, …);

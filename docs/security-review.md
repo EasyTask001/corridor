@@ -76,42 +76,60 @@ card field anywhere.
 
 ## 4. RLS is enabled on every table
 
-All 31 tables in `public` have `relrowsecurity = true`. Each is listed with the
+All 49 tables in `public` have `relrowsecurity = true`. Each is listed with the
 migration that creates it and its policy set:
 
-| Table                               | Migration | Policies                                  |
-| ----------------------------------- | --------- | ----------------------------------------- |
-| `audit_log`                         | 0001      | select                                    |
-| `organizations`                     | 0001      | select, update                            |
-| `organization_members`              | 0001      | select, insert, update, delete            |
-| `permissions`                       | 0001      | select                                    |
-| `role_permissions`                  | 0001      | select, modify (ALL)                      |
-| `roles`                             | 0001      | select, insert, update, delete            |
-| `user_profiles`                     | 0001      | select, update                            |
-| `compliance_alerts`                 | 0002      | select, insert, update, delete            |
-| `drivers`                           | 0002      | select, insert, update, delete            |
-| `partners`                          | 0002      | select, insert, update, delete            |
-| `trailers`                          | 0002      | select, insert, update, delete            |
-| `trucks`                            | 0002      | select, insert, update, delete            |
-| `cargo`                             | 0003      | select, modify (ALL)                      |
-| `movement_amendments`               | 0003      | select, insert, update, delete            |
-| `movement_events`                   | 0003      | select, insert                            |
-| `movements`                         | 0003      | select, insert, update, delete            |
-| `organization_counters`             | 0003      | **none — deny-all by design** (see below) |
-| `seals`                             | 0003      | select, modify (ALL)                      |
-| `background_jobs`                   | 0004      | select, insert                            |
-| `integration_configs`               | 0004      | select, modify (ALL)                      |
-| `integration_events`                | 0004      | select, insert                            |
-| `subscriptions`                     | 0004      | select                                    |
-| `source_documents`                  | 0005      | select, insert, update, delete            |
-| `notification_rules`                | 0006      | select, insert, update, delete            |
-| `notifications`                     | 0006      | select, update                            |
-| `organization_knowledge_embeddings` | 0007      | select, insert, update, delete            |
-| `regulation_documents`              | 0007      | select                                    |
-| `regulation_embeddings`             | 0007      | select                                    |
-| `movement_suggestions`              | 0009      | select, insert, update                    |
-| `organization_sso`                  | 0014      | select, insert, update, delete            |
-| `usage_records`                     | 0013      | select                                    |
+| Table                                     | Migration | Policies                                  |
+| ----------------------------------------- | --------- | ----------------------------------------- |
+| `audit_log`                               | 0001      | select                                    |
+| `organizations`                           | 0001      | select, update                            |
+| `organization_members`                    | 0001      | select, insert, update, delete            |
+| `permissions`                             | 0001      | select                                    |
+| `role_permissions`                        | 0001      | select, modify (ALL)                      |
+| `roles`                                   | 0001      | select, insert, update, delete            |
+| `user_profiles`                           | 0001      | select, update                            |
+| `compliance_alerts`                       | 0002      | select, insert, update, delete            |
+| `drivers`                                 | 0002      | select, insert, update, delete            |
+| `partners`                                | 0002      | select, insert, update, delete            |
+| `trailers`                                | 0002      | select, insert, update, delete            |
+| `trucks`                                  | 0002      | select, insert, update, delete            |
+| `commodities` (was `cargo`, renamed 0019) | 0003      | select, modify (ALL)                      |
+| `movement_amendments`                     | 0003      | select, insert, update, delete            |
+| `movement_events`                         | 0003      | select, insert                            |
+| `movements`                               | 0003      | select, insert, update, delete            |
+| `organization_counters`                   | 0003      | **none — deny-all by design** (see below) |
+| `seals`                                   | 0003      | select, modify (ALL)                      |
+| `background_jobs`                         | 0004      | select, insert                            |
+| `integration_configs`                     | 0004      | select, modify (ALL)                      |
+| `integration_events`                      | 0004      | select, insert                            |
+| `subscriptions`                           | 0004      | select                                    |
+| `source_documents`                        | 0005      | select, insert, update, delete            |
+| `notification_rules`                      | 0006      | select, insert, update, delete            |
+| `notifications`                           | 0006      | select, update                            |
+| `organization_knowledge_embeddings`       | 0007      | select, insert, update, delete            |
+| `regulation_documents`                    | 0007      | select                                    |
+| `regulation_embeddings`                   | 0007      | select                                    |
+| `movement_suggestions`                    | 0009      | select, insert, update                    |
+| `usage_records`                           | 0013      | select                                    |
+| `organization_sso`                        | 0014      | select, insert, update, delete            |
+| `user_devices`                            | 0015      | select, insert, update, delete            |
+| `ports`                                   | 0018      | select                                    |
+| `organization_carrier_codes`              | 0018      | select, insert, update, delete            |
+| `commodity_hazmat`                        | 0019      | select, modify (ALL)                      |
+| `shipments`                               | 0019      | select, insert, update, delete            |
+| `movement_crew`                           | 0020      | select, modify (ALL)                      |
+| `driver_documents`                        | 0020      | select, modify (ALL)                      |
+| `equipment_types`                         | 0021      | select                                    |
+| `equipment_plates`                        | 0021      | select, modify (ALL)                      |
+| `movement_trailers`                       | 0021      | select, modify (ALL)                      |
+| `customs_submissions`                     | 0023      | select, insert, update                    |
+| `carrier_notices`                         | 0023      | select                                    |
+| `generated_documents`                     | 0024      | select, insert                            |
+| `external_shipments`                      | 0026      | select, modify (ALL)                      |
+| `in_bond_records`                         | 0026      | select, modify (ALL)                      |
+| `in_bond_events`                          | 0026      | select, insert                            |
+| `pars_rns_events`                         | 0027      | select, insert                            |
+| `import_batches`                          | 0028      | select, modify (ALL)                      |
 
 `organization_counters` carries RLS with **zero** policies on purpose: RLS with
 no policy denies everything, and the table is reachable only through
@@ -123,7 +141,12 @@ system-written ones: `audit_log` (written by `log_audit()` / the service role,
 never updatable — that immutability is the point), `movement_events`
 (insert-only, with `movement_events_immutable` as a guard trigger),
 `permissions` / `regulation_*` (global reference data), `subscriptions` and
-`usage_records` (written by Stripe sync and metering under the service role).
+`usage_records` (written by Stripe sync and metering under the service role),
+`ports` / `equipment_types` (global CBP/CBSA reference data, seeded by a CSV
+importer under the service role), `carrier_notices` (written by the customs
+gateway inbound webhook / sync job under the service role), `generated_documents`
+/ `in_bond_events` / `pars_rns_events` (append-only event/artifact logs — insert
+by the caller, no update or delete).
 
 Storage is covered too: `supabase/migrations/0005_documents.sql:85-102` puts
 four `storage.objects` policies on the private `documents` bucket, scoped to
@@ -193,16 +216,17 @@ see Finding 1.
 
 ## 8. Service-role usage is enumerated and bounded
 
-`SUPABASE_SERVICE_ROLE_KEY` is read in exactly five places, none of them
+`SUPABASE_SERVICE_ROLE_KEY` is read in exactly six places, none of them
 reachable from a browser bundle:
 
-| Site                                                      | Why                                                                        |
-| --------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `apps/web/src/app/api/webhooks/supabase-auth/route.ts:97` | Provisioning a profile for a user who has no session yet.                  |
-| `packages/api/src/services/customs.ts:85`                 | Reading the vault secret (`read_integration_secret` is service-role only). |
-| `packages/api/src/services/documents.ts:27`               | Downloading the uploaded object for extraction, in a job with no caller.   |
-| `packages/integrations/src/sso.ts:52`                     | SAML provider administration via the Auth admin API.                       |
-| `packages/db/scripts/seed.ts:21`                          | The seed script — developer tooling, not shipped.                          |
+| Site                                                      | Why                                                                                                                                                                  |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web/src/app/api/webhooks/supabase-auth/route.ts:97` | Provisioning a profile for a user who has no session yet.                                                                                                            |
+| `packages/api/src/services/customs.ts:85`                 | Reading the vault secret (`read_integration_secret` is service-role only).                                                                                           |
+| `packages/api/src/services/documents.ts:27`               | Downloading the uploaded object for extraction, in a job with no caller.                                                                                             |
+| `packages/api/src/services/pdf.ts:53`                     | Storing a generated PDF/CSV (migration 0024); the object path is scoped to the caller's own organization, gated by the tRPC permission check, not the bucket policy. |
+| `packages/integrations/src/sso.ts:52`                     | SAML provider administration via the Auth admin API.                                                                                                                 |
+| `packages/db/scripts/seed.ts:21`                          | The seed script — developer tooling, not shipped.                                                                                                                    |
 
 The RLS-bypassing **database** path is `withServiceRole()` (`packages/db/src/rls.ts:56`),
 whose contract is that callers must filter by `organization_id` themselves. Its
@@ -235,11 +259,15 @@ closed. Full list, from `pg_proc`:
 `accept_invitation`, `claim_jobs`, `create_organization_with_owner`,
 `current_user_permissions`, `delete_integration_secret`, `handle_new_auth_user`,
 `has_permission`, `is_assigned_movement`, `is_org_member`, `log_audit`,
-`match_org_knowledge`, `match_regulations`, `movement_suggestions_guard`,
-`next_movement_number`, `notify_organization`,
-`organization_member_role_scope_guard`, `read_integration_secret`,
-`record_usage`, `sso_enforced_for_email`, `sso_provider_for_email`,
-`store_integration_secret`, `sync_org_subscription`.
+`lookup_shipment_status`, `match_org_knowledge`, `match_regulations`,
+`movement_suggestions_guard`, `next_movement_number`, `notify_organization`,
+`organization_member_role_scope_guard`, `push_tokens_for`,
+`read_integration_secret`, `record_usage`, `sso_enforced_for_email`,
+`sso_provider_for_email`, `store_integration_secret`, `sync_org_subscription`.
+
+`lookup_shipment_status` (0027) and `push_tokens_for` (0015) are EXECUTE-granted
+to `service_role` only, not `authenticated`, so they sit outside the §9b table
+below (which covers only functions callable by a signed-in user).
 
 The remaining `public` functions with no `proconfig` are either pgvector/citext
 extension functions or SECURITY **INVOKER** trigger guards (`movements_guard`,

@@ -5,16 +5,17 @@ and where to ask.
 
 ## Before you ask
 
-| Question                              | Look in                                                                                               |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| How do I run it locally?              | `README.md` → Quick start                                                                             |
-| How do I contribute, branch, commit?  | `CONTRIBUTING.md`                                                                                     |
-| What changed recently?                | `CHANGELOG.md`                                                                                        |
-| Is this a known security finding?     | `docs/security-review.md`                                                                             |
-| How does the driver app work?         | `apps/mobile/README.md`                                                                               |
-| How do I load-test it?                | `load/README.md`                                                                                      |
-| Why was something built this way?     | `docs/plans/`                                                                                         |
-| Type errors, test failures, DB not up | `CONTRIBUTING.md` → Getting Help (`pnpm typecheck`, `vitest run <path>`, `pnpm exec supabase status`) |
+| Question                               | Look in                                                                                               |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| How do I run it locally?               | `README.md` → Quick start                                                                             |
+| How do I contribute, branch, commit?   | `CONTRIBUTING.md`                                                                                     |
+| What changed recently?                 | `CHANGELOG.md`                                                                                        |
+| Is this a known security finding?      | `docs/security-review.md`                                                                             |
+| How do I use a feature as an end user? | `docs/user-manual/`                                                                                   |
+| How does the driver app work?          | `apps/mobile/README.md`                                                                               |
+| How do I load-test it?                 | `load/README.md`                                                                                      |
+| Why was something built this way?      | `docs/plans/`                                                                                         |
+| Type errors, test failures, DB not up  | `CONTRIBUTING.md` → Getting Help (`pnpm typecheck`, `vitest run <path>`, `pnpm exec supabase status`) |
 
 ## Asking
 

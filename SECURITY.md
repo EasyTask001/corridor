@@ -62,14 +62,16 @@ Everything below is a claim you can check against the file it names, or a query 
 
 ### Secrets
 
-| Secret                               | Storage            | Reachable by                                                                                                                   |
-| ------------------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| Supabase service-role key            | deployment env     | server only — workers and webhooks (review §8)                                                                                 |
-| AI Gateway / OpenAI keys             | deployment env     | server only, via the `@corridor/ai` resolver                                                                                   |
-| Stripe secret + webhook secret       | deployment env     | server only (`@corridor/integrations`)                                                                                         |
-| Upstash Redis REST URL + token       | deployment env     | server only                                                                                                                    |
-| Integration credentials (customs, …) | **Supabase Vault** | `read_integration_secret` is `service_role` only; writes go through `store_integration_secret`, gated on `integrations.manage` |
-| Supabase Auth webhook secret         | deployment env     | the webhook handler only                                                                                                       |
+| Secret                                              | Storage                                                   | Reachable by                                                                                                                   |
+| --------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Supabase service-role key                           | deployment env                                            | server only — workers and webhooks (review §8)                                                                                 |
+| AI Gateway / OpenAI keys                            | deployment env                                            | server only, via the `@corridor/ai` resolver                                                                                   |
+| Stripe secret + webhook secret                      | deployment env                                            | server only (`@corridor/integrations`)                                                                                         |
+| Upstash Redis REST URL + token                      | deployment env                                            | server only                                                                                                                    |
+| Integration credentials (customs, …)                | **Supabase Vault**                                        | `read_integration_secret` is `service_role` only; writes go through `store_integration_secret`, gated on `integrations.manage` |
+| Supabase Auth webhook secret                        | deployment env                                            | the webhook handler only                                                                                                       |
+| Resend / Twilio / Expo push credentials             | deployment env                                            | server only (`@corridor/integrations`); unset = logged mock send                                                               |
+| Customs gateway base URL + API key + webhook secret | deployment env (fallback) or **Supabase Vault** (per-org) | server only (`@corridor/integrations`); unset = fixture replay, no live transmit                                               |
 
 Never committed: `.gitignore` ignores `.env` and `.env.*`, with `!.env.example` as the single
 tracked exception — and that file holds names, never values.
@@ -103,12 +105,13 @@ tracked exception — and that file holds names, never values.
 
 ### Webhooks
 
-| Webhook       | Verification                                                      |
-| ------------- | ----------------------------------------------------------------- |
-| Stripe        | `stripe.webhooks.constructEvent` with `STRIPE_WEBHOOK_SECRET`     |
-| Supabase Auth | Standard Webhooks HMAC-SHA256 with `SUPABASE_AUTH_WEBHOOK_SECRET` |
+| Webhook         | Verification                                                                                                                                  |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stripe          | `stripe.webhooks.constructEvent` with `STRIPE_WEBHOOK_SECRET`                                                                                 |
+| Supabase Auth   | Standard Webhooks HMAC-SHA256 with `SUPABASE_AUTH_WEBHOOK_SECRET`                                                                             |
+| Customs gateway | HMAC-SHA256 over the raw body, hex in `X-Corridor-Signature`, with `CUSTOMS_GATEWAY_WEBHOOK_SECRET`. Unset = every delivery refused with 401. |
 
-Cron routes (`/api/jobs/process`, `/api/jobs/expiry-scan`) fail closed through
+Cron routes (`/api/jobs/process`, `/api/jobs/expiry-scan`, `/api/jobs/notices-sync`) fail closed through
 `cronAuthFailure()`: an unset `CRON_SECRET` is a 503, a wrong one a 401 compared with
 `timingSafeEqual`.
 

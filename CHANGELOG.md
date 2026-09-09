@@ -30,6 +30,47 @@ the section headings are the build phases, not versions.
   viewer.
 - Cross-tenant leak tests for every tenant table, and `verify:mirror`, which proves the Drizzle
   schema still matches the live database.
+- Port master and multi-carrier codes (`ports`, `organization_carrier_codes`, migration 0018):
+  validated, searchable CBP/CBSA port-of-entry, CBSA office, in-bond destination, FIRMS and
+  sublocation codes replace the free-form `movements.crossing_point` jsonb blob.
+- Shipments as a first-class entity (`shipments`, migration 0019): the PAPS/PARS/bill filing unit,
+  created and searched independently of the movement it eventually rides on; `cargo` moves to
+  `commodities` (with `commodity_hazmat` for up to three dangerous-goods declarations per line).
+- Multi-person crew and travel documents (migration 0020): `movement_crew` replaces
+  `movements.driver_id` (a crossing carries a crew, not one driver), `driver_documents` replaces
+  `drivers.fast_card_*`, and `drivers` gains person type, gender, hazmat endorsement and a US
+  address.
+- Multi-trailer equipment detail (migration 0021): `equipment_types` (CBP/CBSA equipment codes),
+  `equipment_plates`, and `movement_trailers` (a crossing pulls one, two or zero trailers) replace
+  `movements.trailer_id`; seals move to per-trailer-slot, capped at 4 per trailer and 1 per truck.
+- Manifest flags and customs event vocabulary (migration 0022): the ACE IIT indicator, the five
+  ACI trip flags (LVS, postal, flying truck, in-transit, IIT), CBSA ECCRD amendment reason codes,
+  and per-shipment `customs_event` rows on the movement timeline.
+- Customs gateway live filing (`customs_submissions`, `carrier_notices`, migration 0023):
+  `integration_configs.mode` (`mock` | `gateway`) switches between the deterministic simulator and
+  a certified EDI gateway's REST API; submissions are keyed by the gateway's reference number so
+  an inbound webhook can resolve them.
+- Generated documents (`generated_documents`, migration 0024): every PDF Corridor renders (driver
+  sheets, blank driver sheets, manifest summaries, reports, registry exports) is tracked in
+  Storage, plus `organizations.simple_driver_sheet` for Avaal's commodity-line-free sheet.
+- SMS channel and company profile (migration 0025): driver SMS opt-in per regime,
+  `user_profiles.phone`, org timezone/billing address/dispatch e-mails, and the "include PARS in
+  cargo control numbers" filing rule.
+- In-bond monitor (`external_shipments`, `in_bond_records`, `in_bond_events`, migration 0026):
+  IT/TE/IE moves for Corridor's own shipments and for goods another carrier filed, tracked from
+  arrival to export or closure.
+- PARS RNS feed and public tracking (`pars_rns_events`, migration 0027): CBSA Release Notification
+  System messages, plus `lookup_shipment_status()` — the single, minimal, service-role-only read
+  behind the public PAPS/PARS tracking page.
+- CSV bulk import (`import_batches`, migration 0028): validate-then-commit import of shipments or
+  commodity lines from a CSV/TXT/DAT file, with a per-line report; `text/csv` added to the
+  `documents` bucket's allow-list (migration 0029).
+- `docs/user-manual/`: an 8-page in-app user manual, linked from a new Resources page.
+- List toolbar: search by column, page size, auto-refresh and bulk actions on every registry list.
+- Design system foundation (`design/foundation-v2`): primitive/semantic design tokens with dark
+  mode, a FOUC-safe `ThemeToggle`, and every `@corridor/ui` primitive reskinned onto the new
+  tokens (button, badge, alert, table, card, tabs, data-table, input, select, dialog, checkbox,
+  radio, switch, tooltip); the app shell nav was consolidated into grouped, icon-led sections.
 
 ### Changed
 
@@ -41,7 +82,11 @@ the section headings are the build phases, not versions.
 - Migration 0015: `user_devices` (Expo push tokens; `push_tokens_for` is service-role only).
 - Migration 0016: the insert policy the `notification.push` producer needs.
 - Migration 0017: a caller check on `notify_organization()` (see Security).
-- Drizzle schema mirror verified against migrations 0001–0017.
+- Migrations 0018–0029: ports/carrier codes, shipments, crew/equipment, customs gateway,
+  generated documents, in-bond, PARS RNS and CSV import (see Added).
+- Drizzle schema mirror verified against migrations 0001–0029.
+- Web app pages and the Expo driver app restyled onto the new design tokens, across dashboard,
+  documents, alerts, copilot, in-bond and the mobile sign-in, movement and capture screens.
 - AI extraction and copilot run on Claude Sonnet 4.5 when `AI_GATEWAY_API_KEY` is set, on OpenAI
   direct when only `OPENAI_API_KEY` is, and on the deterministic mock with neither.
 - SSO: only `configure` requires the Enterprise plan. `get` and `remove` need just
@@ -61,6 +106,9 @@ the section headings are the build phases, not versions.
   `notification_rules.event_type` is unchanged — it is the rule _selector_, not the row's type.
 - Expo tickets reporting `DeviceNotRegistered` now delete the `user_devices` row, so dead tokens
   are pruned instead of being retried forever.
+- Shipments could get stuck in `draft` through a full customs cycle; fixed.
+- PARS/RNS date filter used a raw SQL template instead of `gte()`, which broke on some driver
+  values.
 
 ### Security
 
