@@ -106,6 +106,9 @@ export const backgroundJobs = pgTable(
     lastError: text("last_error"),
     lockedAt: timestamp("locked_at", { withTimezone: true }),
     lockedBy: text("locked_by"),
+    idempotencyKey: text("idempotency_key"),
+    leaseToken: uuid("lease_token"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     startedAt: timestamp("started_at", { withTimezone: true }),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
@@ -115,6 +118,9 @@ export const backgroundJobs = pgTable(
     index("background_jobs_due_idx")
       .on(t.runAt)
       .where(sql`${t.status} = 'pending'`),
+    index("background_jobs_lease_expiry_idx")
+      .on(t.leaseExpiresAt)
+      .where(sql`${t.status} = 'running' and ${t.leaseExpiresAt} is not null`),
   ],
 );
 
