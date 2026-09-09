@@ -43,6 +43,7 @@ export async function enqueueJob(
     orgId: string | null;
     jobType: JobType;
     payload: Record<string, unknown>;
+    idempotencyKey?: string;
     runAt?: Date;
     maxAttempts?: number;
   },
@@ -53,6 +54,7 @@ export async function enqueueJob(
       organizationId: job.orgId,
       jobType: job.jobType,
       payload: job.payload,
+      idempotencyKey: job.idempotencyKey,
       runAt: job.runAt ?? new Date(),
       maxAttempts: job.maxAttempts ?? 3,
     })
@@ -314,7 +316,15 @@ export async function processDueJobs(
       const markSucceeded = (tx: RlsTransaction) =>
         tx
           .update(backgroundJobs)
-          .set({ status: "succeeded", finishedAt: new Date(), lastError: null })
+          .set({
+            status: "succeeded",
+            finishedAt: new Date(),
+            lastError: null,
+            lockedAt: null,
+            lockedBy: null,
+            leaseToken: null,
+            leaseExpiresAt: null,
+          })
           .where(eq(backgroundJobs.id, job.id));
       let result: Record<string, unknown> | void;
       if (detached) {
@@ -345,6 +355,8 @@ export async function processDueJobs(
             runAt: retry ? new Date(Date.now() + 5000 * Math.pow(5, job.attempts - 1)) : job.runAt,
             lockedAt: null,
             lockedBy: null,
+            leaseToken: null,
+            leaseExpiresAt: null,
           })
           .where(eq(backgroundJobs.id, job.id)),
       );
@@ -368,6 +380,9 @@ function normalise(r: Record<string, unknown>): Job {
     lastError: (r.last_error as string | null) ?? null,
     lockedAt: r.locked_at ? new Date(r.locked_at as string) : null,
     lockedBy: (r.locked_by as string | null) ?? null,
+    idempotencyKey: (r.idempotency_key as string | null) ?? null,
+    leaseToken: (r.lease_token as string | null) ?? null,
+    leaseExpiresAt: r.lease_expires_at ? new Date(r.lease_expires_at as string) : null,
     createdAt: new Date(r.created_at as string),
     startedAt: r.started_at ? new Date(r.started_at as string) : null,
     finishedAt: r.finished_at ? new Date(r.finished_at as string) : null,
