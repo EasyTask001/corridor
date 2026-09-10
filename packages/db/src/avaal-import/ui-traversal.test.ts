@@ -22,6 +22,7 @@ class FakeClient implements AgentycClient {
   async call<T>(tool: string, args: Record<string, unknown>): Promise<T> {
     if (tool === "browser_navigate") {
       this.navigated.push(String(args.url));
+      this.pageIndex = 0;
       return {} as T;
     }
     if (tool === "browser_wait_for_stable_dom") return {} as T;
