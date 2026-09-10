@@ -325,11 +325,6 @@ export const traverseCategory = async (
     if (!page || !Array.isArray(page.rows) || !page.currentUrl) {
       throw new Error(`${config.category}: Avaal list page extraction returned invalid data`);
     }
-    if (page.pageNumber !== pageIndex) {
-      throw new Error(
-        `${config.category}: expected visible page ${pageIndex}, received ${page.pageNumber}`,
-      );
-    }
     pagesVisited.push(pageIndex);
     if (page.displayedTotal !== null) {
       if (displayedTotal !== null && displayedTotal !== page.displayedTotal) {
@@ -353,6 +348,9 @@ export const traverseCategory = async (
       } else {
         warnings.push(`Repeated visible row ${row.sourceId} was de-duplicated`);
       }
+    }
+    if (pageIndex > 1 && unseen.length === 0) {
+      throw new Error(`${config.category}: pagination did not reveal any new visible rows`);
     }
 
     for (const row of unseen) {
@@ -429,7 +427,7 @@ export const traverseCategory = async (
       break;
     }
     const advanced = await client.call<boolean>("browser_evaluate", {
-      code: `(()=>{const e=document.querySelector(${JSON.stringify(config.pagination.nextSelector)}); if(!e || !e.getClientRects().length || e.classList.contains('disabled')) return false; const table=e.closest('.dataTables_wrapper')?.querySelector('table'); const jq=window.jQuery; if(jq && table && jq.fn?.DataTable){jq(table).DataTable().page('next').draw('page');} else e.click(); return true;})()`,
+      code: `(()=>{const e=document.querySelector(${JSON.stringify(config.pagination.nextSelector)}); if(!e || !e.getClientRects().length || e.classList.contains('disabled')) return false; const table=document.querySelector(${JSON.stringify(config.tableSelector)}); const jq=window.jQuery; if(jq && table && jq.fn?.DataTable){const dt=jq(table).DataTable(); dt.page('next').draw('page');} else e.click(); return true;})()`,
     });
     if (!advanced) throw new Error(`${config.category}: visible Next control could not be activated`);
     await client.call("browser_wait_for_network_idle", { timeout_seconds: 15, idle_duration_ms: 500 });
