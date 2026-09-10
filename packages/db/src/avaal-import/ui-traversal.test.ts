@@ -47,6 +47,7 @@ class FakeClient implements AgentycClient {
       this.scrolledLabels.push(String(args.text));
       return {} as T;
     }
+    if (tool === "browser_wait_for_network_idle" || tool === "browser_wait") return {} as T;
     if (tool === "browser_get_state") {
       return {
         interactive_elements: this.options.pages[this.pageIndex]!.rows
