@@ -258,7 +258,7 @@ export const AVAAL_PAGE_CONFIGS = {
     category: "ace_manifests",
     kind: "table",
     baseUrl: BASE_URL,
-    route: "/ACE/EManifest/Manifest",
+    route: "/ACE/Emanifest/Manifest",
     tableSelector: "#manifestList",
     sourceIdColumn: "Trip Number",
     detail: {
