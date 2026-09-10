@@ -3,7 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { createDb, schema } from "../src/client";
 import { mapAvaalSnapshot } from "../src/avaal-import/mapping";
 
-const snapshotPath = process.argv[2];
+const snapshotPath = process.argv.slice(2).find((arg) => !arg.startsWith("-"));
 const execute = process.argv.includes("--execute");
 if (!snapshotPath) throw new Error("usage: avaal:import <snapshot.json> [--execute]");
 const snapshot = JSON.parse(readFileSync(snapshotPath, "utf8"));
