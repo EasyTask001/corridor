@@ -11,7 +11,6 @@ const bundle = mapAvaalSnapshot(snapshot);
 if (!bundle.organization) throw new Error("Avaal company record is missing");
 if (!execute) {
   console.log(JSON.stringify({ dryRun: true, organization: bundle.organization.name, drivers: bundle.drivers.length, trucks: bundle.trucks.length, trailers: bundle.trailers.length, partners: bundle.partners.length, movements: bundle.movements.length, shipments: bundle.shipments.length, commodities: bundle.commodities.length, blocking: bundle.exceptions.filter((e) => e.blocking).length }, null, 2));
-  await client.end();
   process.exit(0);
 }
 
