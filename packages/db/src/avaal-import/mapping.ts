@@ -799,7 +799,7 @@ export const mapAvaalSnapshot = (snapshot: AvaalSnapshot): CorridorImportBundle 
           null;
         if (!driverKey) {
           exceptions.push(
-            toException(category, record, "Crew", row, "does not resolve to a captured driver", true),
+            toException(category, record, "Crew", row, "does not resolve to a captured driver; crew link omitted", false),
           );
           return;
         }
