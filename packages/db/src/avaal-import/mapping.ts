@@ -857,12 +857,12 @@ export const mapAvaalSnapshot = (snapshot: AvaalSnapshot): CorridorImportBundle 
 
   const movementByVisibleId = new Map<string, string>();
   for (const movement of movements) {
-    movementByVisibleId.set(normalizeIdentity(movement.movementNumber), movement.sourceKey);
+    movementByVisibleId.set(`${movement.regime}:${normalizeIdentity(movement.movementNumber)}`, movement.sourceKey);
     if (movement.tripNumber) {
-      movementByVisibleId.set(normalizeIdentity(movement.tripNumber), movement.sourceKey);
+      movementByVisibleId.set(`${movement.regime}:${normalizeIdentity(movement.tripNumber)}`, movement.sourceKey);
       if (movement.carrierCode) {
         movementByVisibleId.set(
-          normalizeIdentity(`${movement.carrierCode}${movement.tripNumber}`),
+          `${movement.regime}:${normalizeIdentity(`${movement.carrierCode}${movement.tripNumber}`)}`,
           movement.sourceKey,
         );
       }
@@ -910,7 +910,7 @@ export const mapAvaalSnapshot = (snapshot: AvaalSnapshot): CorridorImportBundle 
         sourceKey: record.sourceId,
         regime,
         movementKey: attachedTrip
-          ? movementByVisibleId.get(normalizeIdentity(attachedTrip)) ?? null
+          ? movementByVisibleId.get(`${regime}:${normalizeIdentity(attachedTrip)}`) ?? null
           : null,
         carrierCode: carrier,
         shipmentType: regime === "ACE" ? aceShipmentType(fields.string("Shipment Type", "Type")) : null,
