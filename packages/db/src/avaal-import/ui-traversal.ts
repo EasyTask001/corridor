@@ -416,6 +416,11 @@ export const traverseCategory = async (
       finalPageReached = true;
       break;
     }
+    if (config.detail) {
+      await client.call("browser_evaluate", {
+        code: `(()=>{const e=document.querySelector(${JSON.stringify(config.detail.rootSelector)}); if(e) e.style.display='none'; return true;})()`,
+      });
+    }
     if (!page.next?.visible) {
       throw new Error(`${config.category}: a visible disabled Next control was not observed`);
     }
