@@ -72,6 +72,7 @@ class FakeClient implements AgentycClient {
         this.pageIndex = Math.min(this.pageIndex + 1, this.options.pages.length - 1);
         return true as T;
       }
+      if (code.includes("style.display")) return true as T;
       this.detailedIds.push(this.currentDetailId);
       return { fields: this.options.details[this.currentDetailId] ?? {} } as T;
     }

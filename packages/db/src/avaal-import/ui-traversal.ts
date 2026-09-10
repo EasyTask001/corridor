@@ -426,10 +426,6 @@ export const traverseCategory = async (
       await client.call("browser_evaluate", {
         code: `(()=>{const e=document.querySelector(${JSON.stringify(config.detail.rootSelector)}); if(e) e.style.display='none'; return true;})()`,
       });
-      // Opening an inline detail can reset the DataTable to page 1. Reload the
-      // rendered list before advancing so pagination always operates on the
-      // visible table rather than the detail overlay.
-      await visit(client, startUrl);
     }
     if (!page.next?.visible) {
       throw new Error(`${config.category}: a visible disabled Next control was not observed`);
