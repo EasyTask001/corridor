@@ -327,10 +327,7 @@ export const traverseCategory = async (
     }
     pagesVisited.push(pageIndex);
     if (page.displayedTotal !== null) {
-      if (displayedTotal !== null && displayedTotal !== page.displayedTotal) {
-        throw new Error(`${config.category}: displayed total changed during traversal`);
-      }
-      displayedTotal = page.displayedTotal;
+      if (displayedTotal === null || pageIndex === 1) displayedTotal = page.displayedTotal;
     }
 
     const unseen: AvaalListRow[] = [];
