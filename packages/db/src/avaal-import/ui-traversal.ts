@@ -377,7 +377,25 @@ export const traverseCategory = async (
         ref = detailRef(scrolledState, row, config.category);
       }
       if (!ref) {
-        throw new Error(`${config.category}: visible detail control unavailable for ${row.sourceId}`);
+        if (!row.detailElementId) {
+          throw new Error(`${config.category}: visible detail control unavailable for ${row.sourceId}`);
+        }
+        // Some DataTables rows remain visibly clickable in the DOM but are
+        // omitted from the accessibility tree after an inline detail opens.
+        // Use an agentyc-controlled DOM click only after the accessible lookup
+        // and scroll fallback have both failed.
+        const clicked = await client.call<boolean>("browser_evaluate", {
+          code: `(()=>{const e=document.getElementById(${JSON.stringify(row.detailElementId)}); if(!e || !e.getClientRects().length) return false; e.click(); return true;})()`,
+        });
+        if (!clicked) throw new Error(`${config.category}: visible detail control unavailable for ${row.sourceId}`);
+        await client.call("browser_wait_for_stable_dom", { timeout_seconds: 15, quiet_ms: 500 });
+        const detail = await extractDetail(client, config.detail);
+        records.set(row.sourceId, {
+          sourceId: row.sourceId,
+          sourceUrl: row.sourceUrl,
+          fields: mergedFields(row.fields, detail.fields),
+        });
+        continue;
       }
       await client.call("browser_click", { ref });
       await client.call("browser_wait_for_stable_dom", { timeout_seconds: 15, quiet_ms: 500 });
