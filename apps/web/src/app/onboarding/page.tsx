@@ -2,6 +2,9 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { Route } from "lucide-react";
 import { getSession } from "@/lib/session";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { ACTIVE_ORG_COOKIE } from "@corridor/api";
+import { cookies } from "next/headers";
 import { OnboardingForm } from "./onboarding-form";
 
 export const metadata: Metadata = { title: "Set up your carrier" };
@@ -10,6 +13,21 @@ export default async function OnboardingPage() {
   const session = await getSession();
   if (!session) redirect("/login?next=/onboarding");
   if (session.activeOrganizationId) redirect("/dashboard");
+  const supabase = await createSupabaseServerClient();
+  const { data: membership } = await supabase
+    .from("organization_members")
+    .select("organization_id")
+    .eq("user_id", session.user.id)
+    .eq("status", "active")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (membership?.organization_id) {
+    (await cookies()).set(ACTIVE_ORG_COOKIE, membership.organization_id, {
+      httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/",
+    });
+    redirect("/dashboard");
+  }
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-xl flex-col justify-center p-4 sm:p-6">
