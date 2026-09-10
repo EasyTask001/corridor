@@ -397,7 +397,15 @@ export const traverseCategory = async (
         });
         continue;
       }
-      await client.call("browser_click", { ref });
+      try {
+        await client.call("browser_click", { ref });
+      } catch (error) {
+        if (!String(error).includes("stale_ref")) throw error;
+        const refreshed = await client.call<BrowserState>("browser_get_state", { mode: "full" });
+        const retryRef = detailRef(refreshed, row, config.category);
+        if (!retryRef) throw error;
+        await client.call("browser_click", { ref: retryRef });
+      }
       await client.call("browser_wait_for_stable_dom", { timeout_seconds: 15, quiet_ms: 500 });
       const detail = await extractDetail(client, config.detail);
       records.set(row.sourceId, {
