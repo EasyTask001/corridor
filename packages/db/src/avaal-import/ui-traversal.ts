@@ -432,6 +432,7 @@ export const traverseCategory = async (
       code: `(()=>{const e=document.querySelector(${JSON.stringify(config.pagination.nextSelector)}); if(!e || !e.getClientRects().length || e.classList.contains('disabled')) return false; e.click(); return true;})()`,
     });
     if (!advanced) throw new Error(`${config.category}: visible Next control could not be activated`);
+    await client.call("browser_wait_for_network_idle", { timeout_seconds: 15, idle_duration_ms: 500 });
     await client.call("browser_wait_for_stable_dom", { timeout_seconds: 15, quiet_ms: 500 });
   }
 
