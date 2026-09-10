@@ -91,7 +91,7 @@ const listExtractionCode = (config: AvaalTablePageConfig): string => `
   if (!table || !visible(table)) throw new Error("Visible Avaal table was not found");
   const headers = Array.from(table.querySelectorAll("thead th")).map(text);
   const rowSelector = config.rowSelector || "tbody tr";
-  const rows = Array.from(table.querySelectorAll(rowSelector)).filter(visible).map((row) => {
+  const rows = Array.from(table.querySelectorAll(rowSelector)).filter((row) => visible(row) && !/^no data available in table$/i.test(text(row))).map((row) => {
     const cells = Array.from(row.querySelectorAll(":scope > td"));
     const fields = {};
     cells.forEach((cell, index) => {
