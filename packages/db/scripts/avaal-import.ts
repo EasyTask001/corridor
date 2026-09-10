@@ -9,15 +9,15 @@ if (!snapshotPath) throw new Error("usage: avaal:import <snapshot.json> [--execu
 const snapshot = JSON.parse(readFileSync(snapshotPath, "utf8"));
 const bundle = mapAvaalSnapshot(snapshot);
 if (!bundle.organization) throw new Error("Avaal company record is missing");
-const url = process.env.DATABASE_URL;
-if (!url) throw new Error("DATABASE_URL is required");
-const { db, sql: client } = createDb(url, { max: 1 });
-
 if (!execute) {
   console.log(JSON.stringify({ dryRun: true, organization: bundle.organization.name, drivers: bundle.drivers.length, trucks: bundle.trucks.length, trailers: bundle.trailers.length, partners: bundle.partners.length, movements: bundle.movements.length, shipments: bundle.shipments.length, commodities: bundle.commodities.length, blocking: bundle.exceptions.filter((e) => e.blocking).length }, null, 2));
   await client.end();
   process.exit(0);
 }
+
+const url = process.env.DATABASE_URL;
+if (!url) throw new Error("DATABASE_URL is required for --execute");
+const { db, sql: client } = createDb(url, { max: 1 });
 
 await db.transaction(async (tx) => {
   const [target] = await tx.select({ id: schema.organizations.id }).from(schema.organizations).where(eq(schema.organizations.name, "PATHFINDER TRANS INC.")).limit(1);
