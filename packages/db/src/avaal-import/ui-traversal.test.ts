@@ -67,6 +67,10 @@ class FakeClient implements AgentycClient {
     if (tool === "browser_evaluate") {
       const code = String(args.code);
       if (code.includes("corridor:list")) return this.options.pages[this.pageIndex] as T;
+      if (code.includes("paginate_button")) {
+        this.pageIndex = Math.min(this.pageIndex + 1, this.options.pages.length - 1);
+        return true as T;
+      }
       this.detailedIds.push(this.currentDetailId);
       return { fields: this.options.details[this.currentDetailId] ?? {} } as T;
     }
