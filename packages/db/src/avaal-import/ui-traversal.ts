@@ -370,10 +370,12 @@ export const traverseCategory = async (
       const state = await client.call<BrowserState>("browser_get_state", { mode: "full" });
       let ref = detailRef(state, row, config.category);
       if (!ref) {
-        if (row.detailLabel) await client.call("browser_scroll_to_text", { text: row.detailLabel });
-        const scrolledState = await client.call<BrowserState>("browser_get_state", {
-          mode: "full",
-        });
+        if (row.detailLabel) {
+          try { await client.call("browser_scroll_to_text", { text: row.detailLabel }); } catch (error) {
+            if (!String(error).includes("stale_ref")) throw error;
+          }
+        }
+        const scrolledState = await client.call<BrowserState>("browser_get_state", { mode: "full" });
         ref = detailRef(scrolledState, row, config.category);
       }
       if (!ref) {
