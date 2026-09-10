@@ -71,6 +71,7 @@ export const EQUIPMENT_TYPES = [
   { code: "FT", label: "Flat bed trailer" },
   { code: "FH", label: "Flat bed trailer with headboards" },
   { code: "FR", label: "Flat bed trailer, removable sides" },
+  { code: "FN", label: "Flat bed trailer, no headboards" },
   { code: "OT", label: "Open-top / flatbed trailer" },
   { code: "SD", label: "Single-drop trailer (step deck)" },
   { code: "DD", label: "Double-drop trailer" },
