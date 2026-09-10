@@ -429,7 +429,7 @@ export const traverseCategory = async (
       break;
     }
     const advanced = await client.call<boolean>("browser_evaluate", {
-      code: `(()=>{const e=document.querySelector(${JSON.stringify(config.pagination.nextSelector)}); if(!e || !e.getClientRects().length || e.classList.contains('disabled')) return false; e.click(); return true;})()`,
+      code: `(()=>{const e=document.querySelector(${JSON.stringify(config.pagination.nextSelector)}); if(!e || !e.getClientRects().length || e.classList.contains('disabled')) return false; const table=e.closest('.dataTables_wrapper')?.querySelector('table'); const jq=window.jQuery; if(jq && table && jq.fn?.DataTable){jq(table).DataTable().page('next').draw('page');} else e.click(); return true;})()`,
     });
     if (!advanced) throw new Error(`${config.category}: visible Next control could not be activated`);
     await client.call("browser_wait_for_network_idle", { timeout_seconds: 15, idle_duration_ms: 500 });
