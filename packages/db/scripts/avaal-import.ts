@@ -19,7 +19,8 @@ if (!url) throw new Error("DATABASE_URL is required for --execute");
 const { db, sql: client } = createDb(url, { max: 1 });
 
 await db.transaction(async (tx) => {
-  const [target] = await tx.select({ id: schema.organizations.id }).from(schema.organizations).where(eq(schema.organizations.name, "PATHFINDER TRANS INC.")).limit(1);
+  const candidates = await tx.select({ id: schema.organizations.id, name: schema.organizations.name }).from(schema.organizations);
+  const target = candidates.find((row) => row.name.toLowerCase().replace(/[^a-z0-9]/g, "") === "pathfindertransinc");
   if (!target) throw new Error("Pathfinder test organization not found; refusing replacement");
   await tx.delete(schema.organizations).where(eq(schema.organizations.id, target.id));
   await tx.insert(schema.organizations).values({ id: target.id, ...bundle.organization!, billingAddress: bundle.organization!.billingAddress });
