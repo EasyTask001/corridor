@@ -51,6 +51,9 @@ const movementStatuses: Record<string, MovementStatus> = {
   arrived: "arrived",
   cancelled: "cancelled",
   canceled: "cancelled",
+  deleted: "cancelled",
+  void: "cancelled",
+  inchange: "sent",
 };
 
 const shipmentStatuses: Record<string, ShipmentStatus> = {
@@ -71,7 +74,7 @@ const unknownStatus = (kind: "movement" | "shipment", value: string): never => {
 };
 
 export const mapMovementStatus = (value: string): MovementStatus =>
-  movementStatuses[normalized(value)] ?? unknownStatus("movement", value);
+  !value.trim() ? "draft" : movementStatuses[normalized(value)] ?? unknownStatus("movement", value);
 
 export const mapShipmentStatus = (value: string): ShipmentStatus =>
-  shipmentStatuses[normalized(value)] ?? unknownStatus("shipment", value);
+  !value.trim() ? "draft" : shipmentStatuses[normalized(value)] ?? unknownStatus("shipment", value);
