@@ -7,11 +7,13 @@ import { traverseCategory, type AvaalListPage } from "./ui-traversal";
 interface FakeOptions {
   pages: AvaalListPage[];
   details: Record<string, Record<string, AvaalFieldValue>>;
+  omittedFromState?: string[];
 }
 
 class FakeClient implements AgentycClient {
   readonly navigated: string[] = [];
   readonly detailedIds: string[] = [];
+  readonly scrolledLabels: string[] = [];
   private pageIndex = 0;
   private currentDetailId = "";
 
@@ -25,17 +27,40 @@ class FakeClient implements AgentycClient {
     if (tool === "browser_wait_for_stable_dom") return {} as T;
     if (tool === "browser_click") {
       if (args.label === "→") this.pageIndex += 1;
+      else if (typeof args.label === "string") {
+        const row = this.options.pages[this.pageIndex]!.rows.find(
+          (candidate) => candidate.detailLabel === args.label,
+        );
+        if (
+          row &&
+          this.options.omittedFromState?.includes(row.sourceId) &&
+          !this.scrolledLabels.includes(args.label)
+        ) {
+          throw new Error("Element did not match any supported target");
+        }
+        this.currentDetailId = row?.sourceId ?? "";
+      }
       if (typeof args.ref === "string") this.currentDetailId = args.ref.replace("ref-", "");
+      return {} as T;
+    }
+    if (tool === "browser_scroll_to_text") {
+      this.scrolledLabels.push(String(args.text));
       return {} as T;
     }
     if (tool === "browser_get_state") {
       return {
-        interactive_elements: this.options.pages[this.pageIndex]!.rows.map((row) => ({
-          ref: `ref-${row.sourceId}`,
-          tag: "a",
-          text: row.detailLabel,
-          context: Object.values(row.fields).join(" "),
-        })),
+        interactive_elements: this.options.pages[this.pageIndex]!.rows
+          .filter(
+            (row) =>
+              !this.options.omittedFromState?.includes(row.sourceId) ||
+              this.scrolledLabels.includes(row.detailLabel ?? ""),
+          )
+          .map((row) => ({
+            ref: `ref-${row.sourceId}`,
+            tag: "a",
+            text: row.detailLabel,
+            context: Object.values(row.fields).join(" "),
+          })),
       } as T;
     }
     if (tool === "browser_evaluate") {
@@ -100,11 +125,13 @@ describe("Avaal UI category traversal", () => {
         d2: { Name: "Driver Two" },
         d3: { Name: "Driver Three" },
       },
+      omittedFromState: ["d2"],
     });
 
     const snapshot = await traverseCategory(client, config);
 
     expect(client.detailedIds).toEqual(["d1", "d2", "d3"]);
+    expect(client.scrolledLabels).toContain("d2");
     expect(snapshot).toMatchObject({
       displayedTotal: 3,
       finalPageReached: true,

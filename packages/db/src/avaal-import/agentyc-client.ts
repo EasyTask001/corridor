@@ -8,6 +8,7 @@ const ALLOWED_TOOLS = new Set([
   "browser_click",
   "browser_wait_for_stable_dom",
   "browser_wait_for_url",
+  "browser_scroll_to_text",
 ]);
 
 interface JsonRpcError {

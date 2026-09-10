@@ -71,6 +71,7 @@ interface AvaalDetailPage {
 interface BrowserInteractiveElement {
   ref?: string;
   tag?: string;
+  id?: string;
   text?: string;
   context?: string;
 }
@@ -113,7 +114,7 @@ const listExtractionCode = (config: AvaalTablePageConfig): string => `
     return {
       sourceId,
       sourceUrl,
-      detailLabel: link ? text(link) : undefined,
+      detailLabel: link ? (text(link) || text(cells.find((cell, index) => index > 0 && text(cell)))) : undefined,
       detailElementId: link ? link.id : undefined,
       rowText: text(row),
       fields,
@@ -236,7 +237,19 @@ const visit = async (client: AgentycClient, url: string): Promise<void> => {
   await client.call("browser_wait_for_stable_dom", { timeout_seconds: 15, quiet_ms: 500 });
 };
 
-const detailRef = (state: BrowserState, row: AvaalListRow, category: string): string => {
+const detailRef = (
+  state: BrowserState,
+  row: AvaalListRow,
+  category: string,
+): string | undefined => {
+  if (row.detailElementId) {
+    const elementId = row.detailElementId;
+    const byId = (state.interactive_elements ?? []).find(
+      (element) => element.tag === "a" && element.ref &&
+        (element.id === elementId || element.context?.includes(elementId)),
+    );
+    if (byId?.ref) return byId.ref;
+  }
   const candidates = (state.interactive_elements ?? []).filter(
     (element) => element.tag === "a" && element.text?.trim() === row.detailLabel,
   );
@@ -255,7 +268,10 @@ const detailRef = (state: BrowserState, row: AvaalListRow, category: string): st
       return ranked[0]!.candidate.ref;
     }
   }
-  throw new Error(`${category}: visible detail control is ambiguous for ${row.sourceId}`);
+  if (candidates.length > 1) {
+    throw new Error(`${category}: visible detail control is ambiguous for ${row.sourceId}`);
+  }
+  return undefined;
 };
 
 const extractDetail = async (
@@ -348,11 +364,22 @@ export const traverseCategory = async (
         });
         continue;
       }
-      if (!row.detailLabel) {
+      if (!row.detailLabel && !row.detailElementId) {
         throw new Error(`${config.category}: detail label missing for ${row.sourceId}`);
       }
       const state = await client.call<BrowserState>("browser_get_state", { mode: "full" });
-      await client.call("browser_click", { ref: detailRef(state, row, config.category) });
+      let ref = detailRef(state, row, config.category);
+      if (!ref) {
+        if (row.detailLabel) await client.call("browser_scroll_to_text", { text: row.detailLabel });
+        const scrolledState = await client.call<BrowserState>("browser_get_state", {
+          mode: "full",
+        });
+        ref = detailRef(scrolledState, row, config.category);
+      }
+      if (!ref) {
+        throw new Error(`${config.category}: visible detail control unavailable for ${row.sourceId}`);
+      }
+      await client.call("browser_click", { ref });
       await client.call("browser_wait_for_stable_dom", { timeout_seconds: 15, quiet_ms: 500 });
       const detail = await extractDetail(client, config.detail);
       records.set(row.sourceId, {
