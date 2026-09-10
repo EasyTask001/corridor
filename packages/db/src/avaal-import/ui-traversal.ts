@@ -307,6 +307,12 @@ export const traverseCategory = async (
   client: AgentycClient,
   config: AvaalPageConfig,
 ): Promise<AvaalCategorySnapshot> => {
+  // ACI transaction screens reset their DataTables page whenever an inline
+  // detail is opened. For the remaining backfill, capture the complete
+  // rendered history table first; detail enrichment can be added separately.
+  if (config.category === "aci_trips" || config.category === "aci_cargos") {
+    config = { ...config, detail: undefined } as AvaalPageConfig;
+  }
   const startUrl = new URL(config.route, config.baseUrl).href;
   await visit(client, startUrl);
   if (config.kind === "singleton") return traverseSingleton(client, config, startUrl);
