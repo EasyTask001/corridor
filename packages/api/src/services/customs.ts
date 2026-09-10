@@ -104,7 +104,7 @@ async function credentialsFor(
   const admin = createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  const { data, error } = await admin.rpc("read_integration_secret", {
+  const { data, error } = await admin.schema("api").rpc("read_integration_secret", {
     p_org: orgId,
     p_provider: provider,
   });

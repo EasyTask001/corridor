@@ -7,7 +7,15 @@ import {
   type OrgMembership,
   type Session,
 } from "@corridor/auth";
-import { getDb, withRls, type DatabaseClient, type RlsTransaction } from "@corridor/db";
+import {
+  asc,
+  eq,
+  getDb,
+  schema,
+  withRls,
+  type DatabaseClient,
+  type RlsTransaction,
+} from "@corridor/db";
 import { cachePermissions, getCachedPermissions } from "./infra/permission-cache";
 
 export const ACTIVE_ORG_HEADER = "x-corridor-org";
@@ -37,14 +45,6 @@ export interface Context {
   rls: <T>(fn: (tx: RlsTransaction) => Promise<T>) => Promise<T>;
 }
 
-interface MembershipRow {
-  organization_id: string;
-  role_id: string;
-  status: OrgMembership["status"];
-  organizations: { name: string; subscription_plan: SubscriptionPlan | null } | null;
-  roles: { name: string } | null;
-}
-
 /**
  * Resolves the caller from either a cookie session (web) or a Bearer token
  * (future Expo app) — both terminate in `supabase.auth.getUser()`.
@@ -68,33 +68,49 @@ export async function createContext(opts: CreateContextOptions): Promise<Context
 
   const { user, accessToken } = resolved;
 
-  // Memberships are read through supabase-js so RLS applies with the caller's
-  // own JWT (the client is session-bound for cookies; for Bearer we pass it).
   const authed = bearer ? withBearer(opts.supabase, accessToken) : opts.supabase;
 
-  const [{ data: memberRows }, { data: profile }] = await Promise.all([
-    authed
-      .from("organization_members")
-      .select(
-        "organization_id, role_id, status, organizations(name, subscription_plan), roles(name)",
-      )
-      .eq("user_id", user.id)
-      .returns<MembershipRow[]>(),
-    authed.from("user_profiles").select("display_name").eq("user_id", user.id).maybeSingle(),
-  ]);
+  // `public` is intentionally not exposed through PostgREST. Bootstrap the
+  // session through the same direct, caller-scoped RLS transaction as routers.
+  const { organizationMembers, organizations, roles, userProfiles } = schema;
+  const { rows, profile } = await withRls(
+    db,
+    { sub: user.id, email: user.email ?? undefined },
+    async (tx) => {
+      const memberships = await tx
+        .select({
+          organizationId: organizationMembers.organizationId,
+          organizationName: organizations.name,
+          roleId: organizationMembers.roleId,
+          roleName: roles.name,
+          status: organizationMembers.status,
+          subscriptionPlan: organizations.subscriptionPlan,
+        })
+        .from(organizationMembers)
+        .leftJoin(organizations, eq(organizations.id, organizationMembers.organizationId))
+        .leftJoin(roles, eq(roles.id, organizationMembers.roleId))
+        .where(eq(organizationMembers.userId, user.id))
+        .orderBy(asc(organizationMembers.createdAt));
+      const [profile] = await tx
+        .select({ displayName: userProfiles.displayName })
+        .from(userProfiles)
+        .where(eq(userProfiles.userId, user.id))
+        .limit(1);
+      return { rows: memberships, profile };
+    },
+  );
 
-  const rows = memberRows ?? [];
   const memberships: OrgMembership[] = rows.map((m) => ({
-    organizationId: m.organization_id,
-    organizationName: m.organizations?.name ?? "",
-    roleId: m.role_id,
-    roleName: m.roles?.name ?? "",
+    organizationId: m.organizationId,
+    organizationName: m.organizationName ?? "",
+    roleId: m.roleId,
+    roleName: m.roleName ?? "",
     status: m.status,
   }));
   const plansByOrg = new Map<string, SubscriptionPlan>(
     rows.flatMap((m) =>
-      m.organizations?.subscription_plan
-        ? [[m.organization_id, m.organizations.subscription_plan] as const]
+      m.subscriptionPlan
+        ? [[m.organizationId, m.subscriptionPlan] as const]
         : [],
     ),
   );
@@ -114,7 +130,7 @@ export async function createContext(opts: CreateContextOptions): Promise<Context
     if (cached) {
       permissions = new Set(cached);
     } else {
-      const { data } = await authed.rpc("current_user_permissions", {
+      const { data } = await authed.schema("api").rpc("current_user_permissions", {
         org_id: activeOrganizationId,
       });
       const keys = (data ?? []) as PermissionKey[];
@@ -124,7 +140,7 @@ export async function createContext(opts: CreateContextOptions): Promise<Context
   }
 
   const session: Session = {
-    user: toSessionUser(user, (profile as { display_name?: string | null } | null)?.display_name),
+    user: toSessionUser(user, profile?.displayName),
     memberships,
     activeOrganizationId,
     plan: (activeOrganizationId ? plansByOrg.get(activeOrganizationId) : undefined) ?? "trial",

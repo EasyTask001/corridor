@@ -267,7 +267,7 @@ export const organizationRouter = router({
 
   /** Onboarding: create org + Owner membership atomically (SECURITY DEFINER RPC). */
   create: authedProcedure.input(createOrganizationInput).mutation(async ({ ctx, input }) => {
-    const { data, error } = await ctx.supabase.rpc("create_organization_with_owner", {
+    const { data, error } = await ctx.supabase.schema("api").rpc("create_organization_with_owner", {
       p_name: input.name,
       p_legal_name: input.legalName ?? null,
       p_scac_code: input.scacCode ?? null,
@@ -955,7 +955,7 @@ export const organizationRouter = router({
     acceptInvite: authedProcedure
       .input(z.object({ token: z.string().min(10) }))
       .mutation(async ({ ctx, input }) => {
-        const { data, error } = await ctx.supabase.rpc("accept_invitation", {
+        const { data, error } = await ctx.supabase.schema("api").rpc("accept_invitation", {
           p_token: input.token,
         });
         if (error) throw new TRPCError({ code: "BAD_REQUEST", message: error.message });

@@ -124,7 +124,7 @@ export const integrationsRouter = router({
         if (credentials) {
           // Vault write goes through the SECURITY DEFINER RPC — never a direct
           // insert into vault.* — so the permission check lives in the database.
-          const { error } = await ctx.supabase.rpc("store_integration_secret", {
+          const { error } = await ctx.supabase.schema("api").rpc("store_integration_secret", {
             p_org: ctx.orgId,
             p_provider: input.provider,
             p_secret: JSON.stringify(credentials),
@@ -159,7 +159,7 @@ export const integrationsRouter = router({
     clearCredentials: permissionProcedure("integrations.manage")
       .input(z.object({ provider }))
       .mutation(async ({ ctx, input }) => {
-        const { data, error } = await ctx.supabase.rpc("delete_integration_secret", {
+        const { data, error } = await ctx.supabase.schema("api").rpc("delete_integration_secret", {
           p_org: ctx.orgId,
           p_provider: input.provider,
         });
