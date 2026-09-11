@@ -14,10 +14,18 @@ const { generatedDocuments } = schema;
 export type ExportColumn = { key: string; label: string; width?: number };
 export type ExportRow = Record<string, string | number | null>;
 
-/** RFC 4180: quote a field when it holds a comma, quote, CR or LF; double the quotes. */
+/** Leading characters that Excel / Sheets / LibreOffice interpret as a formula (OWASP CSV injection). */
+const FORMULA_TRIGGER = /^[=+\-@\t\r]/;
+
+/**
+ * RFC 4180 quoting, plus formula-injection defence: a string that starts with
+ * a formula trigger is prefixed with a single quote so spreadsheets render it
+ * as text. Numbers pass through untouched (a negative number is data, not a
+ * formula).
+ */
 export function csvField(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return "";
-  const s = typeof value === "number" ? String(value) : value;
+  const s = typeof value === "number" ? String(value) : FORMULA_TRIGGER.test(value) ? `'${value}` : value;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 

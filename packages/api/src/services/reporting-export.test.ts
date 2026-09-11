@@ -11,6 +11,16 @@ describe("csv escaping", () => {
     expect(csvField("two\nlines")).toBe('"two\nlines"');
   });
 
+  it("prefixes formula triggers so Excel/Sheets treat the cell as text", () => {
+    expect(csvField("=SUM(A1:A9)")).toBe("'=SUM(A1:A9)");
+    expect(csvField("+1 905 555 0101")).toBe("'+1 905 555 0101");
+    expect(csvField('-DDE("cmd")')).toBe('"\'-DDE(""cmd"")"'); // prefix first, then RFC 4180 quoting
+    expect(csvField("@import")).toBe("'@import");
+    expect(csvField("\tleading tab")).toBe("'\tleading tab");
+    expect(csvField(-3.5)).toBe("-3.5"); // numbers are never prefixed
+    expect(csvField("plain -text")).toBe("plain -text");
+  });
+
   it("writes a BOM, a header row and CRLF line ends", () => {
     const csv = toCsv(
       [
