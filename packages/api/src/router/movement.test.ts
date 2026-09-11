@@ -309,13 +309,13 @@ describe("movement.crew.add", () => {
    */
   it("delivers only after the caller's transaction has committed", async () => {
     const order: string[] = [];
-    resolveDriverAssignment.mockImplementation(async () => {
+    resolveDriverAssignment.mockImplementation(() => {
       order.push("resolve");
-      return ASSIGNMENT;
+      return Promise.resolve(ASSIGNMENT);
     });
-    notifyUser.mockImplementation(async () => {
+    notifyUser.mockImplementation(() => {
       order.push("notify");
-      return { notified: 1, emailed: 0, pushed: 0 };
+      return Promise.resolve({ notified: 1, emailed: 0, pushed: 0 });
     });
     const { caller: api } = caller({ rows: crewRows(), onCommit: () => order.push("commit") });
 

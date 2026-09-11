@@ -37,6 +37,11 @@ export interface DataTableColumnMeta {
  * — lists in this app page on the server, so the table renders the page it is
  * given and only draws the controls.
  */
+// A typed (not asserted) placeholder value: `tableFeatures` infers its `ColumnMeta`
+// generic from this value's declared type, not its literal shape, so the empty
+// object still carries `className`/`headerClassName` through to `column.columnDef.meta`.
+const emptyColumnMeta: DataTableColumnMeta = {};
+
 export const dataTableFeatures = tableFeatures({
   columnFilteringFeature,
   globalFilteringFeature,
@@ -45,7 +50,7 @@ export const dataTableFeatures = tableFeatures({
   rowSortingFeature,
   sortedRowModel: createSortedRowModel(),
   sortFns: { alphanumeric: sortFn_alphanumeric, text: sortFn_text },
-  columnMeta: {} as DataTableColumnMeta,
+  columnMeta: emptyColumnMeta,
 });
 
 export type DataTableFeatures = typeof dataTableFeatures;

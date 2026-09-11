@@ -26,7 +26,7 @@ function ctx(session: Session | null): Context {
     supabase: {} as never,
     db: {} as never,
     headers: new Headers(),
-    rls: async () => {
+    rls: () => {
       throw new Error("not used");
     },
   };

@@ -111,41 +111,43 @@ export function createMockCustomsClient(opts: MockCustomsOptions): CustomsClient
     environment: opts.environment ?? "sandbox",
     mode: "mock",
 
-    async transmit(manifest, o) {
+    transmit(manifest, o) {
       const trip = hook(manifest);
       if (trip.includes("BADAUTH")) {
-        throw new CustomsTransportError("Gateway rejected carrier credentials", 401, false);
-      }
-      if (trip.includes("FAIL") || random() < failureRate) {
-        throw new CustomsTransportError(
-          "Customs gateway unavailable (simulated outage)",
-          503,
-          true,
+        return Promise.reject(
+          new CustomsTransportError("Gateway rejected carrier credentials", 401, false),
         );
       }
-      return ack(manifest, o);
+      if (trip.includes("FAIL") || random() < failureRate) {
+        return Promise.reject(
+          new CustomsTransportError("Customs gateway unavailable (simulated outage)", 503, true),
+        );
+      }
+      return Promise.resolve(ack(manifest, o));
     },
 
-    async amend(manifest, referenceNumber, o) {
+    amend(manifest, referenceNumber, o) {
       const trip = hook(manifest);
       if (trip.includes("FAIL")) {
-        throw new CustomsTransportError("Customs gateway unavailable (simulated outage)", 503, true);
+        return Promise.reject(
+          new CustomsTransportError("Customs gateway unavailable (simulated outage)", 503, true),
+        );
       }
       // The filing keeps its reference; the decision sequence starts over.
-      return ack(manifest, o, referenceNumber);
+      return Promise.resolve(ack(manifest, o, referenceNumber));
     },
 
-    async cancel(referenceNumber, reason) {
+    cancel(referenceNumber, reason) {
       const f = filed.get(tenant, referenceNumber);
       if (f) f.cancelled = true;
-      return {
+      return Promise.resolve({
         referenceNumber,
         receivedAt: now().toISOString(),
         raw: { mock: true, cancelled: true, reason },
-      };
+      });
     },
 
-    async fetchDecision(referenceNumber, manifest, ctx) {
+    fetchDecision(referenceNumber, manifest, ctx) {
       const trip = hook(manifest);
       let decision: CustomsDecisionMessage["decision"];
       let message: string | null = null;
@@ -180,14 +182,14 @@ export function createMockCustomsClient(opts: MockCustomsOptions): CustomsClient
       });
       const f = filed.get(tenant, referenceNumber);
       if (f) f.stage = decision === "held" ? "held" : decision === "accepted" ? "accepted" : "done";
-      return {
+      return Promise.resolve({
         referenceNumber,
         decision,
         message,
         events,
         shipments,
         raw: { mock: true, credentialsPresent, decidedAt: now().toISOString() },
-      };
+      });
     },
 
     /**
@@ -231,34 +233,39 @@ export function createMockCustomsClient(opts: MockCustomsOptions): CustomsClient
       };
     },
 
-    async fetchNotices(since) {
+    fetchNotices(since) {
       const notice: CarrierNotice = { provider: opts.provider, ...MOCK_CARRIER_NOTICE };
-      return !since || new Date(notice.publishedAt) > since ? [notice] : [];
+      return Promise.resolve(!since || new Date(notice.publishedAt) > since ? [notice] : []);
     },
 
     parseInbound(rawBody, headers, secret) {
       return parseInboundMessage(rawBody, headers, secret ?? undefined);
     },
 
-    async ping() {
-      return { ok: true, mode: "mock", live: false, detail: { mock: true, credentialsPresent } };
+    ping() {
+      return Promise.resolve({
+        ok: true,
+        mode: "mock",
+        live: false,
+        detail: { mock: true, credentialsPresent },
+      });
     },
 
     // In-bond (0026): the mock acknowledges every message and answers the
     // status of a bond with the last thing it heard about it.
-    async inBondArrival(rec) {
+    inBondArrival(rec) {
       bonds.set(tenant, rec.bondNumber, "arrived");
-      return inBondAck("ARR", rec.bondNumber);
+      return Promise.resolve(inBondAck("ARR", rec.bondNumber));
     },
-    async inBondExport(rec) {
+    inBondExport(rec) {
       bonds.set(tenant, rec.bondNumber, "exported");
-      return inBondAck("EXP", rec.bondNumber);
+      return Promise.resolve(inBondAck("EXP", rec.bondNumber));
     },
-    async inBondCancel(rec, reason) {
+    inBondCancel(rec, reason) {
       bonds.set(tenant, rec.bondNumber, "cancelled");
-      return { ...inBondAck("CXL", rec.bondNumber), raw: { mock: true, reason } };
+      return Promise.resolve({ ...inBondAck("CXL", rec.bondNumber), raw: { mock: true, reason } });
     },
-    async inBondStatus(bondNumber) {
+    inBondStatus(bondNumber) {
       const status = bonds.get(tenant, bondNumber) ?? "open";
       const message: InBondStatusMessage = {
         bondNumber,
@@ -266,7 +273,7 @@ export function createMockCustomsClient(opts: MockCustomsOptions): CustomsClient
         message: `Bond ${bondNumber} is ${status} (simulated).`,
         raw: { mock: true, checkedAt: now().toISOString() },
       };
-      return message;
+      return Promise.resolve(message);
     },
   };
   return client;

@@ -10,8 +10,8 @@ describe("toSessionUser", () => {
   it("prefers the explicit display name, then user_metadata, then null", () => {
     expect(toSessionUser(user, "Profile")).toEqual({ id: "u1", email: "d@corridor.test", displayName: "Profile" });
     expect(toSessionUser(user).displayName).toBe("Dee");
-    expect(toSessionUser({ ...user, user_metadata: {} } as User).displayName).toBeNull();
-    expect(toSessionUser({ ...user, email: undefined } as User).email).toBeNull();
+    expect(toSessionUser({ ...user, user_metadata: {} }).displayName).toBeNull();
+    expect(toSessionUser({ ...user, email: undefined }).email).toBeNull();
   });
 });
 

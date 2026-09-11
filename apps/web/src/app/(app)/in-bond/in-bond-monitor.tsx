@@ -257,7 +257,7 @@ function EventDrawer({ id, canWrite }: { id: string; canWrite: boolean }) {
     }),
   );
   const describe = (e: NonNullable<typeof data>[number]) => {
-    const p = (e.payload ?? {}) as Record<string, unknown>;
+    const p = e.payload ?? {};
     switch (e.kind) {
       case "arrival_sent":
         return `Arrival sent · ref ${p.referenceNumber ?? ""}`;

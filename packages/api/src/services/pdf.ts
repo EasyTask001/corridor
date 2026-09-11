@@ -207,7 +207,7 @@ export async function driverSheetDataFor(
       })),
     })),
     customsEvents: customsRows.map((e) => {
-      const p = (e.payload ?? {}) as Record<string, unknown>;
+      const p = e.payload ?? {};
       const detail = [p.shipmentControlNumber, p.entryNumber && `entry ${p.entryNumber}`, p.entryPortCode && `@ ${p.entryPortCode}`]
         .filter(Boolean)
         .join(" · ");

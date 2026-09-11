@@ -208,7 +208,7 @@ export function createGatewayCustomsClient(opts: GatewayClientOptions): CustomsC
   const transport =
     opts.transport ??
     (live
-      ? createHttpTransport({ baseUrl: opts.baseUrl!, apiKey: apiKey! })
+      ? createHttpTransport({ baseUrl: opts.baseUrl!, apiKey })
       : createFixtureGatewayTransport(regime, now, opts.tenantKey));
 
   const ackOf = (json: unknown, fallback: string): TransmitAck => {

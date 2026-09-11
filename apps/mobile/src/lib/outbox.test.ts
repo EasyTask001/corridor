@@ -23,8 +23,8 @@ function memoryStorage(initial: Record<string, string> = {}) {
     snapshot: (userId?: string | null) => OutboxEntry[];
     keys: () => string[];
   } = {
-    getItem: async (key) => map.get(key) ?? null,
-    setItem: async (key, value) => void map.set(key, value),
+    getItem: (key) => Promise.resolve(map.get(key) ?? null),
+    setItem: (key, value) => Promise.resolve(void map.set(key, value)),
     snapshot: (userId = null) =>
       JSON.parse(map.get(userId === null ? ANON_KEY : keyFor(userId)) ?? "[]") as OutboxEntry[],
     keys: () => [...map.keys()],
@@ -42,7 +42,7 @@ function build(
   } = {},
 ) {
   const storage = overrides.storage ?? memoryStorage();
-  const send = overrides.send ?? vi.fn(async () => ({ ok: true }));
+  const send = overrides.send ?? vi.fn(() => Promise.resolve({ ok: true }));
   const online = { value: overrides.isOnline ? overrides.isOnline() : true };
   const outbox = new Outbox({
     storage,
@@ -104,7 +104,7 @@ describe("Outbox.enqueue", () => {
     await expect(
       // A caller can only get here by bypassing the types, which is exactly
       // the case the guard exists for.
-      outbox.enqueue("notifications.markRead", { id: "nope" } as never),
+      outbox.enqueue("notifications.markRead", { id: "nope" }),
     ).rejects.toBeInstanceOf(OutboxValidationError);
     expect(storage.snapshot()).toEqual([]);
   });
@@ -138,9 +138,9 @@ describe("Outbox.flush", () => {
   });
 
   it("stops at the first transport failure so ordering is preserved", async () => {
-    const send = vi.fn(async (op: string) => {
+    const send = vi.fn((op: string) => {
       if (op === "documents.finalizeUpload") throw new Error("offline");
-      return {};
+      return Promise.resolve({});
     });
     const { outbox, storage } = build({ send });
     await outbox.enqueue("documents.finalizeUpload", { documentId: DOC });
@@ -154,7 +154,7 @@ describe("Outbox.flush", () => {
   });
 
   it("discards a poison entry after maxAttempts instead of wedging the queue", async () => {
-    const send = vi.fn(async () => {
+    const send = vi.fn(() => {
       throw new Error("500");
     });
     const { outbox, storage } = build({ send, maxAttempts: 3 });
@@ -320,7 +320,7 @@ describe("Outbox.drainAndClear", () => {
   });
 
   it("empties the queue even when the transport is failing", async () => {
-    const send = vi.fn(async () => {
+    const send = vi.fn(() => {
       throw new Error("502");
     });
     const { outbox, storage } = build({ send });

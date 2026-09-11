@@ -133,13 +133,15 @@ describe("billing.report_usage", () => {
     const unbilled = await seed(unbilledOrg, ago(3 * HOUR));
 
     const seen: UsageMeterRecord[] = [];
-    const result = await run(async (records) => {
+    const result = await run((records) => {
       seen.push(...records);
-      return records.map((r) => ({
-        id: r.id,
-        eventId: r.stripeCustomerId ? `corridor_usage_${r.id}` : `unbilled_${r.id}`,
-        mode: r.stripeCustomerId ? ("stripe" as const) : ("unbilled" as const),
-      }));
+      return Promise.resolve(
+        records.map((r) => ({
+          id: r.id,
+          eventId: r.stripeCustomerId ? `corridor_usage_${r.id}` : `unbilled_${r.id}`,
+          mode: r.stripeCustomerId ? ("stripe" as const) : ("unbilled" as const),
+        })),
+      );
     });
     expect(result.reported).toBe(2);
 
@@ -230,11 +232,13 @@ describe("billing.report_usage", () => {
     const ok = await seed(billedOrg, ago(3 * HOUR));
     const bad = await seed(billedOrg, ago(2 * HOUR));
 
-    const result = await run(async (records) =>
-      records.map((r) =>
-        r.id === ok
-          ? { id: r.id, eventId: `stripe_${r.id}`, mode: "stripe" as const }
-          : { id: r.id, eventId: "", mode: "failed" as const, error: "boom" },
+    const result = await run((records) =>
+      Promise.resolve(
+        records.map((r) =>
+          r.id === ok
+            ? { id: r.id, eventId: `stripe_${r.id}`, mode: "stripe" as const }
+            : { id: r.id, eventId: "", mode: "failed" as const, error: "boom" },
+        ),
       ),
     );
 

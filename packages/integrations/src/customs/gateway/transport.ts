@@ -55,7 +55,7 @@ export function createHttpTransport(opts: HttpTransportOptions): GatewayTranspor
     if (!res.ok) {
       const detail =
         json && typeof json === "object" && "message" in json
-          ? String((json as { message: unknown }).message)
+          ? String(json.message)
           : `HTTP ${res.status}`;
       throw new CustomsTransportError(`Customs gateway: ${detail}`, res.status, retryable(res.status));
     }

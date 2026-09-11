@@ -21,13 +21,14 @@ vi.mock("@/lib/sso", async (importOriginal) => ({
   passwordSignInBlockedFor: (email: string) => passwordSignInBlockedFor(email),
 }));
 vi.mock("@/lib/supabase/server", () => ({
-  createSupabaseServerClient: async () => ({ auth: { signInWithPassword, signUp } }),
+  createSupabaseServerClient: () => Promise.resolve({ auth: { signInWithPassword, signUp } }),
 }));
 vi.mock("next/navigation", () => ({ redirect: (to: string) => redirect(to) }));
 const cookieSet = vi.fn();
 const cookieDelete = vi.fn();
 vi.mock("next/headers", () => ({
-  cookies: async () => ({ set: cookieSet, delete: cookieDelete, get: () => undefined, getAll: () => [] }),
+  cookies: () =>
+    Promise.resolve({ set: cookieSet, delete: cookieDelete, get: () => undefined, getAll: () => [] }),
 }));
 
 process.env.NEXT_PUBLIC_SUPABASE_URL ??= "http://127.0.0.1:55321";

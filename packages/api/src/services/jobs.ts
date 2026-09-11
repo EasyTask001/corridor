@@ -297,7 +297,7 @@ export async function processDueJobs(
 
   for (const raw of claimed) {
     // execute() returns snake_case columns; normalise the ones we use.
-    const job = normalise(raw as unknown as Record<string, unknown>);
+    const job = normalise(raw);
     const handler = jobHandlers[job.jobType as JobType];
     const detached = detachedJobHandlers[job.jobType as JobType];
     try {

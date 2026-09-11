@@ -46,7 +46,7 @@ test.describe("document intelligence", () => {
       .getByLabel("Attach to movement (optional)")
       .locator("option", { hasText: draft.number })
       .getAttribute("value");
-    await page.getByLabel("Attach to movement (optional)").selectOption(opt!);
+    await page.getByLabel("Attach to movement (optional)").selectOption(opt);
     const rows = page.locator("tr", { hasText: "bol-steel.mock.txt" });
     const before = await rows.count();
     await page.getByLabel("File").setInputFiles(fixture("bol-steel.mock.txt"));

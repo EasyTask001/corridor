@@ -199,7 +199,7 @@ describe("rate limiting (memory fallback)", () => {
     process.env.UPSTASH_REDIS_REST_TOKEN = "t";
     resetKvForTests();
     _setUpstashLimiterFactoryForTests(() => ({
-      limit: async () => {
+      limit: () => {
         throw new Error("ECONNREFUSED");
       },
     }));
@@ -315,9 +315,9 @@ describe("permission cache", () => {
 
       const result = await withPermissionInvalidation(
         fakeCtx([userA], order, atCommit),
-        async () => {
+        () => {
           order.push("mutation");
-          return "saved" as const;
+          return Promise.resolve("saved" as const);
         },
       );
 
@@ -335,8 +335,9 @@ describe("permission cache", () => {
       await cachePermissions(otherOrgId, userA, keys);
 
       // userB has just been removed, so the post-mutation member list omits them.
-      await withPermissionInvalidation(fakeCtx([userA], []), async (_tx, alsoInvalidate) => {
+      await withPermissionInvalidation(fakeCtx([userA], []), (_tx, alsoInvalidate) => {
         alsoInvalidate(userB);
+        return Promise.resolve();
       });
 
       await expect(getCachedPermissions(orgId, userA)).resolves.toBeNull();
@@ -347,7 +348,7 @@ describe("permission cache", () => {
     it("leaves the cache alone when the mutation throws", async () => {
       await cachePermissions(orgId, userA, keys);
       await expect(
-        withPermissionInvalidation(fakeCtx([userA], []), async () => {
+        withPermissionInvalidation(fakeCtx([userA], []), () => {
           throw new Error("rolled back");
         }),
       ).rejects.toThrow("rolled back");

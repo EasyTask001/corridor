@@ -90,7 +90,7 @@ export function DocumentsPanel({
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "source_documents" },
-        invalidate,
+        () => void invalidate(),
       )
       .subscribe();
     return () => {

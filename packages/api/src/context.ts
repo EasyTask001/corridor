@@ -60,7 +60,7 @@ export async function createContext(opts: CreateContextOptions): Promise<Context
       supabase: opts.supabase,
       db,
       headers: opts.headers,
-      rls: async () => {
+      rls: () => {
         throw new Error("UNAUTHORIZED");
       },
     };

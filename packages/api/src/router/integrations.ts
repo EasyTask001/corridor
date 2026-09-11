@@ -323,7 +323,7 @@ export const integrationsRouter = router({
           .from(backgroundJobs)
           .where(eq(backgroundJobs.organizationId, ctx.orgId))
           .groupBy(backgroundJobs.status);
-        return Object.fromEntries(rows.map((r) => [r.status, r.count])) as Record<string, number>;
+        return Object.fromEntries(rows.map((r) => [r.status, r.count]));
       }),
     ),
   }),

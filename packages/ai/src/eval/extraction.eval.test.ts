@@ -90,7 +90,7 @@ describe(`extraction eval (${extractor.name})`, () => {
       );
       expect(out.ok, out.ok ? "" : `${out.error} ${out.issues?.join("; ") ?? ""}`).toBe(true);
       if (!out.ok) return;
-      const s = score(out.document as unknown as Record<string, unknown>, expected);
+      const s = score(out.document, expected);
       results.push({ name, accuracy: s.accuracy });
       expect(s.accuracy, s.misses.join("\n")).toBeGreaterThanOrEqual(THRESHOLD);
       if (expected._expectLowConfidence) {

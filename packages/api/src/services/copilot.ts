@@ -9,7 +9,11 @@ import { createHash } from "node:crypto";
 import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import { and, desc, eq, ilike, or, schema, sql, type RlsTransaction } from "@corridor/db";
-import { lookupHsCode as lookupHsCodeStatic, searchTariff } from "@corridor/integrations";
+import {
+  lookupHsCode as lookupHsCodeStatic,
+  searchTariff,
+  type TariffEntry,
+} from "@corridor/integrations";
 import {
   minCitationSimilarity,
   selectEmbedder,
@@ -263,18 +267,25 @@ export function copilotTools(rls: RlsRunner, orgId: string): ToolSet {
         hsCode: z.string().optional().describe("Exact HS code, e.g. 7208.10"),
         keyword: z.string().optional().describe("Keyword to search when the HS code isn't known"),
       }),
-      execute: async ({ hsCode, keyword }) => {
+      execute: ({
+        hsCode,
+        keyword,
+      }): Promise<TariffEntry | TariffEntry[] | { found: false; message: string }> => {
         if (hsCode) {
           const entry = lookupHsCodeStatic(hsCode);
-          return entry ?? { found: false, message: `No tariff entry found for HS code ${hsCode}.` };
+          return Promise.resolve(
+            entry ?? { found: false, message: `No tariff entry found for HS code ${hsCode}.` },
+          );
         }
         if (keyword) {
           const results = searchTariff(keyword);
-          return results.length
-            ? results
-            : { found: false, message: `No tariff entries match "${keyword}".` };
+          return Promise.resolve(
+            results.length
+              ? results
+              : { found: false, message: `No tariff entries match "${keyword}".` },
+          );
         }
-        return { found: false, message: "Provide either an hsCode or a keyword." };
+        return Promise.resolve({ found: false, message: "Provide either an hsCode or a keyword." });
       },
     }),
 

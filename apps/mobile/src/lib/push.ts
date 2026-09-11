@@ -15,12 +15,13 @@ export type PushRegistration =
   { status: "registered"; token: string } | { status: "skipped"; reason: string };
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldPlaySound: false,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
+  handleNotification: () =>
+    Promise.resolve({
+      shouldPlaySound: false,
+      shouldSetBadge: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
 });
 
 function projectId(): string | undefined {

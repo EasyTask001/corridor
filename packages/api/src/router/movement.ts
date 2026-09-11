@@ -221,9 +221,7 @@ export const movementRouter = router({
         .from(movements)
         .where(eq(movements.organizationId, ctx.orgId))
         .groupBy(movements.status);
-      return Object.fromEntries(rows.map((r) => [r.status, r.count])) as Partial<
-        Record<MovementStatus, number>
-      >;
+      return Object.fromEntries(rows.map((r) => [r.status, r.count]));
     }),
   ),
 
@@ -821,7 +819,7 @@ export const movementRouter = router({
         );
         if (set.scheduledCrossingAt !== undefined) {
           set.scheduledCrossingAt = set.scheduledCrossingAt
-            ? new Date(set.scheduledCrossingAt as unknown as string)
+            ? new Date(set.scheduledCrossingAt)
             : null;
         }
         consider("truckId", m.truckId, p.truckId);

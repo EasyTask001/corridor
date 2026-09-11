@@ -31,5 +31,22 @@ export default [
       },
     },
   },
+  {
+    // vitest.config.mts uses the `.mts` extension, which `**/*.ts` in tsconfig's `include`
+    // does not match. typescript-eslint's project service is a singleton created from
+    // whichever file is parsed first in the run, so `allowDefaultProject` must be merged into
+    // the *same* broad file glob as base.js's own `projectService: true` rule (not scoped
+    // narrowly to just the config file) — otherwise the service can get initialized from a
+    // regular src file before this override ever applies, permanently locking in an empty
+    // allowlist for the rest of the run.
+    files: ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"],
+    languageOptions: {
+      parserOptions: {
+        projectService: {
+          allowDefaultProject: ["*.config.ts", "*.config.mts"],
+        },
+      },
+    },
+  },
   { ignores: [".expo/**", "expo-env.d.ts"] },
 ];

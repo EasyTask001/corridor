@@ -108,8 +108,8 @@ beforeEach(() => {
 describe("runDriverNotify", () => {
   it("e-mails dispatch and the driver, texts the entry numbers, notes the delivery", async () => {
     const db = createFakeDb({ rows: rows(), sqlValues: { shipperName: null, consigneeName: null } });
-    const email = vi.fn(async () => ({ mode: "mock" as const, id: null }));
-    const sms = vi.fn(async () => ({ mode: "mock" as const, id: null }));
+    const email = vi.fn(() => Promise.resolve({ mode: "mock" as const, id: null }));
+    const sms = vi.fn(() => Promise.resolve({ mode: "mock" as const, id: null }));
     const r = await runDriverNotify(
       db.tx,
       TEST_ORG_ID,
@@ -133,7 +133,7 @@ describe("runDriverNotify", () => {
 
   it("sends no SMS without opt-in or before an entry exists, and still reports a failed e-mail", async () => {
     const db = createFakeDb({ rows: rows({ smsOptIn: false, entry: null }), sqlValues: {} });
-    const email = vi.fn(async () => ({ mode: "resend" as const, id: null, error: "bounced" }));
+    const email = vi.fn(() => Promise.resolve({ mode: "resend" as const, id: null, error: "bounced" }));
     const sms = vi.fn();
     const r = await runDriverNotify(db.tx, TEST_ORG_ID, { movementId: MOVEMENT_ID, trigger: "accepted" }, { email, sms });
     expect(sms).not.toHaveBeenCalled();

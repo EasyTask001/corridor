@@ -185,13 +185,13 @@ describe("in-bond messages", () => {
   it("a live client posts the in-bond document and reads the status back", async () => {
     const calls: Array<{ path: string; body?: unknown }> = [];
     const transport: GatewayTransport = {
-      post: async (path, body) => {
+      post: (path, body) => {
         calls.push({ path, body });
-        return { referenceNumber: "IB-1", receivedAt: "2026-09-06T12:00:00.000Z" };
+        return Promise.resolve({ referenceNumber: "IB-1", receivedAt: "2026-09-06T12:00:00.000Z" });
       },
-      get: async (path) => {
+      get: (path) => {
         calls.push({ path });
-        return { bondNumber: "123456789", status: "ARRIVED", message: "At port" };
+        return Promise.resolve({ bondNumber: "123456789", status: "ARRIVED", message: "At port" });
       },
     };
     const c = createGatewayCustomsClient({ provider: "cbp_ace", tenantKey: "t1", transport });
@@ -215,12 +215,14 @@ describe("in-bond messages", () => {
 
 describe("http transport", () => {
   const fetchStub =
-    (responses: Array<{ status: number; body: unknown }>) => async () => {
+    (responses: Array<{ status: number; body: unknown }>) => () => {
       const next = responses.shift()!;
-      return new Response(JSON.stringify(next.body), {
-        status: next.status,
-        headers: { "Content-Type": "application/json" },
-      });
+      return Promise.resolve(
+        new Response(JSON.stringify(next.body), {
+          status: next.status,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
     };
 
   it("sends the bearer key and marks 429 / 5xx retryable, 4xx not", async () => {
@@ -228,11 +230,11 @@ describe("http transport", () => {
     const t = createHttpTransport({
       baseUrl: "https://gw.example/",
       apiKey: "k1",
-      fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
+      fetchImpl: (url: string | URL | Request, init?: RequestInit) => {
         seen = init;
         expect(String(url)).toBe("https://gw.example/manifests/ping");
-        return new Response(JSON.stringify({ ok: true }), { status: 200 });
-      }) as typeof fetch,
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      },
     });
     expect(await t.get("/manifests/ping")).toEqual({ ok: true });
     expect((seen?.headers as Record<string, string>).Authorization).toBe("Bearer k1");
@@ -240,7 +242,7 @@ describe("http transport", () => {
     const busy = createHttpTransport({
       baseUrl: "https://gw.example",
       apiKey: "k1",
-      fetchImpl: fetchStub([{ status: 429, body: { message: "slow down" } }]) as typeof fetch,
+      fetchImpl: fetchStub([{ status: 429, body: { message: "slow down" } }]),
     });
     await expect(busy.get("/manifests/x")).rejects.toMatchObject({
       statusCode: 429,
@@ -250,7 +252,7 @@ describe("http transport", () => {
     const bad = createHttpTransport({
       baseUrl: "https://gw.example",
       apiKey: "k1",
-      fetchImpl: fetchStub([{ status: 400, body: { message: "bad manifest" } }]) as typeof fetch,
+      fetchImpl: fetchStub([{ status: 400, body: { message: "bad manifest" } }]),
     });
     const err = await bad.post("/manifests", {}).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(CustomsTransportError);
@@ -260,17 +262,17 @@ describe("http transport", () => {
   it("a live client goes through the transport with the manifest as the body", async () => {
     const calls: Array<{ path: string; body?: unknown }> = [];
     const transport: GatewayTransport = {
-      post: async (path, body) => {
+      post: (path, body) => {
         calls.push({ path, body });
-        return { referenceNumber: "ACE-LIVE1", receivedAt: "2026-09-06T12:00:00.000Z" };
+        return Promise.resolve({ referenceNumber: "ACE-LIVE1", receivedAt: "2026-09-06T12:00:00.000Z" });
       },
-      get: async (path) => {
+      get: (path) => {
         calls.push({ path });
-        return {
+        return Promise.resolve({
           referenceNumber: "ACE-LIVE1",
           status: "accepted",
           events: [{ code: "accepted" }],
-        };
+        });
       },
     };
     const c = createGatewayCustomsClient({ provider: "cbp_ace", tenantKey: "t1", transport });

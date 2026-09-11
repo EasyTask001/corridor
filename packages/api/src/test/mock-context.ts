@@ -242,8 +242,8 @@ export function createFakeDb(options: FakeDbOptions = {}): FakeDb {
     {},
     {
       get: (_t, key: string) => ({
-        findFirst: async () => table(key)[0] ?? undefined,
-        findMany: async () => table(key),
+        findFirst: () => Promise.resolve(table(key)[0] ?? undefined),
+        findMany: () => Promise.resolve(table(key)),
       }),
     },
   );
@@ -255,9 +255,9 @@ export function createFakeDb(options: FakeDbOptions = {}): FakeDb {
     insert: (target: AnyTable) => insertBuilder(target),
     update: (target: AnyTable) => updateBuilder(target),
     delete: (target: AnyTable) => deleteBuilder(target),
-    execute: async (statement: unknown) => {
+    execute: (statement: unknown) => {
       executed.push(statement);
-      return options.onExecute?.(statement) ?? [];
+      return Promise.resolve(options.onExecute?.(statement) ?? []);
     },
   } as unknown as RlsTransaction;
 
@@ -274,7 +274,7 @@ export function statementText(statement: unknown): string {
   return chunks
     .map((chunk) => {
       if (typeof chunk === "object" && chunk !== null && "value" in chunk) {
-        const value = (chunk as { value: unknown }).value;
+        const value = chunk.value;
         return Array.isArray(value) ? value.join("") : String(value);
       }
       return String(chunk);

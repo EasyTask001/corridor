@@ -21,7 +21,7 @@ const record = (over: Partial<UsageMeterRecord> = {}): UsageMeterRecord => ({
 });
 
 /** No STRIPE_SECRET_KEY — the mode every local run and CI job takes. */
-const mockEnv = readStripeEnv({} as NodeJS.ProcessEnv);
+const mockEnv = readStripeEnv({});
 
 describe("meter event names", () => {
   it("falls back to the metric name when no override is configured", () => {
@@ -32,7 +32,7 @@ describe("meter event names", () => {
     const env = readStripeEnv({
       STRIPE_METER_DOCUMENTS_EXTRACTED: "corridor_docs",
       STRIPE_METER_COPILOT_MESSAGES: "corridor_copilot",
-    } as NodeJS.ProcessEnv);
+    });
     expect(meterEventNameFor("documents_extracted", env)).toBe("corridor_docs");
     expect(meterEventNameFor("copilot_messages", env)).toBe("corridor_copilot");
     // A metric with no override still meters under its own name.
@@ -40,7 +40,7 @@ describe("meter event names", () => {
   });
 
   it("ignores empty overrides", () => {
-    const env = readStripeEnv({ STRIPE_METER_COPILOT_MESSAGES: "" } as NodeJS.ProcessEnv);
+    const env = readStripeEnv({ STRIPE_METER_COPILOT_MESSAGES: "" });
     expect(meterEventNameFor("copilot_messages", env)).toBe("copilot_messages");
   });
 });
@@ -80,7 +80,7 @@ describe("reportUsage in mock mode", () => {
 const liveEnv = readStripeEnv({
   STRIPE_SECRET_KEY: "sk_test_x",
   STRIPE_PRICE_STARTER: "price_1",
-} as NodeJS.ProcessEnv);
+});
 
 describe("idempotency keys", () => {
   it("checkout passes a stable idempotency key derived from the attempt id", async () => {

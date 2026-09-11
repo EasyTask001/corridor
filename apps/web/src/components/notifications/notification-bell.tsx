@@ -168,7 +168,7 @@ export function NotificationBell() {
                 <li key={n.id} className={n.readAt ? "" : "bg-signal-500/5"}>
                   {n.linkPath ? (
                     <Link
-                      href={n.linkPath as never}
+                      href={n.linkPath}
                       onClick={() => {
                         setOpen(false);
                         if (!n.readAt) markRead.mutate({ id: n.id });

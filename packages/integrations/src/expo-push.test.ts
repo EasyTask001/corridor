@@ -31,18 +31,20 @@ describe("sendExpoPush", () => {
   });
 
   it("posts the batch to Expo and counts the ok tickets", async () => {
-    const fetchImpl = vi.fn(async () =>
-      Response.json({
-        data: [
-          { status: "ok", id: "t1" },
-          { status: "error", message: "bad" },
-        ],
-      }),
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(
+        Response.json({
+          data: [
+            { status: "ok", id: "t1" },
+            { status: "error", message: "bad" },
+          ],
+        }),
+      ),
     );
     const result = await sendExpoPush(
       [message("ExponentPushToken[a]"), message("ExponentPushToken[b]")],
       { enabled: true },
-      fetchImpl as unknown as typeof fetch,
+      fetchImpl,
     );
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     const [url, init] = fetchImpl.mock.calls[0]! as unknown as [string, RequestInit];
@@ -52,33 +54,35 @@ describe("sendExpoPush", () => {
   });
 
   it("splits batches larger than 100", async () => {
-    const fetchImpl = vi.fn(async () => Response.json({ data: [] }));
+    const fetchImpl = vi.fn(() => Promise.resolve(Response.json({ data: [] })));
     const many = Array.from({ length: 150 }, (_, i) => message(`ExponentPushToken[${i}]`));
-    await sendExpoPush(many, { enabled: true }, fetchImpl as unknown as typeof fetch);
+    await sendExpoPush(many, { enabled: true }, fetchImpl);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it("reports transport failures instead of throwing", async () => {
-    const fetchImpl = vi.fn(async () => {
+    const fetchImpl = vi.fn(() => {
       throw new Error("ECONNRESET");
     });
     const result = await sendExpoPush(
       [message("ExponentPushToken[a]")],
       { enabled: true },
-      fetchImpl as unknown as typeof fetch,
+      fetchImpl,
     );
     expect(result.error).toBe("ECONNRESET");
     expect(result.sent).toBe(0);
   });
 
   it("reports an HTTP error body", async () => {
-    const fetchImpl = vi.fn(async () =>
-      Response.json({ errors: [{ message: "Invalid credentials" }] }, { status: 401 }),
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(
+        Response.json({ errors: [{ message: "Invalid credentials" }] }, { status: 401 }),
+      ),
     );
     const result = await sendExpoPush(
       [message("ExponentPushToken[a]")],
       { enabled: true },
-      fetchImpl as unknown as typeof fetch,
+      fetchImpl,
     );
     expect(result.error).toBe("Invalid credentials");
   });

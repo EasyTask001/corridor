@@ -16,7 +16,7 @@ const ACTOR: Record<Event["actorType"], { label: string; cls: string }> = {
 };
 
 function describe(e: Event): string {
-  const p = (e.payload ?? {}) as Record<string, unknown>;
+  const p = e.payload ?? {};
   switch (e.eventType) {
     case "status_change":
       if (!e.fromStatus)

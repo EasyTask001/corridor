@@ -18,7 +18,7 @@ const INPUT = { metadataUrl: "https://idp.acme.com/metadata", domains: ["acme.co
 function stubFetch(...responses: { status: number; body: unknown }[]) {
   const calls: { url: string; method: string; body: unknown; headers: Record<string, string> }[] =
     [];
-  const impl = (async (input: string | URL | Request, init?: RequestInit) => {
+  const impl = ((input: string | URL | Request, init?: RequestInit) => {
     const next = responses.shift() ?? { status: 500, body: { msg: "no canned response" } };
     calls.push({
       url: String(input),
@@ -26,11 +26,13 @@ function stubFetch(...responses: { status: number; body: unknown }[]) {
       body: init?.body ? JSON.parse(String(init.body)) : null,
       headers: (init?.headers ?? {}) as Record<string, string>,
     });
-    return new Response(JSON.stringify(next.body), {
-      status: next.status,
-      headers: { "content-type": "application/json" },
-    });
-  }) as unknown as typeof fetch;
+    return Promise.resolve(
+      new Response(JSON.stringify(next.body), {
+        status: next.status,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+  }) as typeof fetch;
   return { impl, calls };
 }
 
@@ -54,7 +56,7 @@ describe("ssoMode / readSsoEnv", () => {
         SUPABASE_URL: "https://internal.test",
         NEXT_PUBLIC_SUPABASE_URL: "https://public.test",
         SUPABASE_SERVICE_ROLE_KEY: "k",
-      } as NodeJS.ProcessEnv),
+      }),
     ).toEqual({ url: "https://internal.test", serviceRoleKey: "k" });
   });
 });

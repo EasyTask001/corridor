@@ -42,18 +42,18 @@ describe("selectExtractor", () => {
     const noKey = { CORRIDOR_EXTRACTOR: undefined, OPENAI_API_KEY: undefined } as NodeJS.ProcessEnv;
     expect(
       selectExtractor(textDoc("x", "bol.mock.pdf"), {
-        env: { OPENAI_API_KEY: "k" } as NodeJS.ProcessEnv,
+        env: { OPENAI_API_KEY: "k" },
       }).name,
     ).toBe("mock");
     expect(selectExtractor(textDoc("x", "bol.pdf"), { env: noKey }).name).toBe("mock");
     expect(
       selectExtractor(textDoc("x", "bol.pdf"), {
-        env: { OPENAI_API_KEY: "k" } as NodeJS.ProcessEnv,
+        env: { OPENAI_API_KEY: "k" },
       }).name,
     ).toMatch(/^openai:/);
     expect(
       selectExtractor(textDoc("x", "bol.pdf"), {
-        env: { OPENAI_API_KEY: "k", CORRIDOR_EXTRACTOR: "mock" } as NodeJS.ProcessEnv,
+        env: { OPENAI_API_KEY: "k", CORRIDOR_EXTRACTOR: "mock" },
       }).name,
     ).toBe("mock");
   });
@@ -97,13 +97,14 @@ describe("runExtractionPipeline", () => {
   it("rejects structurally invalid extractor output instead of trusting it", async () => {
     const bad: Extractor = {
       name: "bad",
-      extract: async () => ({
-        raw: {
-          documentType: "bol",
-          cargo: [{ commodityDescription: "x", hsCode: "12", confidence: 2 }],
-        },
-        model: "bad",
-      }),
+      extract: () =>
+        Promise.resolve({
+          raw: {
+            documentType: "bol",
+            cargo: [{ commodityDescription: "x", hsCode: "12", confidence: 2 }],
+          },
+          model: "bad",
+        }),
     };
     const out = await runExtractionPipeline(textDoc("irrelevant"), { extractor: bad });
     expect(out.ok).toBe(false);
@@ -115,7 +116,7 @@ describe("runExtractionPipeline", () => {
   it("turns extractor exceptions into a failure outcome", async () => {
     const boom: Extractor = {
       name: "boom",
-      extract: async () => {
+      extract: () => {
         throw new Error("provider down");
       },
     };
@@ -200,7 +201,7 @@ describe("runExtractionPipeline", () => {
     };
     const stub: Extractor = {
       name: "stub",
-      extract: async () => ({ raw, model: "stub" }),
+      extract: () => Promise.resolve({ raw, model: "stub" }),
     };
     const out = await runExtractionPipeline(textDoc("irrelevant"), { extractor: stub });
     expect(out.ok).toBe(true);

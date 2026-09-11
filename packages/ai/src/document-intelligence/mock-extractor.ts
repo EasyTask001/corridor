@@ -186,7 +186,7 @@ export function mockExtract(input: DocumentInput, hint: { documentType: Document
 
 export const mockExtractor: Extractor = {
   name: "mock",
-  async extract(input, hint): Promise<ExtractorResult> {
-    return { raw: mockExtract(input, hint), model: "mock" };
+  extract(input, hint): Promise<ExtractorResult> {
+    return Promise.resolve({ raw: mockExtract(input, hint), model: "mock" });
   },
 };

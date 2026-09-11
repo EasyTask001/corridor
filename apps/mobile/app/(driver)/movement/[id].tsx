@@ -11,7 +11,7 @@ const when = (value: Date | string | null | undefined) =>
 export default function MovementScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, error, loading, refetch } = useAsync(
-    () => trpc.movement.get.query({ id: id! }),
+    () => trpc.movement.get.query({ id }),
     id ?? "",
   );
 

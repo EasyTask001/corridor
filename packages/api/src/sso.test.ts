@@ -70,34 +70,34 @@ function row(over: Partial<SsoRow> = {}): SsoRow {
 /** Just enough of a Drizzle transaction for the three statements the router runs. */
 function fakeTx(state: { row: SsoRow | null; failWrite?: boolean; failDelete?: boolean }) {
   return {
-    query: { organizationSso: { findFirst: async () => state.row ?? undefined } },
+    query: { organizationSso: { findFirst: () => Promise.resolve(state.row ?? undefined) } },
     // `configure` takes an advisory lock and re-reads the row FOR UPDATE
     // before writing (the TOCTOU guard around the GoTrue round-trip).
-    execute: async () => [],
+    execute: () => Promise.resolve([]),
     select: () => ({
       from: () => ({
         where: () => ({
-          for: async () => (state.row ? [{ providerId: state.row.providerId }] : []),
+          for: () => Promise.resolve(state.row ? [{ providerId: state.row.providerId }] : []),
         }),
       }),
     }),
     insert: () => ({
       values: (values: Omit<SsoRow, "createdAt" | "updatedAt">) => ({
         onConflictDoUpdate: () => ({
-          returning: async () => {
+          returning: () => {
             if (state.failWrite) throw new Error("row-level security violation");
             state.row = row({ ...values, updatedAt: new Date("2026-09-02T00:00:00Z") });
-            return [state.row];
+            return Promise.resolve([state.row]);
           },
         }),
       }),
     }),
     delete: () => ({
       where: () => ({
-        returning: async () => {
-          if (state.failDelete) return [];
+        returning: () => {
+          if (state.failDelete) return Promise.resolve([]);
           state.row = null;
-          return [{ organizationId: ORG }];
+          return Promise.resolve([{ organizationId: ORG }]);
         },
       }),
     }),
@@ -131,8 +131,8 @@ function caller(
     db: {} as never,
     headers: new Headers(),
     rls: state
-      ? ((<T>(fn: (tx: RlsTransaction) => Promise<T>) => fn(fakeTx(state))) as Context["rls"])
-      : async () => {
+      ? (<T>(fn: (tx: RlsTransaction) => Promise<T>) => fn(fakeTx(state)))
+      : () => {
           throw new Error(PAST_THE_GATE);
         },
   };
@@ -381,7 +381,7 @@ describe("organization.sso.configure", () => {
       caller("enterprise", ["organization.manage"], { row: null }).sso.configure({
         domains: ["acme.test"],
         enforced: false,
-      } as never),
+      }),
     ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     expect(createSsoProvider).not.toHaveBeenCalled();
   });

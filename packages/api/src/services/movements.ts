@@ -152,7 +152,7 @@ async function applyShipmentOutcomes(
   for (const e of events) {
     const target = e.shipmentControlNumber ? byControl.get(e.shipmentControlNumber) : undefined;
     // An ACI release carries CBSA's RNS fields: keep them on the PARS RNS feed (0027).
-    const rns = (e.raw ?? {}) as Record<string, unknown>;
+    const rns = e.raw ?? {};
     if (m.regime === "ACI" && rns.rns === true && e.shipmentControlNumber) {
       await tx.insert(parsRnsEvents).values({
         organizationId: actor.orgId,
@@ -290,7 +290,7 @@ export async function applyTransition(
     payload,
     actorType,
   });
-  return row!;
+  return row;
 }
 
 /**

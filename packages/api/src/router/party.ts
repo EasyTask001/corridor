@@ -233,11 +233,11 @@ function registryRouter<T extends PgTable, I extends z.ZodObject, A extends Addr
             if (row.status === input.status) continue;
             const [after] = await tx
               .update(t)
-              .set({ status: input.status } as Partial<RegistryTable["$inferInsert"]>)
+              .set({ status: input.status })
               .where(eq(t.id, row.id))
               .returning();
             await writeAudit(tx, ctx.orgId, `${cfg.entityType}.update`, cfg.entityType, row.id, row, after ?? null);
-            if (cfg.afterSave && after) await cfg.afterSave(tx, ctx.orgId, after as unknown as Row);
+            if (cfg.afterSave && after) await cfg.afterSave(tx, ctx.orgId, after);
             changed += 1;
           }
           return { changed, total: before.length };
@@ -300,7 +300,7 @@ function registryRouter<T extends PgTable, I extends z.ZodObject, A extends Addr
             .where(and(eq(t.id, input.id), eq(t.organizationId, ctx.orgId)))
             .limit(1);
           if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-          if (!cfg.plateOwner) return present(row as unknown as Row);
+          if (!cfg.plateOwner) return present(row);
           const plates = await platesFor(tx, {
             [cfg.plateOwner === "truckId" ? "truckIds" : "trailerIds"]: [row.id],
           });

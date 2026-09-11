@@ -40,10 +40,10 @@ export function mockEmbed(text: string, dims: number = MOCK_DIMENSIONS): number[
 export const mockEmbedder: Embedder = {
   name: "mock",
   dimensions: MOCK_DIMENSIONS,
-  async embed(text: string): Promise<EmbeddingResult> {
-    return { embedding: mockEmbed(text), model: "mock" };
+  embed(text: string): Promise<EmbeddingResult> {
+    return Promise.resolve({ embedding: mockEmbed(text), model: "mock" });
   },
-  async embedMany(texts: string[]): Promise<EmbeddingResult[]> {
-    return texts.map((t) => ({ embedding: mockEmbed(t), model: "mock" }));
+  embedMany(texts: string[]): Promise<EmbeddingResult[]> {
+    return Promise.resolve(texts.map((t) => ({ embedding: mockEmbed(t), model: "mock" })));
   },
 };

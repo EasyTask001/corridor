@@ -40,22 +40,22 @@ describe("sendSms", () => {
   });
 
   it("posts to Twilio with basic auth and returns the SID", async () => {
-    const fetchImpl = vi.fn(async (url: string, init: RequestInit) => {
+    const fetchImpl = vi.fn((url: string, init: RequestInit) => {
       expect(url).toBe("https://api.twilio.com/2010-04-01/Accounts/ACxxx/Messages.json");
       expect((init.headers as Record<string, string>).Authorization).toBe(
         `Basic ${Buffer.from("ACxxx:tok").toString("base64")}`,
       );
       expect(String(init.body)).toContain("To=%2B19055550101");
       expect(String(init.body)).toContain("From=%2B15550001111");
-      return Response.json({ sid: "SM123" });
+      return Promise.resolve(Response.json({ sid: "SM123" }));
     });
     const r = await sendSms({ to: "905-555-0101", body: "PFTR-00012: entry 30039304566 @ 3401" }, live, fetchImpl as never);
     expect(r).toEqual({ mode: "twilio", id: "SM123" });
   });
 
   it("surfaces a Twilio error instead of throwing", async () => {
-    const fetchImpl = vi.fn(async () => Response.json({ message: "unverified number" }, { status: 400 }));
-    const r = await sendSms({ to: "+19055550101", body: "x" }, live, fetchImpl as never);
+    const fetchImpl = vi.fn(() => Promise.resolve(Response.json({ message: "unverified number" }, { status: 400 })));
+    const r = await sendSms({ to: "+19055550101", body: "x" }, live, fetchImpl);
     expect(r).toEqual({ mode: "twilio", id: null, error: "unverified number" });
   });
 });
