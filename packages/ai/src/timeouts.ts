@@ -24,7 +24,11 @@ export function aiTimeoutSignal(
 ): AbortSignal {
   const ms = envMs(kind, env);
   const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(new Error(`${kind} timed out after ${ms}ms`)), ms);
-  if (typeof t === "object" && "unref" in t) t.unref();
+  // `unknown` here, not the environment's declared setTimeout return type: in a
+  // DOM/React Native lib environment that type is `number`, which narrows the
+  // `typeof t === "object"` branch below to `never` and fails typecheck even
+  // though the runtime check itself is correct in every environment.
+  const t: unknown = setTimeout(() => controller.abort(new Error(`${kind} timed out after ${ms}ms`)), ms);
+  if (t && typeof t === "object" && "unref" in t) (t as { unref: () => void }).unref();
   return controller.signal;
 }
