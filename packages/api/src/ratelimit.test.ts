@@ -8,6 +8,7 @@ import {
   PERMISSION_CACHE_TTL_SECONDS,
 } from "./infra/permission-cache";
 import {
+  _setUpstashLimiterFactoryForTests,
   RATE_LIMITS,
   RateLimitExceededError,
   rateLimitFor,
@@ -191,6 +192,29 @@ describe("rate limiting (memory fallback)", () => {
 
     process.env.CORRIDOR_RATELIMIT_MULTIPLIER = "3";
     expect(rateLimitFor("standard", "trial").limit).toBe(RATE_LIMITS.standard.trial * 3);
+  });
+
+  it("counts in-process when the Upstash store throws, instead of allowing everything", async () => {
+    process.env.UPSTASH_REDIS_REST_URL = "https://example.invalid";
+    process.env.UPSTASH_REDIS_REST_TOKEN = "t";
+    resetKvForTests();
+    _setUpstashLimiterFactoryForTests(() => ({
+      limit: async () => {
+        throw new Error("ECONNREFUSED");
+      },
+    }));
+    try {
+      const limiter = rateLimitFor("ai", "trial"); // 5/min
+      const identity = { orgId: "org", userId: "u" };
+      const results = [];
+      for (let i = 0; i < 6; i++) results.push(await limiter.check(identity));
+      expect(results.slice(0, 5).every((r) => r.success)).toBe(true);
+      expect(results[5]?.success).toBe(false);
+    } finally {
+      _setUpstashLimiterFactoryForTests(null);
+      delete process.env.UPSTASH_REDIS_REST_URL;
+      delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    }
   });
 
   it("carries the retry hint on the error thrown by the middleware", () => {

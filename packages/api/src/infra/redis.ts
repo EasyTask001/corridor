@@ -129,6 +129,17 @@ export function getKv(): KvStore {
   return cachedKv;
 }
 
+/**
+ * The in-process memory store, unconditionally — even when Upstash is
+ * configured. Callers that already tried the Redis-backed store and got an
+ * error (e.g. the rate limiter's store-outage fallback) need this instead of
+ * `getKv()`: `getKv()` would hand back the same failing Redis client and
+ * retry the outage rather than falling back.
+ */
+export function getMemoryKv(): KvStore {
+  return memoryKv;
+}
+
 /** Test helper — forgets the memoised client and empties the memory store. */
 export function resetKvForTests(): void {
   cachedRedis = undefined;

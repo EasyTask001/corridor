@@ -19,7 +19,7 @@
  */
 import { Ratelimit, type Duration } from "@upstash/ratelimit";
 import type { SubscriptionPlan } from "@corridor/domain";
-import { getKv, getRedis, type KvStore } from "./redis";
+import { getKv, getMemoryKv, getRedis, type KvStore } from "./redis";
 
 export type RateLimitTier = "standard" | "ai";
 
@@ -113,7 +113,19 @@ export function rateLimitMultiplier(): number {
 
 const upstashLimiters = new Map<string, Ratelimit>();
 
-function upstashLimiter(tier: RateLimitTier, plan: SubscriptionPlan, limit: number): Ratelimit {
+type LimiterLike = Pick<Ratelimit, "limit">;
+let limiterFactoryOverride:
+  | ((tier: RateLimitTier, plan: SubscriptionPlan, limit: number) => LimiterLike)
+  | null = null;
+
+/** Test seam: replace the Upstash limiter (e.g. with one that throws). */
+export function _setUpstashLimiterFactoryForTests(factory: typeof limiterFactoryOverride): void {
+  limiterFactoryOverride = factory;
+  upstashLimiters.clear();
+}
+
+function upstashLimiter(tier: RateLimitTier, plan: SubscriptionPlan, limit: number): LimiterLike {
+  if (limiterFactoryOverride) return limiterFactoryOverride(tier, plan, limit);
   const cacheKey = `${tier}:${plan}:${limit}`;
   const existing = upstashLimiters.get(cacheKey);
   if (existing) return existing;
@@ -169,8 +181,11 @@ async function checkWithKv(
  * ceiling — it is not part of the key — so a plan change takes effect on the
  * next request without resetting the window.
  *
- * Fails open: if Redis is unreachable the request is allowed rather than
- * turning a cache outage into an outage of the whole API.
+ * Falls back to the in-process window: if Redis is unreachable the request is
+ * counted against the per-instance `MemoryKv` sliding window (the same one
+ * used when Upstash isn't configured at all) rather than either allowing
+ * everything through or turning a cache outage into an outage of the whole
+ * API.
  */
 export function rateLimitFor(tier: RateLimitTier, plan: SubscriptionPlan): RateLimiter {
   const redis = getRedis();
@@ -196,8 +211,10 @@ export function rateLimitFor(tier: RateLimitTier, plan: SubscriptionPlan): RateL
           retryAfterSeconds: Math.max(1, Math.ceil((result.reset - Date.now()) / 1000)),
         };
       } catch (error) {
-        console.error("[ratelimit] check failed; allowing request", error);
-        return allowed(limit, limit);
+        // A cache outage must not become an API outage, but neither should it
+        // remove the ceiling: fall back to the per-instance sliding window.
+        console.error("[ratelimit] store unavailable; counting in-process", error);
+        return checkWithKv(getMemoryKv(), `rl:fallback:${key}`, limit, RATE_LIMIT_WINDOW_SECONDS);
       }
     },
   };
@@ -207,7 +224,7 @@ export function rateLimitFor(tier: RateLimitTier, plan: SubscriptionPlan): RateL
  * Fixed-ceiling limiter for sessionless public endpoints (0027): counted by an
  * explicit key (a hashed IP), with a window of the caller's choosing and no
  * plan multiplier — a public page has no plan. Same sliding window, same
- * fail-open policy as the plan limiters.
+ * in-process fallback policy as the plan limiters.
  */
 export async function checkPublicRateLimit(
   key: string,
@@ -237,7 +254,7 @@ export async function checkPublicRateLimit(
       retryAfterSeconds: Math.max(1, Math.ceil((result.reset - Date.now()) / 1000)),
     };
   } catch (error) {
-    console.error("[ratelimit] public check failed; allowing request", error);
-    return allowed(limit, limit);
+    console.error("[ratelimit] public store unavailable; counting in-process", error);
+    return checkWithKv(getMemoryKv(), `rl:public:fallback:${key}:${windowSeconds}`, limit, windowSeconds);
   }
 }

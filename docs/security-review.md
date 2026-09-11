@@ -385,11 +385,11 @@ also asserts neither route reintroduces a `NODE_ENV` branch. The request-tail
 worker (`apps/web/src/lib/jobs.ts`) calls `processDueJobs` directly rather than
 the route, so local job processing is unaffected.
 
-**F2 — the rate limiter fails open (low, accepted).** `rateLimitFor().check()`
-catches a Redis error and allows the request, on the stated grounds that a cache
-outage should not become an API outage. That is a defensible trade, but it means
-an attacker who can degrade Upstash also removes the ceiling. Worth an alert on
-the `[ratelimit] check failed` log line rather than a code change.
+**F2 — the rate limiter used to fail open (resolved).** `rateLimitFor().check()`
+and `checkPublicRateLimit()` now fall back to the per-instance in-memory
+sliding window when the Upstash store errors, so a degraded cache lowers the
+ceiling to per-instance accuracy rather than removing it. Covered by the
+`counts in-process` case in `packages/api/src/ratelimit.test.ts`.
 
 **F3 — `secure` on cookies is conditional on `NODE_ENV` (informational).**
 `secure: process.env.NODE_ENV === "production"` is correct for local HTTP work,
