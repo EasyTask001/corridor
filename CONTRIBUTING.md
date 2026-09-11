@@ -143,10 +143,7 @@ Also:
   (`bigint generated always as identity` for ledgers), `organization_id ... on delete cascade`,
   `created_at` / `updated_at` with the `set_updated_at()` trigger, enum-like values as `text`
   with a `check (... in (...))`, and one index per query path with a comment naming the query.
-- **Every `create table` needs a "Why a new table" paragraph in the migration header**: the
-  grain, the existing tables considered, and why each does not fit. A migration that adds a
-  table without it is sent back in review. The headers of `0013_usage_billing.sql` and
-  `0015_user_devices.sql` are the reference.
+- **Every `create table` needs a "Why a new table" paragraph in the migration header**: the grain, the existing tables considered, and why each does not fit. A migration that adds a table without it is sent back in review. The per-table block in `0028_import_batches.sql` is the reference. The rule applies from `0018` onward; the 32 tables created in `0001`–`0017` predate it and are documented by their file-level banners (`0013_usage_billing.sql`, `0015_user_devices.sql`), which are not edited retroactively because applied migrations are immutable.
 - **Removing or merging a table is also a new migration**, never an edit; move the data in the
   same file and drop the old table only after the Drizzle mirror and `verify:mirror` are green.
 

@@ -10,7 +10,7 @@
   `create table`. Same grain → add columns. One-to-one → columns unless RLS, size or lifecycle
   differ. Only a genuinely new grain gets a table. Full rule: `CONTRIBUTING.md` → Schema design.
 - **Every `create table` carries a "Why a new table" header paragraph**: grain, existing tables
-  considered, why each does not fit. Reference: `supabase/migrations/0013_usage_billing.sql`.
+  considered, why each does not fit. Reference: `supabase/migrations/0028_import_batches.sql`.
 - **No key/value bags or `settings jsonb` to avoid a migration.** `jsonb` is for provider
   payloads and free-form metadata only.
 - **Denormalised copies need a trigger and an integration test** (`sync_org_subscription()` is
