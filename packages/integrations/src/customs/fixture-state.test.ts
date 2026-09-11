@@ -10,6 +10,14 @@ describe("createFixtureStore", () => {
     expect(s.get("b", "k")).toBe("vb");
     expect(s.get("c", "k")).toBeUndefined();
   });
+  it("the tenant+key composite is delimited, so a boundary shift cannot collide", () => {
+    const s = createFixtureStore<string>({ maxEntries: 10, ttlMs: 1000 });
+    s.set("ab", "c", "ab-c");
+    s.set("a", "bc", "a-bc");
+    expect(s.get("ab", "c")).toBe("ab-c");
+    expect(s.get("a", "bc")).toBe("a-bc");
+    expect(s.size).toBe(2);
+  });
   it("evicts beyond maxEntries, least recently used first", () => {
     const s = createFixtureStore<number>({ maxEntries: 2, ttlMs: 1000 });
     s.set("t", "1", 1);

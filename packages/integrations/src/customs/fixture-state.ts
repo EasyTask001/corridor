@@ -21,9 +21,9 @@ export interface FixtureStore<T> {
 export function createFixtureStore<T>(opts: { maxEntries: number; ttlMs: number; now?: () => number }): FixtureStore<T> {
   const entries = new Map<string, { value: T; expiresAt: number }>();
   const now = opts.now ?? (() => Date.now());
-  //  (unit separator) cannot appear in a uuid or a reference number, so
+  //  (unit separator) cannot appear in a uuid or a reference number, so
   // "tenantA" + "1:x" can never collide with "tenantA1" + ":x".
-  const k = (tenant: string, key: string) => `${tenant}${key}`;
+  const k = (tenant: string, key: string) => `${tenant}${key}`;
   const evict = () => {
     while (entries.size > opts.maxEntries) {
       const oldest = entries.keys().next();
@@ -69,7 +69,7 @@ export const mockBonds = createFixtureStore<InBondStatusMessage["status"]>({ max
 /** Per tenant+regime reference counters: two instances of one tenant never hand out the same reference. */
 const sequences = new Map<string, number>();
 export function nextFixtureSequence(tenant: string, regime: Regime): number {
-  const key = `${tenant}${regime}`;
+  const key = `${tenant}${regime}`;
   const next = (sequences.get(key) ?? 0) + 1;
   sequences.set(key, next);
   return next;
