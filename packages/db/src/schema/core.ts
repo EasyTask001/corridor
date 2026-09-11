@@ -1,5 +1,4 @@
 import { sql } from "drizzle-orm";
-import type { Address } from "@corridor/domain";
 import {
   bigint,
   boolean,
@@ -66,7 +65,13 @@ export const organizations = pgTable("organizations", {
   simpleDriverSheet: boolean("simple_driver_sheet").notNull().default(false),
   // 0025 — company profile
   timezone: text("timezone").notNull().default("America/Toronto"),
-  billingAddress: jsonb("billing_address").$type<Address>().notNull().default({}),
+  // 0042 — billing_address as columns; the API nests them back as `billingAddress`.
+  billingLine1: text("billing_line1"),
+  billingLine2: text("billing_line2"),
+  billingCity: text("billing_city"),
+  billingRegion: text("billing_region"),
+  billingPostalCode: text("billing_postal_code"),
+  billingCountry: text("billing_country"),
   includeParsInCargoNumbers: boolean("include_pars_in_cargo_numbers").notNull().default(false),
   dispatchEmails: text("dispatch_emails").array().notNull().default(sql`'{}'::text[]`),
   ...timestamps,

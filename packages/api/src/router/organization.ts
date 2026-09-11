@@ -2,12 +2,14 @@ import { randomBytes } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
+  addressToColumns,
   carrierCodeRemoveInput,
   carrierCodeSetDefaultInput,
   carrierCodeUpsertInput,
   customRoleInput,
   createOrganizationInput,
   inviteMemberInput,
+  nestAddress,
   PERMISSIONS,
   PERMISSION_KEYS,
   ssoConfigureInput,
@@ -285,7 +287,7 @@ export const organizationRouter = router({
         where: eq(organizations.id, ctx.orgId),
       });
       if (!org) throw new TRPCError({ code: "NOT_FOUND" });
-      return org;
+      return nestAddress("billing", "billingAddress", org);
     }),
   ),
 
@@ -314,7 +316,7 @@ export const organizationRouter = router({
               simpleDriverSheet: input.simpleDriverSheet,
             }),
             ...(input.timezone !== undefined && { timezone: input.timezone }),
-            ...(input.billingAddress !== undefined && { billingAddress: input.billingAddress }),
+            ...(input.billingAddress !== undefined && addressToColumns("billing", input.billingAddress)),
             ...(input.includeParsInCargoNumbers !== undefined && {
               includeParsInCargoNumbers: input.includeParsInCargoNumbers,
             }),
@@ -332,7 +334,7 @@ export const organizationRouter = router({
           before,
           row,
         );
-        return row;
+        return nestAddress("billing", "billingAddress", row);
       }),
     ),
 

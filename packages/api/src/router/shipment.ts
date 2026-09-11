@@ -8,16 +8,19 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, asc, desc, eq, gte, ilike, inArray, isNull, or, schema, sql } from "@corridor/db";
 import {
+  addressToColumns,
   assignShipmentsInput,
   commodityRemoveInput,
   commodityUpsertInput,
   isEditable,
+  nestAddress,
   shipmentInput,
   shipmentBulkRemoveInput,
   shipmentListInput,
   rnsListInput,
   shipmentPatch,
   uuid,
+  type Address,
 } from "@corridor/domain";
 import { permissionProcedure, router } from "../trpc";
 import { writeAudit } from "../services/audit";
@@ -163,10 +166,10 @@ export const shipmentRouter = router({
             : [],
         ]);
         return {
-          ...s,
+          ...nestAddress("delivery", "deliveryAddress", s),
           commodities: lines,
-          shipper,
-          consignee,
+          shipper: shipper && nestAddress("address", "address", shipper),
+          consignee: consignee && nestAddress("address", "address", consignee),
           movement,
           // id -> code/name for the four port columns, so the form's pickers
           // can open showing what is stored.
@@ -179,7 +182,9 @@ export const shipmentRouter = router({
     .input(shipmentInput)
     .mutation(({ ctx, input }) =>
       ctx.rls(async (tx) => {
-        const { carrierCode, movementId, ...fields } = input;
+        const { carrierCode, movementId, deliveryAddress, ...fields } = input as typeof input & {
+          deliveryAddress?: Address;
+        };
         if (movementId) {
           const m = await requireMovement(tx, ctx.orgId, movementId);
           if (m.regime !== input.regime) {
@@ -203,6 +208,7 @@ export const shipmentRouter = router({
           .insert(shipments)
           .values({
             ...fields,
+            ...addressToColumns("delivery", deliveryAddress),
             organizationId: ctx.orgId,
             movementId: movementId ?? null,
             carrierCode: carrierCode ?? (await defaultCarrierCode(tx, ctx.orgId, input.regime)),
@@ -222,7 +228,7 @@ export const shipmentRouter = router({
           const { ensureInBondRecordForShipment } = await import("../services/inbond");
           await ensureInBondRecordForShipment(tx, { orgId: ctx.orgId, userId: ctx.session.user.id }, row!);
         }
-        return row!;
+        return nestAddress("delivery", "deliveryAddress", row!);
       }),
     ),
 
@@ -242,7 +248,7 @@ export const shipmentRouter = router({
           .where(eq(shipments.id, id))
           .returning();
         await writeAudit(tx, ctx.orgId, "shipment.update", "shipment", id, before, row!);
-        return row!;
+        return nestAddress("delivery", "deliveryAddress", row!);
       }),
     ),
 

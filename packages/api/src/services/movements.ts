@@ -12,6 +12,7 @@ import { shipmentsForMovement } from "./shipments";
 import {
   actorMayTransition,
   cascadedShipmentStatus,
+  nestAddress,
   transition,
   validateForTransmit,
   type ActorType,
@@ -418,29 +419,35 @@ export async function crewForMovement(tx: Tx, movementId: string) {
       citizenship: drivers.citizenship,
       dateOfBirth: drivers.dateOfBirth,
       hazmatEndorsement: drivers.hazmatEndorsement,
-      usAddress: drivers.usAddress,
+      usAddressLine1: drivers.usAddressLine1,
+      usAddressLine2: drivers.usAddressLine2,
+      usAddressCity: drivers.usAddressCity,
+      usAddressRegion: drivers.usAddressRegion,
+      usAddressPostalCode: drivers.usAddressPostalCode,
+      usAddressCountry: drivers.usAddressCountry,
       status: drivers.status,
     })
     .from(movementCrew)
     .innerJoin(drivers, eq(drivers.id, movementCrew.driverId))
     .where(eq(movementCrew.movementId, movementId))
     .orderBy(asc(movementCrew.position), asc(drivers.lastName));
+  const crew = rows.map((r) => nestAddress("usAddress", "usAddress", r));
 
-  const documents = rows.length
+  const documents = crew.length
     ? await tx
         .select()
         .from(driverDocuments)
         .where(
           inArray(
             driverDocuments.driverId,
-            rows.map((r) => r.driverId),
+            crew.map((r) => r.driverId),
           ),
         )
         .orderBy(desc(driverDocuments.isPrimary), asc(driverDocuments.documentType))
     : [];
 
   const roleRank = { person_in_charge: 0, crew_member: 1, passenger: 2 };
-  return rows
+  return crew
     .map((r) => ({ ...r, documents: documents.filter((d) => d.driverId === r.driverId) }))
     .sort((a, b) => roleRank[a.role] - roleRank[b.role] || a.position - b.position);
 }

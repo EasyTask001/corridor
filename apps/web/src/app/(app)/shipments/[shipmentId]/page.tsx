@@ -30,7 +30,7 @@ export default async function ShipmentPage({
         id: p.id,
         label: p.name,
         type: p.type,
-        country: (p.address as { country?: string } | null)?.country ?? null,
+        country: p.address.country ?? null,
       }))}
       canWrite={session.permissions.has("shipment.write")}
     />

@@ -24,9 +24,11 @@ import {
   type RlsTransaction,
 } from "@corridor/db";
 import {
+  addressToColumns,
   driverDocumentInput,
   driverDocumentRemoveInput,
   driverInput,
+  nestAddress,
   partnerInput,
   registryListInput,
   trailerInput,
@@ -35,6 +37,8 @@ import {
   REGISTRY_SEARCH_COLUMNS,
   registryBulkStatusInput,
   registryExportInput,
+  type Address,
+  type AddressColumns,
   type PermissionKey,
   type PlateEntry,
 } from "@corridor/domain";
@@ -55,7 +59,12 @@ const { drivers, driverDocuments, trucks, trailers, partners } = schema;
 /** Structural shape every registry table satisfies; used for query building. */
 type RegistryTable = typeof drivers;
 
-interface RegistryConfig<T extends PgTable, I extends z.ZodObject> {
+type AddressKey = "address" | "usAddress";
+type Presented<Row, A extends AddressKey | undefined> = A extends AddressKey
+  ? Omit<Row, keyof AddressColumns<A>> & { [k in A]: Address }
+  : Row;
+
+interface RegistryConfig<T extends PgTable, I extends z.ZodObject, A extends AddressKey | undefined = undefined> {
   table: T;
   input: I;
   read: PermissionKey;
@@ -76,6 +85,8 @@ interface RegistryConfig<T extends PgTable, I extends z.ZodObject> {
   /** Title and columns of the CSV / PDF export (Task 12). */
   title: string;
   exportColumns: Array<{ key: string; label: string; value?: (row: T["$inferSelect"]) => unknown }>;
+  /** 0042 — the nested address on the API shape; stored as `<key>_*` columns (the key doubles as the column prefix). */
+  address?: A;
 }
 
 /** Flatten a registry cell for a CSV / PDF: dates to ISO days, booleans to yes/no. */
@@ -87,9 +98,6 @@ function exportCell(value: unknown): string | number | null {
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }
-const addressPart = (part: string) => (row: { address?: unknown }) =>
-  (row.address as Record<string, unknown> | null | undefined)?.[part] ?? null;
-
 function mapDbError(e: unknown): never {
   const cause = (e as { cause?: { code?: string; constraint_name?: string; constraint?: string } })
     ?.cause;
@@ -134,8 +142,18 @@ function withPlates<R extends { id: string }>(
   }));
 }
 
-function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryConfig<T, I>) {
+function registryRouter<T extends PgTable, I extends z.ZodObject, A extends AddressKey | undefined = undefined>(
+  cfg: RegistryConfig<T, I, A>,
+) {
   type Row = T["$inferSelect"];
+  type Out = Presented<Row, A>;
+  const present = (row: Row): Out =>
+    (cfg.address ? nestAddress(cfg.address, cfg.address, row as never) : row) as Out;
+  const flatten = (fields: Record<string, unknown>) => {
+    if (!cfg.address || !(cfg.address in fields)) return fields;
+    const { [cfg.address]: nested, ...rest } = fields;
+    return { ...rest, ...addressToColumns(cfg.address, nested as Address | null | undefined) };
+  };
   const t = cfg.table as unknown as RegistryTable;
   const searchColumns = cfg.searchColumns(cfg.table);
   const orderBy = cfg.orderBy(cfg.table);
@@ -191,7 +209,10 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
                 }),
               )
             : rawRows;
-          return { rows: rows as unknown as Row[], total: counts[0]?.count ?? 0 };
+          return {
+            rows: (rows as unknown as Row[]).map(present),
+            total: counts[0]?.count ?? 0,
+          };
         }),
       ),
 
@@ -279,11 +300,11 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
             .where(and(eq(t.id, input.id), eq(t.organizationId, ctx.orgId)))
             .limit(1);
           if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-          if (!cfg.plateOwner) return row as unknown as Row;
+          if (!cfg.plateOwner) return present(row as unknown as Row);
           const plates = await platesFor(tx, {
             [cfg.plateOwner === "truckId" ? "truckIds" : "trailerIds"]: [row.id],
           });
-          return withPlates([row], cfg.plateOwner, plates)[0] as unknown as Row;
+          return present(withPlates([row], cfg.plateOwner, plates)[0] as unknown as Row);
         }),
       ),
 
@@ -295,7 +316,7 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
             extraPlates?: PlateEntry[];
           };
           const values = {
-            ...fields,
+            ...flatten(fields),
             organizationId: ctx.orgId,
             createdBy: ctx.session.user.id,
           } as unknown as RegistryTable["$inferInsert"];
@@ -313,7 +334,7 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
             saved,
           );
           await cfg.afterSave?.(tx, ctx.orgId, saved);
-          return saved as Row;
+          return present(saved);
         }),
       ),
 
@@ -333,7 +354,7 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
           if (!before) throw new TRPCError({ code: "NOT_FOUND" });
           const [row] = await tx
             .update(t)
-            .set(patch as Partial<RegistryTable["$inferInsert"]>)
+            .set(flatten(patch) as Partial<RegistryTable["$inferInsert"]>)
             .where(and(eq(t.id, id), eq(t.organizationId, ctx.orgId)))
             .returning()
             .catch(mapDbError);
@@ -350,7 +371,7 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
             saved,
           );
           await cfg.afterSave?.(tx, ctx.orgId, saved);
-          return saved;
+          return present(saved);
         }),
       ),
 
@@ -376,7 +397,7 @@ function registryRouter<T extends PgTable, I extends z.ZodObject>(cfg: RegistryC
             { status: "archived" },
           );
           await cfg.afterSave?.(tx, ctx.orgId, saved);
-          return saved;
+          return present(saved);
         }),
       ),
   });
@@ -522,6 +543,7 @@ export const partyRouter = router({
           { type: "driver", id: row.id },
           findingsForDriver(row, await travelDocumentsFor(tx, row.id)),
         ),
+      address: "usAddress",
     }),
     driverDocumentRouter,
   ),
@@ -590,11 +612,11 @@ export const partyRouter = router({
     exportColumns: [
       { key: "name", label: "Partner" },
       { key: "type", label: "Role" },
-      { key: "line1", label: "Address", value: addressPart("line1") },
-      { key: "city", label: "City", value: addressPart("city") },
-      { key: "region", label: "Province / state", value: addressPart("region") },
-      { key: "postalCode", label: "Postal / ZIP", value: addressPart("postalCode") },
-      { key: "country", label: "Country", value: addressPart("country") },
+      { key: "line1", label: "Address", value: (r) => r.addressLine1 },
+      { key: "city", label: "City", value: (r) => r.addressCity },
+      { key: "region", label: "Province / state", value: (r) => r.addressRegion },
+      { key: "postalCode", label: "Postal / ZIP", value: (r) => r.addressPostalCode },
+      { key: "country", label: "Country", value: (r) => r.addressCountry },
       { key: "taxId", label: "Tax ID" },
       { key: "contactName", label: "Contact" },
       { key: "contactEmail", label: "Contact email" },
@@ -603,5 +625,6 @@ export const partyRouter = router({
     ],
     searchColumns: (t) => [t.name, t.contactName, t.taxId],
     orderBy: (t) => [asc(t.name)],
+    address: "address",
   }),
 });

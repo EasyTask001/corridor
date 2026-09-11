@@ -202,16 +202,16 @@ export async function seed() {
       await sql`
         insert into public.drivers (organization_id, first_name, last_name, person_type, gender,
           license_number, license_jurisdiction, license_expiry, medical_cert_expiry, citizenship,
-          hazmat_endorsement, us_address, phone, email)
+          hazmat_endorsement, us_address_line1, us_address_city, us_address_region, us_address_postal_code, us_address_country, phone, email)
         values
-          (${orgId}, 'Gurpreet', 'Singh',   'driver',    'M', 'S1234-56789-01234', 'ON', ${day(400)}, ${day(200)}, 'CA', true,  ${sql.json({})}, '+1 905 555 0101', 'gurpreet@pathfinder.demo'),
-          (${orgId}, 'Marcus',   'Reyes',   'driver',    'M', 'R7788-11223-33445', 'MI', ${day(9)},   ${day(300)}, 'US', false, ${sql.json({})}, '+1 313 555 0102', 'marcus@pathfinder.demo'),
-          (${orgId}, 'Amrit',    'Kaur',    'driver',    'F', 'K5566-99887-77665', 'BC', ${day(-12)}, null,        'CA', false, ${sql.json({})}, '+1 604 555 0103', 'amrit@pathfinder.demo'),
-          (${orgId}, 'Dale',     'Thompson','driver',    'M', 'T1010-20203-30304', 'NY', ${day(700)}, ${day(650)}, 'US', false, ${sql.json({})}, '+1 716 555 0104', 'dale@pathfinder.demo'),
+          (${orgId}, 'Gurpreet', 'Singh',   'driver',    'M', 'S1234-56789-01234', 'ON', ${day(400)}, ${day(200)}, 'CA', true,  null, null, null, null, null, '+1 905 555 0101', 'gurpreet@pathfinder.demo'),
+          (${orgId}, 'Marcus',   'Reyes',   'driver',    'M', 'R7788-11223-33445', 'MI', ${day(9)},   ${day(300)}, 'US', false, null, null, null, null, null, '+1 313 555 0102', 'marcus@pathfinder.demo'),
+          (${orgId}, 'Amrit',    'Kaur',    'driver',    'F', 'K5566-99887-77665', 'BC', ${day(-12)}, null,        'CA', false, null, null, null, null, null, '+1 604 555 0103', 'amrit@pathfinder.demo'),
+          (${orgId}, 'Dale',     'Thompson','driver',    'M', 'T1010-20203-30304', 'NY', ${day(700)}, ${day(650)}, 'US', false, null, null, null, null, null, '+1 716 555 0104', 'dale@pathfinder.demo'),
           -- A passenger rides along and never drives: no licence, a travel
           -- document instead, and a US address for the ACE crew list.
           (${orgId}, 'Rosa',     'Delgado', 'passenger', 'F', null,                null, null,        null,        'MX', false,
-            ${sql.json({ line1: "2200 Michigan Ave", city: "Detroit", region: "MI", postalCode: "48216", country: "US" })},
+            '2200 Michigan Ave', 'Detroit', 'MI', '48216', 'US',
             '+1 313 555 0105', 'rosa@pathfinder.demo')
         on conflict do nothing`;
 
@@ -267,19 +267,19 @@ export async function seed() {
           and not exists (select 1 from public.equipment_plates p where p.trailer_id = t.id)`;
 
       await sql`
-        insert into public.partners (organization_id, name, type, address, tax_id, contact_name, contact_email, contact_phone)
+        insert into public.partners (organization_id, name, type, address_line1, address_city, address_region, address_postal_code, address_country, tax_id, contact_name, contact_email, contact_phone)
         values
           (${orgId}, 'Maple Ridge Steel Ltd', 'shipper',
-            ${sql.json({ line1: "400 Industrial Pkwy", city: "Hamilton", region: "ON", postalCode: "L8E 2W1", country: "CA" })},
+            '400 Industrial Pkwy', 'Hamilton', 'ON', 'L8E 2W1', 'CA',
             '123456789RT0001', 'Lena Park', 'lpark@mapleridgesteel.example', '+1 905 555 0201'),
           (${orgId}, 'Great Lakes Fabrication Inc', 'consignee',
-            ${sql.json({ line1: "1200 Ford Rd", city: "Dearborn", region: "MI", postalCode: "48126", country: "US" })},
+            '1200 Ford Rd', 'Dearborn', 'MI', '48126', 'US',
             '38-1234567', 'Omar Haddad', 'ohaddad@glfab.example', '+1 313 555 0202'),
           (${orgId}, 'Northgate Customs Brokers', 'broker',
-            ${sql.json({ line1: "55 Bridge St", city: "Fort Erie", region: "ON", postalCode: "L2A 1T2", country: "CA" })},
+            '55 Bridge St', 'Fort Erie', 'ON', 'L2A 1T2', 'CA',
             null, 'Priya Nair', 'pnair@northgatecb.example', '+1 905 555 0203'),
           (${orgId}, 'Erie Produce Co', 'both',
-            ${sql.json({ line1: "88 Market Ave", city: "Buffalo", region: "NY", postalCode: "14203", country: "US" })},
+            '88 Market Ave', 'Buffalo', 'NY', '14203', 'US',
             '16-7654321', 'Sam Okafor', 'sam@erieproduce.example', '+1 716 555 0204')
         on conflict do nothing`;
     }
@@ -303,7 +303,7 @@ export async function seed() {
       update public.organizations
       set dispatch_emails = array['dispatch@pathfinder.demo', 'ops@pathfinder.demo'],
           timezone = 'America/Toronto',
-          billing_address = ${sql.json({ line1: "1 Corridor Way", city: "Mississauga", region: "ON", postalCode: "L5T 2M8", country: "CA" })}
+          billing_line1 = '1 Corridor Way', billing_city = 'Mississauga', billing_region = 'ON', billing_postal_code = 'L5T 2M8', billing_country = 'CA'
       where id = ${orgId} and cardinality(dispatch_emails) = 0`;
 
     // 3b. integration configs — sandbox mock gateways with a short decision delay

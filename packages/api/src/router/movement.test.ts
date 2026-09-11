@@ -131,7 +131,6 @@ function transmittableRows(movement: Row = movementRow()): Record<string, Row[]>
         licenseExpiry: isoDay(400),
         citizenship: "CA",
         hazmatEndorsement: false,
-        usAddress: {},
       },
     ],
     drivers: [{ id: DRIVER_ID, organizationId: TEST_ORG_ID }],

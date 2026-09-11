@@ -1087,7 +1087,7 @@ export const movementRouter = router({
             id: partners.id,
             label: partners.name,
             type: partners.type,
-            country: sql<string | null>`${partners.address}->>'country'`,
+            country: partners.addressCountry,
           })
           .from(partners)
           .where(and(eq(partners.organizationId, ctx.orgId), eq(partners.status, "active")))

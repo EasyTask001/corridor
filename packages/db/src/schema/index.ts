@@ -4,7 +4,7 @@
  * express); these files exist so application queries are typed.
  *
  * Verified column-for-column and index-for-index (key columns, order and sort
- * direction) against migrations 0001–0029 (0016 and 0017 add no columns: 0016
+ * direction) against migrations 0001–0042 (0016 and 0017 add no columns: 0016
  * adds a policy, 0017 replaces a function). When you add a migration, mirror it
  * here in the same change and re-check with:
  *

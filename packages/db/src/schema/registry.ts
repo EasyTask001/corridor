@@ -5,7 +5,6 @@ import {
   foreignKey,
   index,
   integer,
-  jsonb,
   numeric,
   pgTable,
   smallint,
@@ -16,7 +15,6 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { DRIVER_DOCUMENT_TYPES, GENDERS, PERSON_TYPES } from "@corridor/domain";
-import type { Address } from "@corridor/domain";
 import { authUsers, citext, organizations } from "./core";
 import { equipmentTypes } from "./reference";
 
@@ -56,7 +54,13 @@ export const drivers = pgTable(
     personType: text("person_type", { enum: PERSON_TYPES }).notNull().default("driver"),
     gender: text("gender", { enum: GENDERS }),
     hazmatEndorsement: boolean("hazmat_endorsement").notNull().default(false),
-    usAddress: jsonb("us_address").$type<Address>().notNull().default({}),
+    // 0042 — us_address as columns; the API nests them back as `usAddress`.
+    usAddressLine1: text("us_address_line1"),
+    usAddressLine2: text("us_address_line2"),
+    usAddressCity: text("us_address_city"),
+    usAddressRegion: text("us_address_region"),
+    usAddressPostalCode: text("us_address_postal_code"),
+    usAddressCountry: text("us_address_country"),
     // 0025 — SMS opt-in with a phone per regime; whether the sheet is e-mailed.
     smsOptIn: boolean("sms_opt_in").notNull().default(false),
     smsPhoneAce: text("sms_phone_ace"),
@@ -240,17 +244,13 @@ export const partners = pgTable(
     ...base(),
     name: text("name").notNull(),
     type: text("type", { enum: ["shipper", "consignee", "broker", "both"] }).notNull(),
-    address: jsonb("address")
-      .$type<{
-        line1?: string;
-        line2?: string;
-        city?: string;
-        region?: string;
-        postalCode?: string;
-        country?: string;
-      }>()
-      .notNull()
-      .default({}),
+    // 0042 — address as columns; the API nests them back as `address`.
+    addressLine1: text("address_line1"),
+    addressLine2: text("address_line2"),
+    addressCity: text("address_city"),
+    addressRegion: text("address_region"),
+    addressPostalCode: text("address_postal_code"),
+    addressCountry: text("address_country"),
     taxId: text("tax_id"),
     contactName: text("contact_name"),
     contactEmail: citext("contact_email"),

@@ -416,17 +416,13 @@ export const shipments = pgTable(
     loadingCountry: text("loading_country"),
     loadingProvince: text("loading_province"),
     loadingCity: text("loading_city"),
-    deliveryAddress: jsonb("delivery_address")
-      .$type<{
-        line1?: string;
-        line2?: string;
-        city?: string;
-        region?: string;
-        postalCode?: string;
-        country?: string;
-      }>()
-      .notNull()
-      .default({}),
+    // 0042 — delivery_address as columns; the API nests them back as `deliveryAddress`.
+    deliveryLine1: text("delivery_line1"),
+    deliveryLine2: text("delivery_line2"),
+    deliveryCity: text("delivery_city"),
+    deliveryRegion: text("delivery_region"),
+    deliveryPostalCode: text("delivery_postal_code"),
+    deliveryCountry: text("delivery_country"),
     consigneeBusinessNumber: text("consignee_business_number"),
     status: text("status", { enum: SHIPMENT_STATUSES }).notNull().default("draft"),
     entryOnFileAt: timestamp("entry_on_file_at", { withTimezone: true }),

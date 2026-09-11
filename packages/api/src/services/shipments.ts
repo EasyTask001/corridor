@@ -4,12 +4,17 @@
  * exists on its own and is attached to a movement when it goes on a truck.
  */
 import { TRPCError } from "@trpc/server";
-import { and, asc, eq, inArray, schema, sql, type RlsTransaction } from "@corridor/db";
-import type { CommodityInput, ShipmentPatch } from "@corridor/domain";
+import { and, asc, eq, inArray, schema, sql, type PgColumn, type RlsTransaction } from "@corridor/db";
+import { addressToColumns, nestAddress, type Address, type CommodityInput, type ShipmentPatch } from "@corridor/domain";
 
 const { shipments, commodities, commodityHazmat, organizationCarrierCodes, partners } = schema;
 
-type PartnerAddress = (typeof partners.$inferSelect)["address"];
+/** Build a partner's address as jsonb in SQL, for the fake DB's `sqlValues` to keep working. */
+const partnerAddressJson = (partnerId: PgColumn) =>
+  sql<Address | null>`(select jsonb_strip_nulls(jsonb_build_object(
+      'line1', p.address_line1, 'line2', p.address_line2, 'city', p.address_city,
+      'region', p.address_region, 'postalCode', p.address_postal_code, 'country', p.address_country))
+    from public.partners p where p.id = ${partnerId})`;
 
 export type Tx = RlsTransaction;
 
@@ -78,15 +83,15 @@ export async function shipmentsForMovement(tx: Tx, movementId: string) {
       >`(select name from public.partners p where p.id = ${shipments.shipperId})`,
       shipperCountry: sql<
         string | null
-      >`(select address ->> 'country' from public.partners p where p.id = ${shipments.shipperId})`,
+      >`(select p.address_country from public.partners p where p.id = ${shipments.shipperId})`,
       consigneeName: sql<
         string | null
       >`(select name from public.partners p where p.id = ${shipments.consigneeId})`,
       consigneeCountry: sql<
         string | null
-      >`(select address ->> 'country' from public.partners p where p.id = ${shipments.consigneeId})`,
-      shipperAddress: sql<PartnerAddress | null>`(select address from public.partners p where p.id = ${shipments.shipperId})`,
-      consigneeAddress: sql<PartnerAddress | null>`(select address from public.partners p where p.id = ${shipments.consigneeId})`,
+      >`(select p.address_country from public.partners p where p.id = ${shipments.consigneeId})`,
+      shipperAddress: partnerAddressJson(shipments.shipperId),
+      consigneeAddress: partnerAddressJson(shipments.consigneeId),
       entryPortCode: sql<
         string | null
       >`(select code from public.ports p where p.id = ${shipments.entryPortId})`,
@@ -102,7 +107,7 @@ export async function shipmentsForMovement(tx: Tx, movementId: string) {
     rows.map((r) => r.shipment.id),
   );
   return rows.map(({ shipment, ...rest }) => ({
-    ...shipment,
+    ...nestAddress("delivery", "deliveryAddress", shipment),
     ...rest,
     commodities: lines.filter((l) => l.shipmentId === shipment.id),
   }));
@@ -110,10 +115,12 @@ export async function shipmentsForMovement(tx: Tx, movementId: string) {
 
 /** Only the columns a patch may touch; `undefined` keys are left alone. */
 export function shipmentSetFrom(patch: ShipmentPatch) {
+  const { deliveryAddress, ...rest } = patch;
   const set: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(patch)) {
+  for (const [key, value] of Object.entries(rest)) {
     if (value !== undefined) set[key] = value;
   }
+  if (deliveryAddress !== undefined) Object.assign(set, addressToColumns("delivery", deliveryAddress));
   return set as Partial<typeof shipments.$inferInsert>;
 }
 
