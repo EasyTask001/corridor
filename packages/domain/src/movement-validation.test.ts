@@ -6,6 +6,7 @@ import {
   type MovementForValidation,
   type ShipmentForValidation,
 } from "./movement-validation";
+import { expectedPartnerCountry } from "./registry";
 
 const TODAY = "2026-09-06";
 
@@ -297,6 +298,31 @@ describe("validateForTransmit", () => {
     expect(issues.map((i) => i.code)).not.toEqual(
       expect.arrayContaining(["shipment_0_shipper_country", "shipment_0_consignee_country"]),
     );
+  });
+
+  it("derives the expected shipper/consignee countries from expectedPartnerCountry", () => {
+    const aciWarnings = validateForTransmit(
+      {
+        ...ready,
+        regime: "ACI",
+        shipments: [
+          {
+            ...shipment,
+            shipmentType: null,
+            cargoType: "regular",
+            shipper: { ...shipment.shipper!, country: "CA" },
+            consignee: { ...shipment.consignee!, country: "US" },
+          },
+        ],
+      },
+      TODAY,
+    );
+    expect(aciWarnings.map((i) => i.code)).toEqual(
+      expect.arrayContaining(["shipment_0_shipper_country", "shipment_0_consignee_country"]),
+    );
+    expect(
+      aciWarnings.find((i) => i.code === "shipment_0_shipper_country")?.message,
+    ).toContain(`not ${expectedPartnerCountry("ACI", "shipper")}`);
   });
 
   it("trailer without seal is a warning, not a block", () => {

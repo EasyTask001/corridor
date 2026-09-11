@@ -6,7 +6,7 @@
 import { daysBetween, todayIso } from "./compliance";
 import type { Regime } from "./movement";
 import type { CrewRole } from "./movement-inputs";
-import type { Address, DriverDocumentType, PersonType } from "./registry";
+import { expectedPartnerCountry, type Address, type DriverDocumentType, type PersonType } from "./registry";
 import type { AceShipmentType, AciCargoType, InBondEntryType } from "./shipment";
 
 export type IssueSeverity = "blocking" | "warning";
@@ -182,11 +182,10 @@ export function validateForTransmit(
   });
 
   // --- shipments ---
-  // ACE moves goods into the US, so the shipper is normally Canadian and the
-  // consignee American; ACI is the mirror image. A cross-border pair that does
-  // not follow that shape is legal but nearly always a data-entry slip.
-  const expectedShipperCountry = m.regime === "ACE" ? "CA" : "US";
-  const expectedConsigneeCountry = m.regime === "ACE" ? "US" : "CA";
+  // The regime decides which side of the border each party normally sits on;
+  // the single source of that rule is expectedPartnerCountry (registry.ts).
+  const expectedShipperCountry = expectedPartnerCountry(m.regime, "shipper");
+  const expectedConsigneeCountry = expectedPartnerCountry(m.regime, "consignee");
 
   if (m.isEmpty && m.shipments.length > 0)
     block(
