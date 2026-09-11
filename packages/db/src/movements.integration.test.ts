@@ -126,11 +126,13 @@ describe("state machine parity (SQL vs domain)", () => {
   it("movement_can_transition agrees with MOVEMENT_TRANSITIONS for every pair", async () => {
     const statuses = movementStatus.options;
     const pairs = statuses.flatMap((f) => statuses.map((t) => ({ f, t })));
-    const rows = await db.execute<{ f: string; t: string; ok: boolean }>(sql`
+    const fs = pairs.map((p) => p.f);
+    const ts = pairs.map((p) => p.t);
+    const rows = await conn.sql<{ f: string; t: string; ok: boolean }[]>`
       select f, t, public.movement_can_transition(f, t) as ok
-      from unnest(${sql.raw(`array[${pairs.map((p) => `'${p.f}'`).join(",")}]`)}::text[]) with ordinality as a(f, i)
-      join unnest(${sql.raw(`array[${pairs.map((p) => `'${p.t}'`).join(",")}]`)}::text[]) with ordinality as b(t, j) on a.i = b.j
-    `);
+      from unnest(${fs}::text[]) with ordinality as a(f, i)
+      join unnest(${ts}::text[]) with ordinality as b(t, j) on a.i = b.j
+    `;
     expect(rows).toHaveLength(pairs.length);
     for (const r of rows) {
       const expected = MOVEMENT_TRANSITIONS[r.f as keyof typeof MOVEMENT_TRANSITIONS].includes(
