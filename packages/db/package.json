@@ -10,7 +10,7 @@
     "./schema": "./src/schema/index.ts"
   },
   "scripts": {
-    "lint": "eslint .",
+    "lint": "eslint . && tsx scripts/lint-migrations.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --project unit --passWithNoTests",
     "test:integration": "vitest run --project integration",

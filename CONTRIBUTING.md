@@ -105,6 +105,10 @@ refactor: extract tariff caching to integrations
 - Every tenant table: `organization_id uuid REFERENCES organizations(id)`, `enable row level security`
 - RLS policies use `has_permission(org_id, 'key')` / `is_org_member(org_id)`
 - Run `pnpm db:lint` before committing migrations
+- `pnpm --filter @corridor/db lint` (also run via `pnpm lint`) statically checks every migration
+  numbered ≥0032 for `security definer` functions missing `set search_path = ''` or set to
+  `public` — `pnpm db:lint` (Supabase's linter) only catches a missing `search_path`, not one
+  pinned to `public`
 
 ### Schema design: extend before you add
 
