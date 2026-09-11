@@ -10,6 +10,7 @@ import type {
 
 export * from "./types";
 export * from "./manifest";
+export { clearCustomsFixtureState, createFixtureStore, type FixtureStore } from "./fixture-state";
 export { createMockCustomsClient, MOCK_CARRIER_NOTICE } from "./mock";
 export { rnsFields, simulateCustomsEvents, simulatedEntryNumber } from "./simulate";
 export { createGatewayCustomsClient, fixtureOutcomeFor } from "./gateway/client";
@@ -39,6 +40,8 @@ export function createCustomsClient(input: {
   baseUrl?: string | null;
   apiKey?: string | null;
   webhookSecret?: string | null;
+  /** Owner of the fixture state (the organization id in production); never sent to a live gateway. */
+  tenantKey: string;
 }): CustomsClient {
   const provider = providerForRegime(input.regime);
   if (input.mode === "gateway") {
@@ -49,6 +52,7 @@ export function createCustomsClient(input: {
       apiKey: input.apiKey ?? null,
       credentials: input.credentials,
       webhookSecret: input.webhookSecret ?? null,
+      tenantKey: input.tenantKey,
     });
   }
   return createMockCustomsClient({
@@ -56,5 +60,6 @@ export function createCustomsClient(input: {
     environment: input.environment ?? "sandbox",
     ...input.settings,
     credentials: input.credentials,
+    tenantKey: input.tenantKey,
   });
 }

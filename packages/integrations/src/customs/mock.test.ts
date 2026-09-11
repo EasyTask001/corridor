@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { clearCustomsFixtureState } from "./fixture-state";
 import { createCustomsClient } from "./index";
 import { buildManifest, type ManifestSource } from "./manifest";
 import { createMockCustomsClient } from "./mock";
@@ -124,6 +125,8 @@ const withTrip = (t: string | null) =>
   buildManifest({ ...src, movement: { ...src.movement, tripNumber: t } });
 const fixedNow = () => new Date("2026-09-06T12:00:00.000Z");
 
+beforeEach(clearCustomsFixtureState);
+
 describe("buildManifest", () => {
   it("maps movement → provider-neutral e-manifest", () => {
     const m = buildManifest(src);
@@ -199,6 +202,7 @@ describe("mock customs client", () => {
       mockDelayMs: 1234,
       now: fixedNow,
       random: () => 0.99,
+      tenantKey: "t1",
     });
     const ack = await c.transmit(withTrip("TRIP-1"));
     expect(ack.referenceNumber).toMatch(/^ACE-[0-9A-Z]{7}$/);
@@ -208,12 +212,12 @@ describe("mock customs client", () => {
   });
 
   it("ACI prefix for CBSA", async () => {
-    const c = createMockCustomsClient({ provider: "cbsa_aci", random: () => 0.99 });
+    const c = createMockCustomsClient({ provider: "cbsa_aci", random: () => 0.99, tenantKey: "t1" });
     expect((await c.transmit(withTrip(null))).referenceNumber).toMatch(/^ACI-/);
   });
 
   it("FAIL / BADAUTH hooks and failure-rate injection throw transport errors", async () => {
-    const c = createMockCustomsClient({ provider: "cbp_ace", random: () => 0.99 });
+    const c = createMockCustomsClient({ provider: "cbp_ace", random: () => 0.99, tenantKey: "t1" });
     await expect(c.transmit(withTrip("TRIP-FAIL-1"))).rejects.toMatchObject({
       statusCode: 503,
       retryable: true,
@@ -227,18 +231,20 @@ describe("mock customs client", () => {
       provider: "cbp_ace",
       mockFailureRate: 0.5,
       random: () => 0.1,
+      tenantKey: "t1",
     });
     await expect(flaky.transmit(withTrip("OK"))).rejects.toMatchObject({ statusCode: 503 });
     const lucky = createMockCustomsClient({
       provider: "cbp_ace",
       mockFailureRate: 0.5,
       random: () => 0.9,
+      tenantKey: "t1",
     });
     await expect(lucky.transmit(withTrip("OK"))).resolves.toBeTruthy();
   });
 
   it("emits the Avaal message sequence behind each decision", async () => {
-    const c = createMockCustomsClient({ provider: "cbp_ace", now: fixedNow });
+    const c = createMockCustomsClient({ provider: "cbp_ace", now: fixedNow, tenantKey: "t1" });
     const ok = withTrip("TRIP-OK");
     const accepted = await c.fetchDecision("R", ok, { currentStatus: "sent" });
     expect(accepted.events.map((e) => e.code)).toEqual([
@@ -277,13 +283,13 @@ describe("mock customs client", () => {
     });
     expect(rejected.events.map((e) => e.code)).toEqual(["sending", "rejected"]);
 
-    const aci = createMockCustomsClient({ provider: "cbsa_aci", now: fixedNow });
+    const aci = createMockCustomsClient({ provider: "cbsa_aci", now: fixedNow, tenantKey: "t1" });
     const rns = await aci.fetchDecision("R", { ...ok, regime: "ACI" }, { currentStatus: "accepted" });
     expect(rns.events.map((e) => e.code)).toEqual(["entered_and_released", "released"]);
   });
 
   it("decisions follow the trip hooks through the lifecycle", async () => {
-    const c = createMockCustomsClient({ provider: "cbp_ace" });
+    const c = createMockCustomsClient({ provider: "cbp_ace", tenantKey: "t1" });
     const ok = withTrip("TRIP-OK");
     expect((await c.fetchDecision("R", ok, { currentStatus: "sent" })).decision).toBe("accepted");
     expect((await c.fetchDecision("R", ok, { currentStatus: "accepted" })).decision).toBe(
@@ -296,25 +302,47 @@ describe("mock customs client", () => {
     expect((await c.fetchDecision("R", hold, { currentStatus: "accepted" })).decision).toBe("held");
     expect((await c.fetchDecision("R", hold, { currentStatus: "held" })).decision).toBe("released");
   });
+
+  it("a filing transmitted through one instance is visible to fetchStatus on a second instance of the same tenant", async () => {
+    const mk = () => createMockCustomsClient({ provider: "cbp_ace", now: fixedNow, random: () => 0.99, tenantKey: "org-a" });
+    const ack = await mk().transmit(withTrip("TRIP-HOLD"));
+    const stages: string[] = [];
+    for (let i = 0; i < 4; i++) stages.push((await mk().fetchStatus(ack.referenceNumber)).status);
+    expect(stages).toEqual(["accepted", "held", "released", "released"]);
+    const other = createMockCustomsClient({ provider: "cbp_ace", now: fixedNow, tenantKey: "org-b" });
+    expect((await other.fetchStatus(ack.referenceNumber)).status).toBe("pending");
+  });
 });
 
 describe("mock in-bond", () => {
+  const rec = {
+    bondNumber: "123456789",
+    entryType: "IT" as const,
+    arrivalPortCode: "3801",
+    exportPortCode: "0901",
+    firmsCode: "A123",
+    carrierCode: "PFTR",
+    controlNumber: null,
+  };
+
   it("acknowledges and remembers the last message per bond", async () => {
-    const c = createMockCustomsClient({ provider: "cbp_ace", now: fixedNow });
-    const rec = {
-      bondNumber: "123456789",
-      entryType: "IT" as const,
-      arrivalPortCode: "3801",
-      exportPortCode: "0901",
-      firmsCode: "A123",
-      carrierCode: "PFTR",
-      controlNumber: null,
-    };
+    const c = createMockCustomsClient({ provider: "cbp_ace", now: fixedNow, tenantKey: "t1" });
     expect((await c.inBondStatus("123456789")).status).toBe("open");
     expect((await c.inBondArrival(rec)).referenceNumber).toMatch(/^ARR-/);
     expect((await c.inBondStatus("123456789")).status).toBe("arrived");
     expect((await c.inBondCancel(rec, "oops")).raw.reason).toBe("oops");
     expect((await c.inBondStatus("123456789")).status).toBe("cancelled");
+  });
+
+  it("two tenants with the same bond number do not see each other's status", async () => {
+    const a = createMockCustomsClient({ provider: "cbp_ace", now: fixedNow, tenantKey: "org-a" });
+    const b = createMockCustomsClient({ provider: "cbp_ace", now: fixedNow, tenantKey: "org-b" });
+    await a.inBondArrival(rec);
+    expect((await a.inBondStatus(rec.bondNumber)).status).toBe("arrived");
+    expect((await b.inBondStatus(rec.bondNumber)).status).toBe("open");
+    await b.inBondCancel(rec, "rerouted");
+    expect((await b.inBondStatus(rec.bondNumber)).status).toBe("cancelled");
+    expect((await a.inBondStatus(rec.bondNumber)).status).toBe("arrived");
   });
 });
 
@@ -331,6 +359,7 @@ describe("vault-backed credentials", () => {
       provider: "cbp_ace",
       random: () => 0.99,
       credentials: { apiKey: "super-secret", apiSecret: "also-secret" },
+      tenantKey: "t1",
     });
     const ack = await withCreds.transmit(withTrip("TRIP-1"));
     expect(ack.raw.credentialsPresent).toBe(true);
@@ -344,7 +373,7 @@ describe("vault-backed credentials", () => {
   });
 
   it("works unchanged when the org has stored no credentials", async () => {
-    const bare = createMockCustomsClient({ provider: "cbp_ace", random: () => 0.99 });
+    const bare = createMockCustomsClient({ provider: "cbp_ace", random: () => 0.99, tenantKey: "t1" });
     const ack = await bare.transmit(withTrip("TRIP-1"));
     expect(ack.raw.credentialsPresent).toBe(false);
     expect(ack.referenceNumber).toMatch(/^ACE-/);
@@ -356,6 +385,7 @@ describe("vault-backed credentials", () => {
       environment: "production",
       settings: { mockDelayMs: 10, mockFailureRate: 0 },
       credentials: { accountId: "acct-1" },
+      tenantKey: "t1",
     });
     const ack = await client.transmit(withTrip("TRIP-1"));
     expect(client.environment).toBe("production");

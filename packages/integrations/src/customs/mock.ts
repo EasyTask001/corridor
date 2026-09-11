@@ -24,6 +24,7 @@ import type {
   TransmitAck,
 } from "./types";
 import { CustomsTransportError, hasCustomsCredentials } from "./types";
+import { mockBonds, mockFiled } from "./fixture-state";
 import { parseInboundMessage } from "./gateway/inbound";
 import { simulateCustomsEvents } from "./simulate";
 
@@ -50,6 +51,8 @@ export interface MockCustomsOptions extends CustomsClientSettings {
   /** injectable for tests */
   random?: () => number;
   now?: () => Date;
+  /** Owner of the fixture state (the organization id in production). */
+  tenantKey: string;
 }
 
 function hashRef(seed: string): string {
@@ -61,8 +64,6 @@ function hashRef(seed: string): string {
   return h.toString(36).toUpperCase().padStart(7, "0").slice(0, 7);
 }
 
-const mockBonds = new Map<string, InBondStatusMessage["status"]>();
-
 export function createMockCustomsClient(opts: MockCustomsOptions): CustomsClient {
   const random = opts.random ?? Math.random;
   const now = opts.now ?? (() => new Date());
@@ -73,15 +74,11 @@ export function createMockCustomsClient(opts: MockCustomsOptions): CustomsClient
 
   const hook = (m: ManifestPayload) => (m.trip.tripNumber ?? "").toUpperCase();
 
-  /** In-bond moves the mock has heard about (0026) — shared across instances,
-   * since the API builds a fresh client per request. */
+  /** In-bond moves the mock has heard about (0026) — shared across instances
+   * of the same tenant, since the API builds a fresh client per request. */
+  const tenant = opts.tenantKey;
   const bonds = mockBonds;
-
-  /** The mock remembers what it acknowledged, so fetchStatus can answer. */
-  const filed = new Map<
-    string,
-    { manifest: ManifestPayload; stage: "sent" | "accepted" | "held" | "done"; cancelled: boolean }
-  >();
+  const filed = mockFiled;
 
   const ack = (
     manifest: ManifestPayload,
@@ -91,7 +88,7 @@ export function createMockCustomsClient(opts: MockCustomsOptions): CustomsClient
     const receivedAt = now().toISOString();
     const referenceNumber =
       reference ?? `${prefix}-${hashRef(manifest.trip.movementNumber + receivedAt)}`;
-    filed.set(referenceNumber, { manifest, stage: "sent", cancelled: false });
+    filed.set(tenant, referenceNumber, { manifest, stage: "sent", cancelled: false });
     return {
       referenceNumber,
       receivedAt,
@@ -139,7 +136,7 @@ export function createMockCustomsClient(opts: MockCustomsOptions): CustomsClient
     },
 
     async cancel(referenceNumber, reason) {
-      const f = filed.get(referenceNumber);
+      const f = filed.get(tenant, referenceNumber);
       if (f) f.cancelled = true;
       return {
         referenceNumber,
@@ -181,7 +178,7 @@ export function createMockCustomsClient(opts: MockCustomsOptions): CustomsClient
         shipments: manifest.shipments,
         now,
       });
-      const f = filed.get(referenceNumber);
+      const f = filed.get(tenant, referenceNumber);
       if (f) f.stage = decision === "held" ? "held" : decision === "accepted" ? "accepted" : "done";
       return {
         referenceNumber,
@@ -199,7 +196,7 @@ export function createMockCustomsClient(opts: MockCustomsOptions): CustomsClient
      * gateway answering GET /manifests/{ref}.
      */
     async fetchStatus(referenceNumber) {
-      const f = filed.get(referenceNumber);
+      const f = filed.get(tenant, referenceNumber);
       const pending: CustomsStatusMessage = {
         referenceNumber,
         status: "pending",
@@ -250,19 +247,19 @@ export function createMockCustomsClient(opts: MockCustomsOptions): CustomsClient
     // In-bond (0026): the mock acknowledges every message and answers the
     // status of a bond with the last thing it heard about it.
     async inBondArrival(rec) {
-      bonds.set(rec.bondNumber, "arrived");
+      bonds.set(tenant, rec.bondNumber, "arrived");
       return inBondAck("ARR", rec.bondNumber);
     },
     async inBondExport(rec) {
-      bonds.set(rec.bondNumber, "exported");
+      bonds.set(tenant, rec.bondNumber, "exported");
       return inBondAck("EXP", rec.bondNumber);
     },
     async inBondCancel(rec, reason) {
-      bonds.set(rec.bondNumber, "cancelled");
+      bonds.set(tenant, rec.bondNumber, "cancelled");
       return { ...inBondAck("CXL", rec.bondNumber), raw: { mock: true, reason } };
     },
     async inBondStatus(bondNumber) {
-      const status = bonds.get(bondNumber) ?? "open";
+      const status = bonds.get(tenant, bondNumber) ?? "open";
       const message: InBondStatusMessage = {
         bondNumber,
         status,

@@ -22,6 +22,7 @@ export function noticesClientFor(provider: (typeof PROVIDERS)[number]) {
     mode: baseUrl && apiKey ? "gateway" : "mock",
     baseUrl,
     apiKey,
+    tenantKey: "system",
   });
 }
 

@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { CustomsTransportError, type ManifestPayload } from "../types";
+import { clearCustomsFixtureState } from "../fixture-state";
 import { createGatewayCustomsClient } from "./client";
 import { parseInboundMessage, signInbound, verifyInboundSignature } from "./inbound";
 import { createFixtureTransport, createHttpTransport, type GatewayTransport } from "./transport";
@@ -50,9 +51,11 @@ const withControl = (controlNumber: string): ManifestPayload => ({
 
 const fixedNow = () => new Date("2026-09-06T12:00:00.000Z");
 
+beforeEach(clearCustomsFixtureState);
+
 describe("gateway customs client (fixture transport)", () => {
   it("submits, polls to accepted, then released with an entry per shipment", async () => {
-    const c = createGatewayCustomsClient({ provider: "cbp_ace", now: fixedNow });
+    const c = createGatewayCustomsClient({ provider: "cbp_ace", now: fixedNow, tenantKey: "t1" });
     expect(c.mode).toBe("gateway");
     const ack = await c.transmit(manifest, { correlationId: "c-1" });
     expect(ack.referenceNumber).toMatch(/^ACE-FX\d{5}$/);
@@ -91,7 +94,7 @@ describe("gateway customs client (fixture transport)", () => {
   });
 
   it("H-suffixed control numbers hold before release; R-suffixed are rejected", async () => {
-    const c = createGatewayCustomsClient({ provider: "cbsa_aci", now: fixedNow });
+    const c = createGatewayCustomsClient({ provider: "cbsa_aci", now: fixedNow, tenantKey: "t1" });
     const held = await c.transmit(withControl("7ELUPARS00H"));
     expect((await c.fetchStatus(held.referenceNumber)).status).toBe("accepted");
     const hold = await c.fetchStatus(held.referenceNumber);
@@ -108,6 +111,7 @@ describe("gateway customs client (fixture transport)", () => {
   it("fetchDecision keeps the caller polling while the gateway says pending", async () => {
     const c = createGatewayCustomsClient({
       provider: "cbp_ace",
+      tenantKey: "t1",
       transport: createFixtureTransport({
         "POST /manifests": () => ({ referenceNumber: "ACE-P1", receivedAt: "now" }),
         "GET /manifests/ACE-P1": () => ({ referenceNumber: "ACE-P1", status: "pending" }),
@@ -120,7 +124,7 @@ describe("gateway customs client (fixture transport)", () => {
   });
 
   it("amend keeps the reference and restarts the sequence; cancel acknowledges; ping and notices answer", async () => {
-    const c = createGatewayCustomsClient({ provider: "cbp_ace", now: fixedNow });
+    const c = createGatewayCustomsClient({ provider: "cbp_ace", now: fixedNow, tenantKey: "t1" });
     const ack = await c.transmit(manifest);
     expect((await c.fetchStatus(ack.referenceNumber)).status).toBe("accepted");
     const amended = await c.amend(manifest, ack.referenceNumber);
@@ -132,6 +136,26 @@ describe("gateway customs client (fixture transport)", () => {
     const notices = await c.fetchNotices(null);
     expect(notices).toHaveLength(1);
     expect(notices[0]).toMatchObject({ provider: "cbp_ace", severity: "warning" });
+  });
+
+  it("a filing transmitted through one instance is visible to fetchStatus on a second instance of the same tenant", async () => {
+    const mk = () => createGatewayCustomsClient({ provider: "cbp_ace", now: fixedNow, tenantKey: "org-a" });
+    const ack = await mk().transmit(manifest);
+    // Every poll below is from a fresh instance — what customsClientFor does per request.
+    const stages: string[] = [];
+    for (let i = 0; i < 3; i++) stages.push((await mk().fetchStatus(ack.referenceNumber)).status);
+    expect(stages).toEqual(["accepted", "released", "released"]);
+    const last = await mk().fetchStatus(ack.referenceNumber);
+    expect(last.shipments[0]).toMatchObject({ controlNumber: "PFTRPAPS0001", status: "released", entryPortCode: "3801" });
+  });
+
+  it("a second instance of the same tenant continues the reference sequence", async () => {
+    const mk = () => createGatewayCustomsClient({ provider: "cbp_ace", now: fixedNow, tenantKey: "org-a" });
+    const first = await mk().transmit(manifest);
+    const second = await mk().transmit(withControl("PFTRPAPS0002"));
+    expect(first.referenceNumber).toBe("ACE-FX00001");
+    expect(second.referenceNumber).toBe("ACE-FX00002");
+    expect((await mk().fetchStatus(first.referenceNumber)).shipments[0]?.controlNumber).toBe("PFTRPAPS0001");
   });
 });
 
@@ -147,7 +171,7 @@ describe("in-bond messages", () => {
   };
 
   it("the fixture gateway acknowledges arrival, export and cancel, and reports the last one", async () => {
-    const c = createGatewayCustomsClient({ provider: "cbp_ace", now: fixedNow });
+    const c = createGatewayCustomsClient({ provider: "cbp_ace", now: fixedNow, tenantKey: "t1" });
     expect((await c.inBondStatus(rec.bondNumber)).status).toBe("open");
     const arrival = await c.inBondArrival(rec);
     expect(arrival.referenceNumber).toMatch(/^ACE-FX/);
@@ -170,11 +194,22 @@ describe("in-bond messages", () => {
         return { bondNumber: "123456789", status: "ARRIVED", message: "At port" };
       },
     };
-    const c = createGatewayCustomsClient({ provider: "cbp_ace", transport });
+    const c = createGatewayCustomsClient({ provider: "cbp_ace", tenantKey: "t1", transport });
     expect((await c.inBondArrival(rec)).referenceNumber).toBe("IB-1");
     expect(calls[0]).toMatchObject({ path: "/in-bond/123456789/arrival" });
     expect((calls[0]?.body as { firmsCode: string }).firmsCode).toBe("A123");
     expect(await c.inBondStatus("123456789")).toMatchObject({ status: "arrived", message: "At port" });
+  });
+
+  it("two tenants with the same bond number do not see each other's status", async () => {
+    const a = createGatewayCustomsClient({ provider: "cbp_ace", now: fixedNow, tenantKey: "org-a" });
+    const b = createGatewayCustomsClient({ provider: "cbp_ace", now: fixedNow, tenantKey: "org-b" });
+    await a.inBondArrival(rec);
+    expect((await a.inBondStatus(rec.bondNumber)).status).toBe("arrived");
+    expect((await b.inBondStatus(rec.bondNumber)).status).toBe("open");
+    await b.inBondCancel(rec, "rerouted");
+    expect((await b.inBondStatus(rec.bondNumber)).status).toBe("cancelled");
+    expect((await a.inBondStatus(rec.bondNumber)).status).toBe("arrived");
   });
 });
 
@@ -238,7 +273,7 @@ describe("http transport", () => {
         };
       },
     };
-    const c = createGatewayCustomsClient({ provider: "cbp_ace", transport });
+    const c = createGatewayCustomsClient({ provider: "cbp_ace", tenantKey: "t1", transport });
     const ack = await c.transmit(manifest, { correlationId: "corr" });
     expect(ack.referenceNumber).toBe("ACE-LIVE1");
     expect(calls[0]).toMatchObject({ path: "/manifests" });

@@ -152,6 +152,7 @@ export async function customsClientFor(tx: RlsTransaction, orgId: string, regime
       baseUrl: cfg?.baseUrl ?? process.env.CUSTOMS_GATEWAY_BASE_URL ?? null,
       apiKey: credentials?.apiKey ?? process.env.CUSTOMS_GATEWAY_API_KEY ?? null,
       webhookSecret: process.env.CUSTOMS_GATEWAY_WEBHOOK_SECRET ?? null,
+      tenantKey: orgId,
     }),
     config: cfg ?? null,
   };

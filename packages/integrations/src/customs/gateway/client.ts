@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CUSTOMS_EVENT_LABELS, type CustomsEventCode, type Regime } from "@corridor/domain";
+import { gatewayBonds, gatewayFilings, nextFixtureSequence, type GatewayFiling } from "../fixture-state";
 import { simulatedEntryNumber } from "../simulate";
 import type {
   CarrierNotice,
@@ -42,6 +43,8 @@ export interface GatewayClientOptions {
   /** Injected in tests; otherwise derived from baseUrl/apiKey or the fixtures. */
   transport?: GatewayTransport;
   now?: () => Date;
+  /** Owner of the fixture state (the organization id in production); never sent to a live gateway. */
+  tenantKey: string;
 }
 
 type FixtureOutcome = "accepted" | "held" | "rejected";
@@ -75,30 +78,25 @@ export function fixtureOutcomeFor(manifest: {
   return suffix === "H" ? "held" : suffix === "R" ? "rejected" : "accepted";
 }
 
-interface Filing {
-  outcome: FixtureOutcome;
-  controlNumbers: string[];
-  portOfEntry: string | null;
-  polls: number;
-}
-
 /**
  * The fixture gateway keeps a little state per reference so a poll sequence
  * unfolds like a real crossing: accepted → (held →) released, with the
  * shipments' control numbers and entry numbers filled in from the filing.
  */
-const fixtureBonds = new Map<string, "arrived" | "exported" | "cancelled">();
-
-export function createFixtureGatewayTransport(regime: Regime, now: () => Date): GatewayTransport {
+export function createFixtureGatewayTransport(
+  regime: Regime,
+  now: () => Date,
+  tenantKey: string,
+): GatewayTransport {
   const prefix = regime.toLowerCase();
-  const filings = new Map<string, Filing>();
-  let seq = 0;
+  const filings = gatewayFilings;
+  const bonds = gatewayBonds;
   const ack = () => ({
-    referenceNumber: `${regime}-FX${String(++seq).padStart(5, "0")}`,
+    referenceNumber: `${regime}-FX${String(nextFixtureSequence(tenantKey, regime)).padStart(5, "0")}`,
     receivedAt: now().toISOString(),
   });
 
-  const expand = (reference: string, filing: Filing): Record<string, unknown> => {
+  const expand = (reference: string, filing: GatewayFiling): Record<string, unknown> => {
     const fixture = loadFixture<Fixture>(`${prefix}-${filing.outcome}`);
     const stage = fixture.stages[Math.min(filing.polls, fixture.stages.length) - 1]!;
     const base = now().getTime();
@@ -149,7 +147,7 @@ export function createFixtureGatewayTransport(regime: Regime, now: () => Date): 
       trip?: { portOfEntry?: string };
     };
     const a = reference ? { referenceNumber: reference, receivedAt: now().toISOString() } : ack();
-    filings.set(a.referenceNumber, {
+    filings.set(tenantKey, a.referenceNumber, {
       outcome: fixtureOutcomeFor({ shipments: m.shipments ?? [] }),
       controlNumbers: (m.shipments ?? []).map((s) => s.controlNumber),
       portOfEntry: m.trip?.portOfEntry ?? null,
@@ -162,9 +160,6 @@ export function createFixtureGatewayTransport(regime: Regime, now: () => Date): 
     "POST /manifests": (body) => file(body),
     "POST /manifests/*/cancel": () => ack(),
   });
-  // In-bond moves: the fixture answers a bond's status with the last message
-  // sent about it — shared across instances, like a gateway would.
-  const bonds = fixtureBonds;
 
   return {
     post: (path, body) => {
@@ -174,7 +169,7 @@ export function createFixtureGatewayTransport(regime: Regime, now: () => Date): 
       const inBond = /^\/in-bond\/([^/]+)\/(arrival|export|cancel)$/.exec(path);
       if (inBond) {
         const bond = decodeURIComponent(inBond[1]!);
-        bonds.set(bond, inBond[2] === "arrival" ? "arrived" : inBond[2] === "export" ? "exported" : "cancelled");
+        bonds.set(tenantKey, bond, inBond[2] === "arrival" ? "arrived" : inBond[2] === "export" ? "exported" : "cancelled");
         return Promise.resolve({ ...ack(), bondNumber: bond, fixture: true });
       }
       return routes.post(path, body);
@@ -184,20 +179,20 @@ export function createFixtureGatewayTransport(regime: Regime, now: () => Date): 
       const bond = /^\/in-bond\/([^/?]+)$/.exec(path);
       if (bond) {
         const number = decodeURIComponent(bond[1]!);
-        return Promise.resolve({ bondNumber: number, status: bonds.get(number) ?? "open", fixture: true });
+        return Promise.resolve({ bondNumber: number, status: bonds.get(tenantKey, number) ?? "open", fixture: true });
       }
       if (path.startsWith("/notices")) return Promise.resolve(loadFixture<unknown>("notices"));
       const m = /^\/manifests\/([^/?]+)$/.exec(path);
       if (m) {
         const reference = decodeURIComponent(m[1]!);
-        const filing = filings.get(reference) ?? {
+        const filing = filings.get(tenantKey, reference) ?? {
           outcome: "accepted" as const,
           controlNumbers: [],
           portOfEntry: null,
           polls: 0,
         };
         filing.polls += 1;
-        filings.set(reference, filing);
+        filings.set(tenantKey, reference, filing);
         return Promise.resolve(expand(reference, filing));
       }
       return Promise.reject(new Error(`no fixture for GET ${path}`));
@@ -214,7 +209,7 @@ export function createGatewayCustomsClient(opts: GatewayClientOptions): CustomsC
     opts.transport ??
     (live
       ? createHttpTransport({ baseUrl: opts.baseUrl!, apiKey: apiKey! })
-      : createFixtureGatewayTransport(regime, now));
+      : createFixtureGatewayTransport(regime, now, opts.tenantKey));
 
   const ackOf = (json: unknown, fallback: string): TransmitAck => {
     const d = (json ?? {}) as Record<string, unknown>;
