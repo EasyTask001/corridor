@@ -927,7 +927,7 @@ Extend the summary line to include `fks` count.
 - [ ] **Step 2: Run the verifier and record RED**
 
 Run: `pnpm --filter @corridor/db verify:mirror`
-Expected: FAIL listing ~33 FK mismatches under the `(table, columns)` key (single-column vs composite, e.g. `fk movements(truck_id): missing from the database` — the DB's actual composite FK is keyed `movements(organization_id,truck_id)`, a different column set, so no match is found and both directions report), the 21 `*_id_organization_unique` indexes, the 34 `*_org_*_idx` indexes, and the 6 trigram indexes from 0034. Save the list — it is the checklist for Step 3.
+Expected: FAIL listing ~33 FK mismatches under the `(table, columns)` key (single-column vs composite, e.g. `fk movements(truck_id): missing from the database` — the DB's actual composite FK is keyed `movements(organization_id,truck_id)`, a different column set, so no match is found and both directions report), the 20 `*_id_organization_unique` indexes, the 34 `*_org_*_idx` indexes, and the 6 trigram indexes from 0034. Save the list — it is the checklist for Step 3.
 
 - [ ] **Step 3: Mirror 0031 in Drizzle**
 
@@ -968,7 +968,7 @@ The 0031 rewrite list (child → columns → parent → on delete), all names `<
 
 Read `supabase/migrations/0031_tenant_referential_integrity.sql` for the exact constraint and index names rather than deriving them; the verifier's RED output is authoritative. (`on delete set null (shipment_id)` — Postgres's column-list form — is mirrored as `.onDelete("set null")`; the verifier compares only the action letter.)
 
-Add to each of the 21 parent tables from 0031 lines 71-110 (`roles, partners, movements, import_batches, shipments, source_documents, commodities, commodity_hazmat, movement_events, movement_amendments, seals, integration_events, movement_suggestions, customs_submissions, generated_documents, in_bond_records, external_shipments, in_bond_events, pars_rns_events, movement_trailers`, plus any the RED list names):
+Add to each of the 20 parent tables from 0031 lines 71-110 (`roles, partners, movements, import_batches, shipments, source_documents, commodities, commodity_hazmat, movement_events, movement_amendments, seals, integration_events, movement_suggestions, customs_submissions, generated_documents, in_bond_records, external_shipments, in_bond_events, pars_rns_events, movement_trailers`, plus any the RED list names):
 
 ```ts
 uniqueIndex("<table>_id_organization_unique").on(t.id, t.organizationId),
