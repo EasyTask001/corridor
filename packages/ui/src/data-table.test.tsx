@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createDataTableColumns, DataTable } from "./components/data-table";
@@ -60,5 +60,36 @@ describe("DataTable", () => {
 
     expect(screen.getByText("Loading…")).toBeInTheDocument();
     expect(screen.queryByText("No drivers yet.")).not.toBeInTheDocument();
+  });
+});
+
+describe("row activation", () => {
+  it("activates a row with Enter and Space from the keyboard", async () => {
+    const user = userEvent.setup();
+    const onRowClick = vi.fn();
+    render(<DataTable data={rows} columns={columns} getRowId={(r) => r.id} onRowClick={onRowClick} />);
+    await user.tab(); // first body row is the first tabbable element
+    expect(screen.getAllByRole("row")[1]).toHaveFocus();
+    await user.keyboard("{Enter}");
+    await user.keyboard(" ");
+    expect(onRowClick).toHaveBeenCalledTimes(2);
+    expect(onRowClick).toHaveBeenLastCalledWith(rows[0]);
+  });
+
+  it("does not activate the row when a control inside it is used", async () => {
+    const user = userEvent.setup();
+    const onRowClick = vi.fn();
+    const withButton = helper.columns([
+      helper.accessor("name", { header: "Driver", cell: (c) => <button type="button">{c.getValue()}</button> }),
+    ]);
+    render(<DataTable data={rows} columns={withButton} getRowId={(r) => r.id} onRowClick={onRowClick} />);
+    await user.click(screen.getByRole("button", { name: "Bianca Ross" }));
+    await user.keyboard("{Enter}");
+    expect(onRowClick).not.toHaveBeenCalled();
+  });
+
+  it("rows are not tabbable without onRowClick", () => {
+    render(<DataTable data={rows} columns={columns} getRowId={(r) => r.id} />);
+    expect(screen.getAllByRole("row")[1]).not.toHaveAttribute("tabindex");
   });
 });

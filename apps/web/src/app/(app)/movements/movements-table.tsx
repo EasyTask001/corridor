@@ -122,6 +122,7 @@ export function MovementsTable({
       emptyMessage="No movements match."
       rowClassName={() => "hover:bg-surface-sunken"}
       onRowClick={(row) => router.push(`/movements/${row.id}`)}
+      getRowAriaLabel={(row) => `Open movement ${row.movementNumber}`}
       pageIndex={pageIndex}
       pageSize={pageSize}
       total={total}

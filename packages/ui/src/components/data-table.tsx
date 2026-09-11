@@ -1,6 +1,6 @@
 "use client";
 
-import type { MouseEvent, ReactNode } from "react";
+import type { KeyboardEvent, ReactNode, SyntheticEvent } from "react";
 import {
   columnFilteringFeature,
   createColumnHelper,
@@ -73,6 +73,8 @@ export interface DataTableProps<TData extends RowData> {
   globalFilter?: string;
   onGlobalFilterChange?: (value: string) => void;
   onRowClick?: (row: TData) => void;
+  /** Accessible name for a clickable row; defaults to the row's first cell text. */
+  getRowAriaLabel?: (row: TData) => string;
   rowClassName?: (row: TData) => string | undefined;
   isLoading?: boolean;
   loadingMessage?: ReactNode;
@@ -92,11 +94,15 @@ export interface DataTableProps<TData extends RowData> {
   "aria-label"?: string;
 }
 
-/** Clicks that land on their own control must not also trigger the row action. */
-function isInteractiveTarget(event: MouseEvent<HTMLTableRowElement>) {
+/** Events that originate on their own control must not also trigger the row action. */
+function isInteractiveTarget(event: SyntheticEvent<HTMLTableRowElement>) {
   return Boolean(
     (event.target as HTMLElement | null)?.closest("a,button,input,select,textarea,label,summary"),
   );
+}
+
+function isActivationKey(event: KeyboardEvent<HTMLTableRowElement>) {
+  return event.key === "Enter" || event.key === " ";
 }
 
 export function DataTable<TData extends RowData>({
@@ -107,6 +113,7 @@ export function DataTable<TData extends RowData>({
   globalFilter,
   onGlobalFilterChange,
   onRowClick,
+  getRowAriaLabel,
   rowClassName,
   isLoading = false,
   loadingMessage = "Loading…",
@@ -215,11 +222,26 @@ export function DataTable<TData extends RowData>({
               return (
                 <TableRow
                   key={row.id}
-                  className={cn(rowClassName?.(row.original), onRowClick && "cursor-pointer")}
+                  className={cn(
+                    rowClassName?.(row.original),
+                    onRowClick &&
+                      "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring/40",
+                  )}
+                  tabIndex={onRowClick ? 0 : undefined}
+                  aria-label={onRowClick ? getRowAriaLabel?.(row.original) : undefined}
                   onClick={
                     onRowClick
                       ? (event) => {
                           if (!isInteractiveTarget(event)) onRowClick(row.original);
+                        }
+                      : undefined
+                  }
+                  onKeyDown={
+                    onRowClick
+                      ? (event) => {
+                          if (!isActivationKey(event) || isInteractiveTarget(event)) return;
+                          event.preventDefault();
+                          onRowClick(row.original);
                         }
                       : undefined
                   }
