@@ -112,6 +112,9 @@ export const movements = pgTable(
     unique("movements_organization_id_movement_number_key").on(t.organizationId, t.movementNumber),
     // 0034
     index("movements_number_trgm_idx").using("gin", t.movementNumber),
+    // 0043
+    index("movements_trip_number_trgm_idx").using("gin", t.tripNumber),
+    index("movements_customs_reference_trgm_idx").using("gin", t.customsReferenceNumber),
     // 0031
     index("movements_org_truck_idx")
       .on(t.organizationId, t.truckId)
@@ -471,6 +474,19 @@ export const shipments = pgTable(
     index("shipments_org_source_document_idx")
       .on(t.organizationId, t.sourceDocumentId)
       .where(sql`${t.sourceDocumentId} is not null`),
+    // 0043
+    index("shipments_entry_port_idx")
+      .on(t.entryPortId)
+      .where(sql`${t.entryPortId} is not null`),
+    index("shipments_in_bond_destination_port_idx")
+      .on(t.inBondDestinationPortId)
+      .where(sql`${t.inBondDestinationPortId} is not null`),
+    index("shipments_destination_port_idx")
+      .on(t.destinationPortId)
+      .where(sql`${t.destinationPortId} is not null`),
+    index("shipments_sublocation_port_idx")
+      .on(t.sublocationPortId)
+      .where(sql`${t.sublocationPortId} is not null`),
     /** 0031 — target for the composite keys on commodities, movement_events,
      * movement_amendments, in_bond_records, pars_rns_events. */
     uniqueIndex("shipments_id_organization_unique").on(t.id, t.organizationId),

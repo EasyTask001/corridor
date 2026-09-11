@@ -81,6 +81,11 @@ export const drivers = pgTable(
     // 0034
     index("drivers_first_name_trgm_idx").using("gin", t.firstName),
     index("drivers_last_name_trgm_idx").using("gin", t.lastName),
+    // 0043
+    index("drivers_full_name_trgm_idx").using(
+      "gin",
+      sql`(${t.firstName} || ' ' || ${t.lastName}) gin_trgm_ops`,
+    ),
     uniqueIndex("drivers_org_user_unique")
       .on(t.organizationId, t.userId)
       .where(sql`${t.userId} is not null`),
@@ -160,6 +165,8 @@ export const trucks = pgTable(
     uniqueIndex("trucks_org_vin_unique")
       .on(t.organizationId, t.vin)
       .where(sql`${t.vin} is not null and ${t.status} <> 'archived'`),
+    // 0043
+    index("trucks_unit_number_trgm_idx").using("gin", t.unitNumber),
     /** 0021 — target for the composite key on equipment_plates. */
     unique("trucks_id_organization_id_key").on(t.id, t.organizationId),
   ],

@@ -37,4 +37,20 @@ describe("database API security invariants", () => {
       await sql.end();
     }
   });
+
+  it("every FK to ports and every ILIKE search column is indexed (0043)", async () => {
+    const sql = postgres(url, { max: 1 });
+    try {
+      const rows = await sql<{ indexname: string }[]>`
+        select indexname from pg_indexes where schemaname = 'public' and indexname = any(${[
+          "shipments_entry_port_idx", "shipments_in_bond_destination_port_idx", "shipments_destination_port_idx",
+          "shipments_sublocation_port_idx", "in_bond_records_arrival_port_idx", "in_bond_records_export_port_idx",
+          "movements_trip_number_trgm_idx", "movements_customs_reference_trgm_idx",
+          "drivers_full_name_trgm_idx", "trucks_unit_number_trgm_idx",
+        ]}::text[])`;
+      expect(rows.map((r) => r.indexname).sort()).toHaveLength(10);
+    } finally {
+      await sql.end();
+    }
+  });
 });

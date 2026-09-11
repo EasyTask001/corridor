@@ -92,6 +92,13 @@ export const inBondRecords = pgTable(
     // 0031
     index("in_bond_records_org_external_idx").on(t.organizationId, t.externalShipmentId),
     index("in_bond_records_org_shipment_idx").on(t.organizationId, t.shipmentId),
+    // 0043
+    index("in_bond_records_arrival_port_idx")
+      .on(t.arrivalPortId)
+      .where(sql`${t.arrivalPortId} is not null`),
+    index("in_bond_records_export_port_idx")
+      .on(t.exportPortId)
+      .where(sql`${t.exportPortId} is not null`),
     /** 0031 — target for the composite key on in_bond_events. */
     uniqueIndex("in_bond_records_id_organization_unique").on(t.id, t.organizationId),
     foreignKey({
