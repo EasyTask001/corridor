@@ -23,12 +23,49 @@ cli:
 
 # entry_points configured by /validator-setup
 entry_points:
+  # Root: mirrors the CI "check" job. Turbo caches unchanged workspaces, so
+  # these stay cheap when only one package changed.
   - path: .
+    checks:
+      - lint:
+          command: pnpm lint
+      - typecheck:
+          command: pnpm typecheck
+      - test:
+          command: pnpm test
+      - format-check:
+          command: pnpm format:check
+      - build-web:
+          command: pnpm turbo run build --filter=web
+          run_locally: false
+          timeout: 900
+      - security-deps:
+          command: pnpm audit --audit-level=moderate
+          run_locally: false
     reviews:
       - all-reviewers:
           builtin: all-reviewers
           num_reviews: 4
           model: gpt-5.3-codex
+
+  # Schema changes: migrations are the source of truth, the drizzle mirror
+  # must match, and RLS is verified by the integration suite. All three need
+  # the local Supabase stack (pnpm db:start) to be running.
+  - path: supabase
+    checks:
+      - db-lint:
+          command: pnpm db:lint
+      - db-verify-mirror:
+          command: pnpm --filter @corridor/db verify:mirror
+      - test-integration:
+          command: pnpm test:integration
+          timeout: 900
+
+  - path: packages/db
+    checks:
+      - db-lint
+      - db-verify-mirror
+      - test-integration
 
 # -------------------------------------------------------------------
 # All settings below are optional. Uncomment and change as needed.
