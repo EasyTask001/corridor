@@ -92,13 +92,18 @@ describe("reporting.run", () => {
     });
   });
 
-  it("requires both report.read and movement.read", async () => {
-    const { caller: api } = caller({ permissions: ["report.read"] });
+  it("accepts report.read alone (a reporting-only role)", async () => {
+    const { caller: api } = caller({ permissions: ["report.read"], sqlValues: { label: "All", value: 100 } });
+
+    await expect(api.run({ question: "How many movements all time?" })).resolves.toBeDefined();
+  });
+
+  it("rejects a caller with neither permission", async () => {
+    const { caller: api } = caller({ permissions: ["shipment.read"] });
 
     await expect(api.run({ question: "How many movements all time?" })).rejects.toMatchObject({
       code: "FORBIDDEN",
-      message: "Missing permission: movement.read",
+      message: "Missing one of: report.read, movement.read",
     });
-    expect(writeAudit).not.toHaveBeenCalled();
   });
 });

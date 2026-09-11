@@ -8,7 +8,7 @@ import {
   type ReportQuery,
 } from "@corridor/domain";
 import { translateReportQuestion, UnsupportedReportQuestionError } from "@corridor/ai";
-import { permissionProcedure, router } from "../trpc";
+import { anyPermissionProcedure, permissionProcedure, router } from "../trpc";
 import { writeAudit } from "../services/audit";
 import { crossingReport, dashboardData } from "../services/crossings";
 import { loadOrganization } from "../services/movements";
@@ -134,7 +134,7 @@ function summarize(
 
 export const reportingRouter = router({
   /** Crossing log: one row per movement in a date range, with whichever columns were picked. */
-  crossings: permissionProcedure("report.read", "movement.read")
+  crossings: anyPermissionProcedure("report.read", "movement.read")
     .input(crossingReportInput)
     .query(({ ctx, input }) =>
       ctx.rls(async (tx) => {
@@ -144,7 +144,7 @@ export const reportingRouter = router({
     ),
 
   /** CSV or PDF of the crossing report or of a question's result; stored as a generated document. */
-  export: permissionProcedure("report.read", "movement.read")
+  export: anyPermissionProcedure("report.read", "movement.read")
     .input(reportExportInput)
     .mutation(({ ctx, input }) =>
       ctx.rls(async (tx) => {
@@ -199,7 +199,7 @@ export const reportingRouter = router({
     ctx.rls((tx) => dashboardData(tx, ctx.orgId)),
   ),
 
-  run: permissionProcedure("report.read", "movement.read")
+  run: anyPermissionProcedure("report.read", "movement.read")
     .input(reportInput)
     .mutation(({ ctx, input }) =>
       ctx.rls(async (tx) => {
