@@ -2,40 +2,49 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@corridor/api";
 import { useTRPC } from "@/lib/trpc/client";
 import { markedRead } from "@/components/notifications/mark-read";
 
 type List = inferRouterOutputs<AppRouter>["notifications"]["list"];
+type ListPages = InfiniteData<List, string | null>;
 
 export function NotificationsList({ initial }: { initial: List }) {
   const trpc = useTRPC();
   const qc = useQueryClient();
   const [unreadOnly, setUnreadOnly] = useState(false);
-  const listOpts = trpc.notifications.list.queryOptions({ limit: 50, unreadOnly });
-  const { data = initial } = useQuery({
+  const listOpts = trpc.notifications.list.infiniteQueryOptions(
+    { limit: 50, unreadOnly },
+    { getNextPageParam: (last) => last.nextCursor ?? undefined, initialCursor: null },
+  );
+  const query = useInfiniteQuery({
     ...listOpts,
-    initialData: unreadOnly ? undefined : initial,
+    initialData: unreadOnly ? undefined : { pages: [initial], pageParams: [null] },
   });
+  const rows = query.data?.pages.flatMap((p) => p.rows) ?? [];
 
   const invalidate = () => qc.invalidateQueries({ queryKey: trpc.notifications.pathKey() });
 
   /**
    * Optimistic mark-read: the row must stop looking unread the instant it is
    * clicked (often while the click also navigates away). `onSettled`
-   * invalidation reconciles with the server's `read_at`.
+   * invalidation reconciles with the server's `read_at`. The list is now
+   * paginated, so these helpers patch every loaded page rather than a single
+   * page of rows.
    */
   const snapshot = async () => {
     await qc.cancelQueries({ queryKey: listOpts.queryKey });
     return { list: qc.getQueryData(listOpts.queryKey) };
   };
-  const rollback = (ctx?: { list?: List }) => {
+  const rollback = (ctx?: { list?: ListPages }) => {
     if (ctx?.list !== undefined) qc.setQueryData(listOpts.queryKey, ctx.list);
   };
   const patchRows = (fn: (rows: List["rows"]) => List["rows"]) =>
-    qc.setQueryData(listOpts.queryKey, (old) => (old ? { ...old, rows: fn(old.rows) } : undefined));
+    qc.setQueryData(listOpts.queryKey, (old) =>
+      old ? { ...old, pages: old.pages.map((p) => ({ ...p, rows: fn(p.rows) })) } : undefined,
+    );
 
   const markRead = useMutation(
     trpc.notifications.markRead.mutationOptions({
@@ -84,10 +93,10 @@ export function NotificationsList({ initial }: { initial: List }) {
         </button>
       </div>
       <div className="panel divide-y divide-border-default">
-        {data.rows.length === 0 && (
+        {rows.length === 0 && (
           <p className="px-4 py-6 text-sm text-fg-secondary">Nothing here.</p>
         )}
-        {data.rows.map((n) => (
+        {rows.map((n) => (
           <div
             key={n.id}
             className={`flex items-start gap-3 px-4 py-3 ${n.readAt ? "" : "bg-signal-500/5"}`}
@@ -125,6 +134,15 @@ export function NotificationsList({ initial }: { initial: List }) {
           </div>
         ))}
       </div>
+      {query.hasNextPage && (
+        <button
+          className="btn-secondary w-full py-2 text-sm"
+          disabled={query.isFetchingNextPage}
+          onClick={() => query.fetchNextPage()}
+        >
+          {query.isFetchingNextPage ? "Loading…" : "Load more"}
+        </button>
+      )}
     </div>
   );
 }

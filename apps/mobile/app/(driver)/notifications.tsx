@@ -1,15 +1,26 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { FlatList, Pressable, RefreshControl, Text, View } from "react-native";
+import type { inferRouterOutputs } from "@trpc/server";
+import type { AppRouter } from "@corridor/api";
 import { useSession } from "../../src/lib/session";
 import { outbox } from "../../src/lib/outbox-client";
 import { trpc } from "../../src/lib/trpc";
 import { useAsync } from "../../src/lib/use-async";
+import { appendPage, type Page } from "../../src/lib/use-paged";
 import { colors, styles } from "../../src/lib/theme";
+
+type List = inferRouterOutputs<AppRouter>["notifications"]["list"];
+type Row = List["rows"][number];
 
 /**
  * The same inbox the web bell shows. `markRead` goes through the outbox so a
  * driver reading alerts in a dead zone does not lose the change — it is
  * idempotent, which is what makes a replay safe.
+ *
+ * Pagination is a small local reducer (`appendPage`) rather than React
+ * Query's infinite-query helpers: the driver app calls the vanilla tRPC
+ * client directly (see `use-async.ts`), so there is no query cache to hook
+ * an infinite query onto.
  */
 export default function NotificationsScreen() {
   const { membership } = useSession();
@@ -17,7 +28,30 @@ export default function NotificationsScreen() {
     () => trpc.notifications.list.query({ limit: 50, unreadOnly: false }),
     membership?.organizationId ?? "",
   );
+  const [page, setPage] = useState<Page<Row>>();
+  const [loadingMore, setLoadingMore] = useState(false);
   const [readLocally, setReadLocally] = useState<string[]>([]);
+
+  // Every fresh load (first fetch or pull-to-refresh) replaces the
+  // accumulated pages with the server's page one.
+  useEffect(() => {
+    setPage(data ? { rows: data.rows, nextCursor: data.nextCursor } : undefined);
+  }, [data]);
+
+  const loadMore = useCallback(async () => {
+    if (!page?.nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const next = await trpc.notifications.list.query({
+        limit: 50,
+        unreadOnly: false,
+        cursor: page.nextCursor,
+      });
+      setPage((p) => appendPage(p, next));
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [page?.nextCursor, loadingMore]);
 
   const markRead = useCallback(async (id: string) => {
     setReadLocally((previous) => [...previous, id]);
@@ -29,14 +63,23 @@ export default function NotificationsScreen() {
       style={styles.screen}
       contentContainerStyle={styles.content}
       contentInsetAdjustmentBehavior="automatic"
-      data={data?.rows ?? []}
+      data={page?.rows ?? []}
       keyExtractor={(n) => n.id}
       refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void refetch()} />}
+      onEndReached={() => page?.nextCursor && !loadingMore && void loadMore()}
+      onEndReachedThreshold={0.5}
       ListHeaderComponent={
         error ? (
           <Text style={styles.error} accessibilityLiveRegion="polite">
             {error}
           </Text>
+        ) : null
+      }
+      ListFooterComponent={
+        loadingMore ? (
+          <View style={{ paddingVertical: 16, alignItems: "center" }}>
+            <Text style={styles.muted}>Loading more…</Text>
+          </View>
         ) : null
       }
       ListEmptyComponent={
