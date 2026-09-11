@@ -149,10 +149,15 @@ export interface CheckoutInput {
   customerEmail: string | null;
   successUrl: string;
   cancelUrl: string;
+  /** Stable per-attempt id (the router mints one per call and audits it) — the Stripe idempotency key. */
+  attemptId: string;
 }
 
-export async function createCheckout(input: CheckoutInput, env: StripeEnv = readStripeEnv()) {
-  const stripe = stripeClient(env);
+export async function createCheckout(
+  input: CheckoutInput,
+  env: StripeEnv = readStripeEnv(),
+  stripe: Stripe | null = stripeClient(env),
+) {
   if (!stripe) {
     // mock: the app's own route activates the plan and redirects back
     const u = new URL(input.successUrl);
@@ -161,32 +166,41 @@ export async function createCheckout(input: CheckoutInput, env: StripeEnv = read
   }
   const price = env.prices?.[input.plan];
   if (!price) throw new Error(`Missing Stripe price id for plan ${input.plan}`);
-  const session = await stripe.checkout.sessions.create({
-    mode: "subscription",
-    line_items: [{ price, quantity: 1 }],
-    success_url: input.successUrl,
-    cancel_url: input.cancelUrl,
-    ...(input.customerId
-      ? { customer: input.customerId }
-      : { customer_email: input.customerEmail ?? undefined }),
-    client_reference_id: input.organizationId,
-    metadata: { organizationId: input.organizationId, plan: input.plan },
-    subscription_data: { metadata: { organizationId: input.organizationId, plan: input.plan } },
-  });
+  const session = await stripe.checkout.sessions.create(
+    {
+      mode: "subscription",
+      line_items: [{ price, quantity: 1 }],
+      success_url: input.successUrl,
+      cancel_url: input.cancelUrl,
+      ...(input.customerId
+        ? { customer: input.customerId }
+        : { customer_email: input.customerEmail ?? undefined }),
+      client_reference_id: input.organizationId,
+      metadata: { organizationId: input.organizationId, plan: input.plan },
+      subscription_data: { metadata: { organizationId: input.organizationId, plan: input.plan } },
+    },
+    { idempotencyKey: `corridor_checkout_${input.attemptId}` },
+  );
   return { mode: "stripe" as const, url: session.url! };
 }
 
+export interface PortalInput {
+  customerId: string;
+  returnUrl: string;
+  /** Stable per-attempt id (the router mints one per call and audits it) — the Stripe idempotency key. */
+  attemptId: string;
+}
+
 export async function createPortal(
-  customerId: string,
-  returnUrl: string,
+  input: PortalInput,
   env: StripeEnv = readStripeEnv(),
+  stripe: Stripe | null = stripeClient(env),
 ) {
-  const stripe = stripeClient(env);
-  if (!stripe) return { mode: "mock" as const, url: returnUrl };
-  const session = await stripe.billingPortal.sessions.create({
-    customer: customerId,
-    return_url: returnUrl,
-  });
+  if (!stripe) return { mode: "mock" as const, url: input.returnUrl };
+  const session = await stripe.billingPortal.sessions.create(
+    { customer: input.customerId, return_url: input.returnUrl },
+    { idempotencyKey: `corridor_portal_${input.attemptId}` },
+  );
   return { mode: "stripe" as const, url: session.url };
 }
 
@@ -211,8 +225,11 @@ export interface UsageMeterResult {
    * `unbilled` — Stripe is configured but the organization has no customer to
    *              bill (it never checked out). Stamped and settled rather than
    *              retried forever; the local meter keeps the number for the UI.
+   * `failed`   — Stripe rejected this one record; it stays unstamped and is
+   *              retried next run. The rest of the batch still settles.
    */
-  mode: "stripe" | "mock" | "unbilled";
+  mode: "stripe" | "mock" | "unbilled" | "failed";
+  error?: string;
 }
 
 /**
@@ -226,8 +243,8 @@ export interface UsageMeterResult {
 export async function reportUsage(
   records: UsageMeterRecord[],
   env: StripeEnv = readStripeEnv(),
+  stripe: Stripe | null = stripeClient(env),
 ): Promise<UsageMeterResult[]> {
-  const stripe = stripeClient(env);
   if (!stripe) {
     return records.map((r) => ({ id: r.id, eventId: `mock_${randomUUID()}`, mode: "mock" }));
   }
@@ -238,16 +255,22 @@ export async function reportUsage(
       continue;
     }
     const identifier = `corridor_usage_${record.id}`;
-    await stripe.billing.meterEvents.create({
-      event_name: meterEventNameFor(record.metric, env),
-      identifier,
-      timestamp: Math.floor(record.occurredAt.getTime() / 1000),
-      payload: {
-        value: String(record.quantity),
-        stripe_customer_id: record.stripeCustomerId,
-      },
-    });
-    out.push({ id: record.id, eventId: identifier, mode: "stripe" });
+    try {
+      await stripe.billing.meterEvents.create({
+        event_name: meterEventNameFor(record.metric, env),
+        identifier,
+        timestamp: Math.floor(record.occurredAt.getTime() / 1000),
+        payload: {
+          value: String(record.quantity),
+          stripe_customer_id: record.stripeCustomerId,
+        },
+      });
+      out.push({ id: record.id, eventId: identifier, mode: "stripe" });
+    } catch (e) {
+      const error = e instanceof Error ? e.message : String(e);
+      console.error(`[stripe] meter event ${identifier} failed`, e);
+      out.push({ id: record.id, eventId: identifier, mode: "failed", error });
+    }
   }
   return out;
 }

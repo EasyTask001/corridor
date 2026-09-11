@@ -11,7 +11,7 @@
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createDb, eq, inArray, schema, withServiceRole } from "@corridor/db";
-import { reportUsage, type UsageMeterRecord } from "@corridor/integrations";
+import { reportUsage, type UsageMeterRecord, type UsageMeterResult } from "@corridor/integrations";
 import { reportPendingUsage } from "./services/usage";
 
 const DB_URL =
@@ -29,7 +29,7 @@ const ago = (ms: number) => new Date(Date.now() - ms);
  * transaction. The reporter opens its own short transactions around the Stripe
  * call precisely so no transaction spans it.
  */
-function run(report?: (r: UsageMeterRecord[]) => Promise<Array<{ id: number; eventId: string }>>) {
+function run(report?: (r: UsageMeterRecord[]) => Promise<UsageMeterResult[]>) {
   return reportPendingUsage(db, report);
 }
 
@@ -138,6 +138,7 @@ describe("billing.report_usage", () => {
       return records.map((r) => ({
         id: r.id,
         eventId: r.stripeCustomerId ? `corridor_usage_${r.id}` : `unbilled_${r.id}`,
+        mode: r.stripeCustomerId ? ("stripe" as const) : ("unbilled" as const),
       }));
     });
     expect(result.reported).toBe(2);
@@ -172,7 +173,7 @@ describe("billing.report_usage", () => {
           and query ilike '%usage_records%'
       `;
       openTxDuringReport = row!.n;
-      return records.map((r) => ({ id: r.id, eventId: `mock_tx_probe_${r.id}` }));
+      return records.map((r) => ({ id: r.id, eventId: `mock_tx_probe_${r.id}`, mode: "mock" as const }));
     });
 
     expect(order).toEqual(["report"]);
@@ -223,6 +224,32 @@ describe("billing.report_usage", () => {
     const retry = await run();
     expect(retry).toMatchObject({ reported: 1, organizations: 1, failures: [] });
     expect((await rowsFor([billed])).get(billed)!.reportedAt).not.toBeNull();
+  });
+
+  it("a per-record failure inside a batch stamps the others and reports the failure", async () => {
+    const ok = await seed(billedOrg, ago(3 * HOUR));
+    const bad = await seed(billedOrg, ago(2 * HOUR));
+
+    const result = await run(async (records) =>
+      records.map((r) =>
+        r.id === ok
+          ? { id: r.id, eventId: `stripe_${r.id}`, mode: "stripe" as const }
+          : { id: r.id, eventId: "", mode: "failed" as const, error: "boom" },
+      ),
+    );
+
+    expect(result.reported).toBe(1);
+    expect(result.organizations).toBe(1);
+    expect(result.failures).toEqual([{ organizationId: billedOrg, error: "boom" }]);
+
+    const rows = await rowsFor([ok, bad]);
+    expect(rows.get(ok)!.reportedAt).not.toBeNull();
+    expect(rows.get(bad)!.reportedAt).toBeNull(); // failed record left unstamped
+
+    // The failed record is retried on the next run.
+    const retry = await run();
+    expect(retry).toMatchObject({ reported: 1, organizations: 1, failures: [] });
+    expect((await rowsFor([bad])).get(bad)!.reportedAt).not.toBeNull();
   });
 
   it("reports nothing when the only records are still inside the window", async () => {

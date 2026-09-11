@@ -27,6 +27,7 @@ import {
   reportUsage,
   type PlanUsage,
   type UsageMeterRecord,
+  type UsageMeterResult,
 } from "@corridor/integrations";
 import type { SubscriptionPlan } from "@corridor/domain";
 
@@ -202,9 +203,7 @@ export type UsageReportResult = {
  */
 export async function reportPendingUsage(
   db: DatabaseClient,
-  report: (
-    records: UsageMeterRecord[],
-  ) => Promise<Array<{ id: number; eventId: string }>> = reportUsage,
+  report: (records: UsageMeterRecord[]) => Promise<UsageMeterResult[]> = reportUsage,
   now: Date = new Date(),
 ): Promise<UsageReportResult> {
   const cutoff = new Date(now.getTime() - USAGE_SETTLE_MS);
@@ -239,9 +238,16 @@ export async function reportPendingUsage(
     try {
       const results = await report(records);
       if (results.length === 0) continue;
+      // A `failed` record stays unstamped so the next run retries it; the rest
+      // of the batch still settles. It is reported the same way a whole-batch
+      // throw is, so one bad record does not vanish silently.
+      const settled = results.filter((r) => r.mode !== "failed");
+      for (const f of results.filter((r) => r.mode === "failed")) {
+        failures.push({ organizationId, error: f.error ?? "meter event failed" });
+      }
       const stamped = await withServiceRole(db, async (tx) => {
         let n = 0;
-        for (const result of results) {
+        for (const result of settled) {
           await tx
             .update(usageRecords)
             .set({ reportedAt: new Date(), stripeMeterEventId: result.eventId })

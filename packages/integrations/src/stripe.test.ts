@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type Stripe from "stripe";
 import {
   billingMode,
+  createCheckout,
+  createPortal,
   meterEventNameFor,
   readStripeEnv,
   reportUsage,
@@ -71,5 +74,65 @@ describe("reportUsage in mock mode", () => {
 
   it("returns nothing for an empty batch", async () => {
     expect(await reportUsage([], mockEnv)).toEqual([]);
+  });
+});
+
+const liveEnv = readStripeEnv({
+  STRIPE_SECRET_KEY: "sk_test_x",
+  STRIPE_PRICE_STARTER: "price_1",
+} as NodeJS.ProcessEnv);
+
+describe("idempotency keys", () => {
+  it("checkout passes a stable idempotency key derived from the attempt id", async () => {
+    const create = vi.fn().mockResolvedValue({ url: "https://checkout" });
+    const stripe = { checkout: { sessions: { create } } } as unknown as Stripe;
+    await createCheckout(
+      {
+        organizationId: "org",
+        plan: "starter",
+        customerId: null,
+        customerEmail: "a@b.c",
+        successUrl: "https://x/s",
+        cancelUrl: "https://x/c",
+        attemptId: "att-1",
+      },
+      liveEnv,
+      stripe,
+    );
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ mode: "subscription" }), {
+      idempotencyKey: "corridor_checkout_att-1",
+    });
+  });
+
+  it("portal passes a stable idempotency key", async () => {
+    const create = vi.fn().mockResolvedValue({ url: "https://portal" });
+    const stripe = { billingPortal: { sessions: { create } } } as unknown as Stripe;
+    await createPortal({ customerId: "cus_1", returnUrl: "https://x", attemptId: "att-2" }, liveEnv, stripe);
+    expect(create).toHaveBeenCalledWith(
+      { customer: "cus_1", return_url: "https://x" },
+      { idempotencyKey: "corridor_portal_att-2" },
+    );
+  });
+});
+
+describe("reportUsage partial failure", () => {
+  it("keeps going after one rejected record and reports it as failed", async () => {
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({})
+      .mockRejectedValueOnce(new Error("No such customer"))
+      .mockResolvedValueOnce({});
+    const stripe = { billing: { meterEvents: { create } } } as unknown as Stripe;
+    const rec = (id: number) => ({
+      id,
+      organizationId: "org",
+      metric: "documents_extracted",
+      quantity: 1,
+      occurredAt: new Date(0),
+      stripeCustomerId: "cus_1",
+    });
+    const out = await reportUsage([rec(1), rec(2), rec(3)], liveEnv, stripe);
+    expect(out.map((r) => r.mode)).toEqual(["stripe", "failed", "stripe"]);
+    expect(out[1]).toMatchObject({ id: 2, error: "No such customer" });
   });
 });

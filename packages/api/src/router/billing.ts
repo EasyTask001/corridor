@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { eq, schema, withServiceRole } from "@corridor/db";
@@ -98,6 +99,7 @@ export const billingRouter = router({
         const [o] = await tx.select().from(organizations).where(eq(organizations.id, ctx.orgId));
         return o!;
       });
+      const attemptId = randomUUID();
       const res = await createCheckout({
         organizationId: ctx.orgId,
         plan: input.plan,
@@ -105,6 +107,7 @@ export const billingRouter = router({
         customerEmail: org.billingEmail ?? ctx.session.user.email,
         successUrl: `${base}${input.returnPath}?checkout=success`,
         cancelUrl: `${base}${input.returnPath}?checkout=cancelled`,
+        attemptId,
       });
       await ctx.rls(async (tx) => {
         await logIntegrationEvent(tx, {
@@ -120,6 +123,7 @@ export const billingRouter = router({
           session: "checkout",
           plan: input.plan,
           mode: res.mode,
+          attemptId,
         });
       });
       return res;
@@ -137,11 +141,17 @@ export const billingRouter = router({
         message: "No Stripe customer yet — start a subscription first",
       });
     }
-    const res = await createPortal(org.stripeCustomerId ?? "mock", `${base}/settings/billing`);
+    const attemptId = randomUUID();
+    const res = await createPortal({
+      customerId: org.stripeCustomerId ?? "mock",
+      returnUrl: `${base}/settings/billing`,
+      attemptId,
+    });
     await ctx.rls((tx) =>
       writeAudit(tx, ctx.orgId, "billing.session_opened", "subscription", ctx.orgId, null, {
         session: "portal",
         mode: res.mode,
+        attemptId,
       }),
     );
     return res;
