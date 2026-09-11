@@ -384,11 +384,11 @@ describe("background_jobs queue", () => {
       );
       expect(unscoped.map((r) => Number(r.id))).toEqual(expect.arrayContaining([b!.id, system!.id]));
       // Exactly one claim_jobs remains (the 4-arg overload is gone).
-      const [{ count }] = await withServiceRole(db, (tx) =>
+      const [row] = await withServiceRole(db, (tx) =>
         tx.execute<{ count: string }>(sql`select count(*)::text as count from pg_proc p
           join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'claim_jobs'`),
       );
-      expect(Number(count)).toBe(1);
+      expect(Number(row!.count)).toBe(1);
     } finally {
       await withServiceRole(db, (tx) =>
         tx.delete(backgroundJobs).where(inArray(backgroundJobs.id, [a!.id, b!.id, system!.id])),
