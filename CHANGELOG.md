@@ -119,6 +119,16 @@ the section headings are the build phases, not versions.
 
 ### Security
 
+- **2026-09-11 audit remediation.** All 41 findings from the 2026-09-11 security/quality audit
+  (`docs/AUDIT-2026-09-11.md`) have been resolved — see the `**Resolution:**` line under each
+  finding there for the fixing commit(s). Highlights: the CRITICAL cross-tenant leak in
+  `integrations.jobs.runNow` (now scoped to the caller's org via `claim_jobs`'s new
+  `p_organization_id` parameter, migration 0041, and returning counts only); four jsonb address
+  columns replaced with flat text columns (migration 0042); tenant-scoped, bounded fixture state
+  for the customs mock/gateway clients; the rate limiter's Redis-outage fallback closed (no longer
+  fails open); and type-aware ESLint (`recommendedTypeChecked`) rolled out monorepo-wide (partial
+  by a recorded controller ruling — 10 rule families remain a tracked follow-up). See
+  `docs/security-review.md` for the updated service-role and RLS posture.
 - **Cross-tenant fix.** `notify_organization()` is SECURITY DEFINER and granted to
   `authenticated`, and took an organization id from its caller without checking membership: any
   signed-in user could read another tenant's member emails and plant notifications in their
