@@ -861,7 +861,9 @@ git commit -m "fix(integrations): tenant-scoped, bounded fixture state for custo
 
 **Interfaces:**
 - Consumes: `getTableConfig(table).foreignKeys` (Drizzle `ForeignKey[]`, each with `getName()`, `reference()` → `{ columns, foreignTable, foreignColumns }`, `onDelete`), `pg_constraint`.
-- Produces: `verify:mirror` fails on any FK whose name, columns, referenced table/columns or delete action differ, and on any DB index on a mirrored table that Drizzle does not declare.
+- Produces: `verify:mirror` fails on any FK whose columns, referenced table/columns or delete action differ from the DB's, and on any DB index on a mirrored table that Drizzle does not declare.
+
+**Ruling (recorded during Task 5 execution, 2026-09-11):** the FK check matches a Drizzle-declared FK to its `pg_constraint` row by **`(table, sorted column list)`**, not by constraint name. Constraint name is NOT part of the pass/fail criteria. Reason: ~85 pre-existing single-column FKs across the schema were declared via plain `.references()` (no explicit `foreignKey({ name: ... })`), and Drizzle's auto-generated name for those (`<table>_<col>_<foreignTable>_<foreignCol>_fk`) never matches Postgres's implicit default naming (`<table>_<col>_fkey`) used by the hand-written SQL migrations. Matching by name would produce ~220 problems instead of the ~33 this task's migration-0031 mirroring actually accounts for, and reaching 0 problems would require an unrelated project-wide rename sweep of ~85 FKs with no security or correctness benefit — the property that matters is the FK's columns/target/delete-action, not its name string. The 18 tables this task mirrors still get explicit `foreignKey({ name: "..." })` declarations matching each migration's literal constraint name (unchanged from the rest of this task) — this ruling only changes how the verifier PAIRS UP a Drizzle FK with a DB FK for comparison.
 
 - [ ] **Step 1: Extend the verifier first (it is the test)**
 
@@ -883,8 +885,9 @@ In `packages/db/scripts/verify-schema-mirror.ts`, after the index query, add an 
       join pg_class rt on rt.oid = c.confrelid
       join pg_namespace n on n.oid = t.relnamespace and n.nspname = 'public'
       where c.contype = 'f'`;
+    // Keyed by (table, sorted columns) — not conname. See the Ruling above.
     const dbFks = new Map<string, (typeof fkRows)[number]>();
-    for (const r of fkRows) dbFks.set(`${r.table_name}.${r.conname}`, r);
+    for (const r of fkRows) dbFks.set(`${r.table_name}.${[...r.cols].sort().join(",")}`, r);
     const dbIndexesByTable = new Map<string, Set<string>>();
     // (populate from the existing indexRows loop: for each row add index_name to the set for its table —
     //  extend the SELECT with `t.relname as table_name` and skip names ending in `_pkey`)
@@ -896,17 +899,18 @@ Inside the per-table loop, after the index comparison:
 ```ts
       for (const fk of table.foreignKeys) {
         const ref = fk.reference();
-        const key = `${table.name}.${fk.getName()}`;
+        const cols = ref.columns.map((c) => c.name);
+        const key = `${table.name}.${[...cols].sort().join(",")}`;
+        const label = `fk ${table.name}(${cols.join(",")})`;
         const actual = dbFks.get(key);
-        if (!actual) { problems.push(`fk ${key}: missing from the database`); continue; }
-        const cols = ref.columns.map((c) => c.name).join(",");
+        if (!actual) { problems.push(`${label}: missing from the database`); continue; }
         const refCols = ref.foreignColumns.map((c) => c.name).join(",");
         const refTable = getTableConfig(ref.foreignTable).name;
-        if (cols !== actual.cols.join(",") || refTable !== actual.ref_table || refCols !== actual.ref_cols.join(","))
-          problems.push(`fk ${key}: Drizzle (${cols}) -> ${refTable}(${refCols}) vs DB (${actual.cols}) -> ${actual.ref_table}(${actual.ref_cols})`);
+        if (refTable !== actual.ref_table || refCols !== actual.ref_cols.join(","))
+          problems.push(`${label}: Drizzle -> ${refTable}(${refCols}) vs DB -> ${actual.ref_table}(${actual.ref_cols})`);
         const expectedAction = fk.onDelete ?? "no action";
         if (expectedAction !== DELETE_ACTION[actual.ondelete])
-          problems.push(`fk ${key}: on delete Drizzle=${expectedAction} DB=${DELETE_ACTION[actual.ondelete]}`);
+          problems.push(`${label}: on delete Drizzle=${expectedAction} DB=${DELETE_ACTION[actual.ondelete]}`);
         dbFks.delete(key);
       }
       const declared = new Set(table.indexes.map((i) => i.config.name!));
@@ -916,14 +920,14 @@ Inside the per-table loop, after the index comparison:
       }
 ```
 
-After the loop: `for (const key of dbFks.keys()) problems.push(\`fk ${key}: exists in the database but not in the Drizzle mirror\`);` — but only for tables the mirror declares (filter by `table.name` set collected during the loop).
+After the loop: `for (const key of dbFks.keys()) problems.push(\`fk ${key}: exists in the database but not in the Drizzle mirror\`);` — but only for tables the mirror declares (filter by `table.name` set collected during the loop). Since `key` is now `table.column1,column2`, this message already reads as `fk shipments.shipper_id,organization_id: exists in the database but not in the Drizzle mirror` without further formatting.
 
 Extend the summary line to include `fks` count.
 
 - [ ] **Step 2: Run the verifier and record RED**
 
 Run: `pnpm --filter @corridor/db verify:mirror`
-Expected: FAIL listing ~33 FK mismatches (single-column vs composite, e.g. `fk movements.movements_truck_id_fkey: missing from the database`), the 21 `*_id_organization_unique` indexes, the 34 `*_org_*_idx` indexes, and the 6 trigram indexes from 0034. Save the list — it is the checklist for Step 3.
+Expected: FAIL listing ~33 FK mismatches under the `(table, columns)` key (single-column vs composite, e.g. `fk movements(truck_id): missing from the database` — the DB's actual composite FK is keyed `movements(organization_id,truck_id)`, a different column set, so no match is found and both directions report), the 21 `*_id_organization_unique` indexes, the 34 `*_org_*_idx` indexes, and the 6 trigram indexes from 0034. Save the list — it is the checklist for Step 3.
 
 - [ ] **Step 3: Mirror 0031 in Drizzle**
 
