@@ -46,10 +46,11 @@ export async function verifySchemaMirror(url = DB_URL) {
         column_name: string | null;
         ord: number;
         is_desc: boolean;
+        is_unique: boolean;
       }[]
     >`
       select t.relname as table_name, i.relname as index_name, a.attname as column_name,
-             k.ord::int as ord, (x.indoption[k.ord - 1] & 1) = 1 as is_desc
+             k.ord::int as ord, (x.indoption[k.ord - 1] & 1) = 1 as is_desc, x.indisunique as is_unique
       from pg_index x
       join pg_class i on i.oid = x.indexrelid
       join pg_class t on t.oid = x.indrelid
@@ -59,9 +60,11 @@ export async function verifySchemaMirror(url = DB_URL) {
       order by i.relname, k.ord`;
     const dbIndexes = new Map<string, string[]>();
     const dbIndexesByTable = new Map<string, Set<string>>();
+    const dbIndexIsUnique = new Map<string, boolean>();
     for (const r of indexRows) {
       const key = `${r.column_name ?? "(expr)"}:${r.is_desc ? "desc" : "asc"}`;
       dbIndexes.set(r.index_name, [...(dbIndexes.get(r.index_name) ?? []), key]);
+      dbIndexIsUnique.set(r.index_name, r.is_unique);
       if (!dbIndexesByTable.has(r.table_name)) dbIndexesByTable.set(r.table_name, new Set());
       if (!r.index_name.endsWith("_pkey")) dbIndexesByTable.get(r.table_name)!.add(r.index_name);
     }
@@ -199,7 +202,11 @@ export async function verifySchemaMirror(url = DB_URL) {
       // Column-level `.unique()` backs a single-column unique index whose DB
       // name (Postgres default `<table>_<col>_key`) never matches Drizzle's
       // own default (`<table>_<col>_unique`) — match by column, not name,
-      // same as the FK check above.
+      // same as the FK check above. Require the DB index to actually be
+      // unique (indisunique) before suppressing it this way — otherwise a
+      // future non-unique single-column index on a column that happens to
+      // carry `.isUnique` in Drizzle would be silently swallowed instead of
+      // flagged as real drift.
       const uniqueCols = new Set(
         table.columns.filter((c) => (c as { isUnique?: boolean }).isUnique).map((c) => c.name),
       );
@@ -207,7 +214,12 @@ export async function verifySchemaMirror(url = DB_URL) {
         if (declared.has(name) || name.endsWith("_pkey")) continue;
         if (table.uniqueConstraints.some((u) => u.name === name)) continue;
         const cols = dbIndexes.get(name) ?? [];
-        if (cols.length === 1 && uniqueCols.has(cols[0]!.split(":")[0]!)) continue;
+        if (
+          cols.length === 1 &&
+          dbIndexIsUnique.get(name) === true &&
+          uniqueCols.has(cols[0]!.split(":")[0]!)
+        )
+          continue;
         problems.push(`index ${name}: exists in the database but not in the Drizzle mirror`);
       }
     }
