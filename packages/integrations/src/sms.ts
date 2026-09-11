@@ -5,6 +5,8 @@
  * fully exercised in dev/CI without a Twilio account.
  */
 
+import { parsePhoneNumberFromString, type CountryCode } from "libphonenumber-js";
+
 export type SmsMode = "twilio" | "mock";
 
 export interface SmsEnv {
@@ -38,13 +40,10 @@ export interface SendSmsResult {
   error?: string;
 }
 
-/** E.164-ish: digits with an optional leading +, 8–15 digits. */
-export function normalisePhone(raw: string): string | null {
-  const digits = raw.replace(/[^\d+]/g, "");
-  const body = digits.startsWith("+") ? digits.slice(1) : digits;
-  if (!/^\d{8,15}$/.test(body)) return null;
-  // North American numbers without a country code get +1.
-  return `+${body.length === 10 ? `1${body}` : body}`;
+/** E.164 via libphonenumber; a bare national number is interpreted in `defaultCountry`. */
+export function normalisePhone(raw: string, defaultCountry: CountryCode = "CA"): string | null {
+  const parsed = parsePhoneNumberFromString(raw, defaultCountry);
+  return parsed?.isValid() ? parsed.number : null;
 }
 
 export async function sendSms(

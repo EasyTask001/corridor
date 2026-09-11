@@ -16,6 +16,9 @@ describe("normalisePhone", () => {
     expect(normalisePhone("+1 905 555 0101")).toBe("+19055550101");
     expect(normalisePhone("(905) 555-0101")).toBe("+19055550101");
     expect(normalisePhone("+44 20 7946 0958")).toBe("+442079460958");
+    expect(normalisePhone("020 7946 0958")).toBeNull(); // bare non-NANP 10 digits: no longer silently +1
+    expect(normalisePhone("020 7946 0958", "GB")).toBe("+442079460958");
+    expect(normalisePhone("011 555 0101")).toBeNull(); // invalid NANP area code
     expect(normalisePhone("call me")).toBeNull();
     expect(normalisePhone("123")).toBeNull();
   });
