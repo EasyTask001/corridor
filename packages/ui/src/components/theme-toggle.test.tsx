@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ThemeToggle } from "./theme-toggle";
+import { THEME_STORAGE_KEY } from "../lib/theme";
 
 beforeEach(() => {
   localStorage.clear();
@@ -21,13 +22,17 @@ describe("ThemeToggle", () => {
     await user.click(button);
 
     expect(document.documentElement.dataset.theme).toBe("dark");
-    expect(localStorage.getItem("corridor-theme")).toBe("dark");
+    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("dark");
   });
 
   it("reads a stored preference on mount", async () => {
-    localStorage.setItem("corridor-theme", "dark");
+    localStorage.setItem(THEME_STORAGE_KEY, "dark");
     render(<ThemeToggle />);
 
     expect(await screen.findByRole("button", { name: /switch to light theme/i })).toBeInTheDocument();
+  });
+
+  it("uses the same storage key as the web app's pre-paint init script", () => {
+    expect(THEME_STORAGE_KEY).toBe("corridor-theme");
   });
 });

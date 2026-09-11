@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { Plus_Jakarta_Sans } from "next/font/google";
-import { TooltipProvider } from "@corridor/ui";
+import { THEME_STORAGE_KEY, TooltipProvider } from "@corridor/ui";
 import "./globals.css";
 
 /**
@@ -33,7 +33,7 @@ export const viewport: Viewport = {
  * flash light first. Runs inline, not via next/script, because it must
  * execute before the first paint of `<body>`.
  */
-const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem('corridor-theme');if(t==='light'||t==='dark'){document.documentElement.dataset.theme=t;}}catch(e){}})();`;
+const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem(${JSON.stringify(THEME_STORAGE_KEY)});if(t==='light'||t==='dark'){document.documentElement.dataset.theme=t;}}catch(e){}})();`;
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (

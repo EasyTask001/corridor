@@ -3,19 +3,18 @@
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { cn } from "../lib/cn";
-
-const STORAGE_KEY = "corridor-theme";
+import { THEME_STORAGE_KEY } from "../lib/theme";
 
 function applyTheme(theme: "light" | "dark") {
   document.documentElement.dataset.theme = theme;
-  window.localStorage.setItem(STORAGE_KEY, theme);
+  window.localStorage.setItem(THEME_STORAGE_KEY, theme);
 }
 
 export function ThemeToggle({ className }: { className?: string }) {
   const [theme, setTheme] = useState<"light" | "dark" | null>(null);
 
   useEffect(() => {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
+    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
     const resolved =
       stored === "light" || stored === "dark"
         ? stored

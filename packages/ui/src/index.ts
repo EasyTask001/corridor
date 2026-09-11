@@ -1,4 +1,5 @@
 export { cn } from "./lib/cn";
+export { THEME_STORAGE_KEY } from "./lib/theme";
 
 export { Alert, AlertDescription, AlertTitle, alertVariants } from "./components/alert";
 export type { AlertProps } from "./components/alert";
