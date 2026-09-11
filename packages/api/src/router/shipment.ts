@@ -7,6 +7,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, asc, desc, eq, gte, ilike, inArray, isNull, or, schema, sql } from "@corridor/db";
+import { containsPattern } from "../infra/like";
 import {
   addressToColumns,
   assignShipmentsInput,
@@ -68,7 +69,7 @@ export const shipmentRouter = router({
         if (input.status?.length) conds.push(inArray(shipments.status, input.status));
         if (input.unassignedOnly) conds.push(isNull(shipments.movementId));
         if (input.q) {
-          const like = `%${input.q.replace(/[%_\\]/g, "\\$&")}%`;
+          const like = containsPattern(input.q);
           // Search-by-column (Task 14): one column when named, else every searchable one.
           const byColumn = {
             controlNumber: ilike(shipments.controlNumber, like),
@@ -388,7 +389,7 @@ export const shipmentRouter = router({
           eq(shipments.status, "draft"),
         ];
         if (input.q) {
-          const like = `%${input.q.replace(/[%_\\]/g, "\\$&")}%`;
+          const like = containsPattern(input.q);
           conds.push(ilike(shipments.controlNumber, like));
         }
         return tx
@@ -499,7 +500,7 @@ export const shipmentRouter = router({
             gte(parsRnsEvents.receivedAt, since),
           ];
           if (input.q) {
-            const like = `%${input.q.replace(/[%_\\]/g, "\\$&")}%`;
+            const like = containsPattern(input.q);
             conds.push(
               or(
                 ilike(parsRnsEvents.parsNumber, like),

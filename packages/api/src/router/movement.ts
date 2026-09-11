@@ -6,6 +6,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, asc, desc, eq, ilike, inArray, ne, or, schema, sql } from "@corridor/db";
+import { containsPattern } from "../infra/like";
 import {
   amendmentInput,
   crewInput,
@@ -146,7 +147,7 @@ export const movementRouter = router({
           );
         if (input.portId) conds.push(eq(movements.portId, input.portId));
         if (input.search) {
-          const like = `%${input.search.replace(/[%_\\]/g, "\\$&")}%`;
+          const like = containsPattern(input.search);
           // Search-by-column (Task 14): one column when named, else the three references.
           const byColumn = {
             movementNumber: ilike(movements.movementNumber, like),

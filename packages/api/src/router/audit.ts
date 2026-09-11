@@ -1,6 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, desc, eq, ilike, or, schema, sql } from "@corridor/db";
+import { containsPattern } from "../infra/like";
 import { anyPermissionProcedure, permissionProcedure, router } from "../trpc";
 import { HISTORY_ENTITY_PERMISSIONS, historyEntityType } from "../services/history";
 
@@ -62,7 +63,7 @@ export const auditRouter = router({
       ctx.rls(async (tx) => {
         const conditions = [eq(auditLog.organizationId, ctx.orgId)];
         if (input.search) {
-          const pattern = `%${input.search.replace(/[%_\\]/g, "\\$&")}%`;
+          const pattern = containsPattern(input.search);
           conditions.push(
             or(
               ilike(auditLog.action, pattern),

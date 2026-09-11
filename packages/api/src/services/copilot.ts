@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { tool, type ToolSet } from "ai";
 import { z } from "zod";
 import { and, desc, eq, ilike, or, schema, sql, type RlsTransaction } from "@corridor/db";
+import { containsPattern, escapeLike } from "../infra/like";
 import {
   lookupHsCode as lookupHsCodeStatic,
   searchTariff,
@@ -238,7 +239,7 @@ export function copilotTools(rls: RlsRunner, orgId: string): ToolSet {
             .where(
               and(
                 eq(movements.organizationId, orgId),
-                ilike(movements.movementNumber, movementNumber),
+                ilike(movements.movementNumber, escapeLike(movementNumber)),
               ),
             )
             .limit(1);
@@ -295,7 +296,7 @@ export function copilotTools(rls: RlsRunner, orgId: string): ToolSet {
       inputSchema: z.object({ driverName: z.string().describe("Driver's first and/or last name") }),
       execute: async ({ driverName }) =>
         rls(async (tx) => {
-          const like = `%${driverName.replace(/[%_\\]/g, "\\$&")}%`;
+          const like = containsPattern(driverName);
           const rows = await tx
             .select({
               firstName: drivers.firstName,

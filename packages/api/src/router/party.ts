@@ -23,6 +23,7 @@ import {
   type PgTable,
   type RlsTransaction,
 } from "@corridor/db";
+import { containsPattern } from "../infra/like";
 import {
   addressToColumns,
   driverDocumentInput,
@@ -168,7 +169,7 @@ function registryRouter<T extends PgTable, I extends z.ZodObject, A extends Addr
           if (input.status) conds.push(eq(t.status, input.status));
           else if (!input.includeArchived) conds.push(sql`${t.status} <> 'archived'`);
           if (input.search) {
-            const like = `%${input.search.replace(/[%_\\]/g, "\\$&")}%`;
+            const like = containsPattern(input.search);
             if (input.searchColumn) {
               // Search-by-column (Task 14): only this registry's advertised columns.
               const allowed = REGISTRY_SEARCH_COLUMNS[cfg.kind].some((c) => c.key === input.searchColumn);

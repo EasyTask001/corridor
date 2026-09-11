@@ -2,6 +2,7 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { and, desc, eq, ilike, or, schema, sql } from "@corridor/db";
+import { containsPattern } from "../infra/like";
 import {
   externalShipmentInput,
   externalShipmentListInput,
@@ -175,7 +176,7 @@ export const inbondRouter = router({
           const conds = [eq(externalShipments.organizationId, ctx.orgId)];
           if (input.status) conds.push(eq(externalShipments.status, input.status));
           if (input.q) {
-            const like = `%${input.q.replace(/[%_\\]/g, "\\$&")}%`;
+            const like = containsPattern(input.q);
             conds.push(
               or(
                 ilike(externalShipments.controlNumber, like),

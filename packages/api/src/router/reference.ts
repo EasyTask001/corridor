@@ -3,6 +3,7 @@ import { z } from "zod";
 import { and, asc, eq, ilike, or, schema } from "@corridor/db";
 import { portsSearchInput, uuid } from "@corridor/domain";
 import { getBorderWait, searchTariff } from "@corridor/integrations";
+import { containsPattern } from "../infra/like";
 import { orgProcedure, router } from "../trpc";
 
 const { ports, equipmentTypes } = schema;
@@ -15,7 +16,7 @@ export const referenceRouter = router({
         if (input.regime) conds.push(eq(ports.regime, input.regime));
         if (input.kind) conds.push(eq(ports.kind, input.kind));
         if (input.q) {
-          const like = `%${input.q.trim().replace(/[%_\\]/g, "\\$&")}%`;
+          const like = containsPattern(input.q);
           conds.push(or(ilike(ports.code, like), ilike(ports.name, like))!);
         }
         return tx

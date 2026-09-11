@@ -8,6 +8,7 @@
 import { randomUUID } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, ilike, inArray, or, schema, sql, type RlsTransaction } from "@corridor/db";
+import { containsPattern } from "../infra/like";
 import {
   canTransitionInBond,
   inBondSendable,
@@ -56,7 +57,7 @@ export async function listInBondRecords(tx: RlsTransaction, orgId: string, input
   const conds = [eq(inBondRecords.organizationId, orgId)];
   if (input.status?.length) conds.push(inArray(inBondRecords.status, input.status));
   if (input.q) {
-    const like = `%${input.q.replace(/[%_\\]/g, "\\$&")}%`;
+    const like = containsPattern(input.q);
     conds.push(
       or(
         ilike(inBondRecords.bondNumber, like),
