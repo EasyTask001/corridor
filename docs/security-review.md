@@ -231,14 +231,18 @@ reachable from a browser bundle:
 The RLS-bypassing **database** path is `withServiceRole()` (`packages/db/src/rls.ts:56`),
 whose contract is that callers must filter by `organization_id` themselves. Its
 call sites are the job worker and cron routes (`api/jobs/process`,
-`api/jobs/expiry-scan`, `api/jobs/notices-sync`), `packages/api/src/services/jobs.ts`,
-`packages/api/src/services/audit.ts` (audit rows for actorless events),
-`packages/api/src/router/billing.ts`, and — since migration 0023 — the customs
-webhook (`api/webhooks/customs` → `applyInboundCustomsMessage`, which resolves the
-gateway's reference number to one organization through `customs_submissions`
-before touching anything, and is idempotent per `eventId`). Each is a place where
-there is genuinely no caller to derive claims from. Cross-tenant-leak coverage lives in
-`packages/db/src/rls.integration.test.ts`.
+`api/jobs/expiry-scan`, `api/jobs/notices-sync`) and `packages/api/src/services/jobs.ts`.
+The one service-role claim a signed-in user can trigger, `integrations.jobs.runNow`,
+passes `organizationId: ctx.orgId` to `processDueJobs`, which forwards it as
+`claim_jobs(…, p_organization_id)` (0041) so only that organization's rows are
+claimed, and the procedure returns counts only — never a job's `result` payload.
+The remaining call sites are `packages/api/src/services/audit.ts` (audit rows for
+actorless events), `packages/api/src/router/billing.ts`, and — since migration
+0023 — the customs webhook (`api/webhooks/customs` → `applyInboundCustomsMessage`,
+which resolves the gateway's reference number to one organization through
+`customs_submissions` before touching anything, and is idempotent per `eventId`).
+Each is a place where there is genuinely no caller to derive claims from.
+Cross-tenant-leak coverage lives in `packages/db/src/rls.integration.test.ts`.
 
 One caller is the deliberate exception to "filters `organization_id` itself":
 `packages/api/src/services/tracking.ts` (public `/track` lookup, migration 0027)
@@ -299,7 +303,7 @@ and what it checks:
 | `sso_provider_for_email` / `sso_enforced_for_email` | anon (by design) | Unauthenticated by necessity (the login page has no session yet); each returns a single scalar — a provider id or a boolean — and never a row, a member list, or an org id | ✅  |
 | `read_integration_secret`                           | service_role     | EXECUTE revoked from `public`, `anon` **and** `authenticated` (0012)                                                                                                       | ✅  |
 | `push_tokens_for`                                   | service_role     | EXECUTE granted to `service_role` only (0015)                                                                                                                              | ✅  |
-| `claim_jobs`                                        | service_role     | EXECUTE revoked from `public`/`authenticated` (0004, 0011, 0013)                                                                                                           | ✅  |
+| `claim_jobs`                                        | service_role     | EXECUTE revoked from `public`/`anon`/`authenticated` (0004, 0011, 0013, 0041); the 0041 signature adds `p_organization_id uuid default null`, which `runNow` always sets to the caller's org | ✅  |
 
 Re-runnable:
 
@@ -329,9 +333,10 @@ derive everything from `auth.uid()` and are the check rather than a bypass of it
 - **Audit coverage is enforced by a test.** `packages/api/src/audit-coverage.test.ts`
   asserts that mutating procedures write an audit row, so the trail cannot rot
   silently as routers grow.
-- **Per-org job concurrency cap.** `claim_jobs(p_org_cap default 2)` in
-  `supabase/migrations/0011_schema_gaps.sql`, with `FOR UPDATE SKIP LOCKED`
-  leasing, so one tenant's AI burst cannot starve the queue.
+- **Per-org job concurrency cap.** `claim_jobs(p_org_cap default 2)`, currently
+  defined in `supabase/migrations/0041_claim_jobs_org_scope.sql` (cap since
+  0011, leases since 0033), with `FOR UPDATE SKIP LOCKED` leasing, so one
+  tenant's AI burst cannot starve the queue.
 - **Uploads never pass through a function.** `documents.getUploadUrl` mints a
   signed upload URL with the **caller's** session, so Storage RLS applies to the
   upload itself (`packages/api/src/router/documents.ts:69`).

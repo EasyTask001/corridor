@@ -352,6 +352,51 @@ describe("background_jobs queue", () => {
     }
   });
 
+  it("claims only one organization's jobs when p_organization_id is given (0041)", async () => {
+    const [orgA, orgB] = await db
+      .insert(organizations)
+      .values([{ name: `Job Scope A ${Date.now()}` }, { name: `Job Scope B ${Date.now()}` }])
+      .returning({ id: organizations.id });
+    const runAt = new Date(Date.now() - 2 * 3600_000);
+    const [a, b, system] = await withServiceRole(db, (tx) =>
+      tx.insert(backgroundJobs).values([
+        { organizationId: orgA!.id, jobType: "noop.test", runAt },
+        { organizationId: orgB!.id, jobType: "noop.test", runAt },
+        { organizationId: null, jobType: "noop.test", runAt },
+      ]).returning({ id: backgroundJobs.id }),
+    );
+    try {
+      const claimed = await withServiceRole(db, (tx) =>
+        tx.execute<{ id: number; organization_id: string | null }>(
+          sql`select id, organization_id from public.claim_jobs(10, 'scoped', 5, 600, ${orgA!.id}::uuid)`,
+        ),
+      );
+      expect(claimed.map((r) => Number(r.id))).toEqual([a!.id]);
+      const rows = await withServiceRole(db, (tx) =>
+        tx.select({ id: backgroundJobs.id, status: backgroundJobs.status, lockedBy: backgroundJobs.lockedBy })
+          .from(backgroundJobs).where(inArray(backgroundJobs.id, [b!.id, system!.id])),
+      );
+      expect(rows).toHaveLength(2);
+      expect(rows.every((r) => r.status === "pending" && r.lockedBy === null)).toBe(true);
+      // The null default still claims queue-wide, as before 0041.
+      const unscoped = await withServiceRole(db, (tx) =>
+        tx.execute<{ id: number }>(sql`select id from public.claim_jobs(10, 'unscoped', 5, 600)`),
+      );
+      expect(unscoped.map((r) => Number(r.id))).toEqual(expect.arrayContaining([b!.id, system!.id]));
+      // Exactly one claim_jobs remains (the 4-arg overload is gone).
+      const [{ count }] = await withServiceRole(db, (tx) =>
+        tx.execute<{ count: string }>(sql`select count(*)::text as count from pg_proc p
+          join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'claim_jobs'`),
+      );
+      expect(Number(count)).toBe(1);
+    } finally {
+      await withServiceRole(db, (tx) =>
+        tx.delete(backgroundJobs).where(inArray(backgroundJobs.id, [a!.id, b!.id, system!.id])),
+      );
+      await db.delete(organizations).where(inArray(organizations.id, [orgA!.id, orgB!.id]));
+    }
+  });
+
   it("reclaims a job whose worker died, but not one still inside its lease", async () => {
     // Own org so the per-org cap arithmetic cannot be perturbed by seeded jobs.
     const [org] = await db

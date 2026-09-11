@@ -300,21 +300,21 @@ export const integrationsRouter = router({
             .limit(input.limit),
         ),
       ),
-    /** Run due jobs now (dev / ops convenience; the cron does this in prod). */
+    /**
+     * Run this organization's due jobs now (dev / ops convenience; the cron
+     * does this queue-wide in prod). The claim is scoped to ctx.orgId (0041)
+     * and only counts come back — never a job's result payload.
+     */
     runNow: permissionProcedure("integrations.manage").mutation(async ({ ctx }) => {
       const result = await processDueJobs(ctx.db, {
         worker: `manual-${ctx.session.user.id.slice(0, 8)}`,
+        organizationId: ctx.orgId,
       });
-      // The worker runs queue-wide under the service role, so the audit row
-      // records who pressed the button, not which org's jobs ran.
+      const summary = { claimed: result.claimed, succeeded: result.succeeded, failed: result.failed };
       await ctx.rls((tx) =>
-        writeAudit(tx, ctx.orgId, "job.run_now", "background_jobs", ctx.orgId, null, {
-          claimed: result.claimed,
-          succeeded: result.succeeded,
-          failed: result.failed,
-        }),
+        writeAudit(tx, ctx.orgId, "job.run_now", "background_jobs", ctx.orgId, null, summary),
       );
-      return result;
+      return summary;
     }),
     stats: permissionProcedure("integrations.manage").query(({ ctx }) =>
       ctx.rls(async (tx) => {

@@ -274,17 +274,24 @@ function jobLeaseSeconds(): number {
   return Number.isInteger(configured) && configured > 0 ? configured : 600;
 }
 
-/** Claim and run due jobs. Safe to call concurrently from multiple workers. */
+/**
+ * Claim and run due jobs. Safe to call concurrently from multiple workers.
+ * `organizationId` narrows the claim to one tenant (0041) — the manual
+ * `integrations.jobs.runNow` path; the cron and request-tail workers omit it.
+ */
 export async function processDueJobs(
   db: DatabaseClient,
-  opts: { limit?: number; worker?: string } = {},
+  opts: { limit?: number; worker?: string; organizationId?: string } = {},
 ): Promise<ProcessResult> {
   const limit = opts.limit ?? 10;
   const worker = opts.worker ?? `worker-${process.pid}`;
   const orgCap = jobOrgCap();
   const lease = jobLeaseSeconds();
+  const organizationId = opts.organizationId ?? null;
   const claimed = await withServiceRole(db, (tx) =>
-    tx.execute<Job>(sql`select * from public.claim_jobs(${limit}, ${worker}, ${orgCap}, ${lease})`),
+    tx.execute<Job>(
+      sql`select * from public.claim_jobs(${limit}, ${worker}, ${orgCap}, ${lease}, ${organizationId}::uuid)`,
+    ),
   );
   const out: ProcessResult = { claimed: claimed.length, succeeded: 0, failed: 0, results: [] };
 
