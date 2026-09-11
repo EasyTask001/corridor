@@ -6,9 +6,9 @@
  */
 const required = (name: string, value: string | undefined) => {
   if (!value) {
-    console.warn(`[corridor] ${name} is not set — copy .env.example to .env.local`);
+    throw new Error(`${name} is not set — copy .env.example to .env.local`);
   }
-  return value ?? "";
+  return value;
 };
 
 export const API_URL = required("EXPO_PUBLIC_API_URL", process.env.EXPO_PUBLIC_API_URL);
