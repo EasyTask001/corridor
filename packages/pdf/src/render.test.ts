@@ -5,6 +5,7 @@ import {
   renderManifestSummary,
   renderTableReport,
 } from "./render";
+import { MAX_TABLE_REPORT_ROWS, truncateTableRows } from "./templates/table-report";
 import type { DriverSheetData } from "./types";
 
 const carrier = {
@@ -137,5 +138,29 @@ describe("pdf templates", () => {
     });
     expect(isPdf(buf)).toBe(true);
     expect(buf.length).toBeGreaterThan(1024);
+  });
+
+  it("table report renders a PDF even with more rows than the cap", async () => {
+    const rows = Array.from({ length: MAX_TABLE_REPORT_ROWS + 5 }, (_, i) => ({ a: String(i) }));
+    const buf = await renderTableReport({
+      title: "Crossings",
+      subtitle: null,
+      carrier,
+      columns: [{ key: "a", label: "A" }],
+      rows,
+      generatedAt: "2026-09-08T12:10:00.000Z",
+    });
+    expect(buf).toBeInstanceOf(Buffer);
+    expect(isPdf(buf)).toBe(true);
+  });
+});
+
+describe("truncateTableRows", () => {
+  it("caps a table report at MAX_TABLE_REPORT_ROWS and says so", () => {
+    const rows = Array.from({ length: MAX_TABLE_REPORT_ROWS + 5 }, (_, i) => ({ a: String(i) }));
+    const { rows: kept, truncatedFrom } = truncateTableRows(rows);
+    expect(kept).toHaveLength(MAX_TABLE_REPORT_ROWS);
+    expect(truncatedFrom).toBe(MAX_TABLE_REPORT_ROWS + 5);
+    expect(truncateTableRows(rows.slice(0, 3)).truncatedFrom).toBeNull();
   });
 });
