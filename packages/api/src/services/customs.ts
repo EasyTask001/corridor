@@ -632,24 +632,48 @@ export async function applyStatusMessage(
   return { changed, status: current.status, terminal };
 }
 
-/**
- * One poll of a gateway-mode filing (`customs.poll_status` job). Returns
- * whether the job should re-enqueue itself.
- */
-export async function pollCustomsStatus(
+export type PollPayload = {
+  movementId: string;
+  referenceNumber?: string | null;
+  startedAt?: string | null;
+  correlationId?: string | null;
+};
+export type PollResult = { status: string; changed: boolean; again: boolean; reason?: string };
+export type PollPrepared =
+  | { skip: true; result: PollResult }
+  | {
+      skip: false;
+      m: MovementRow;
+      ref: string;
+      client: CustomsClient;
+      config: typeof integrationConfigs.$inferSelect | null;
+    };
+
+/** Phase 1 of a poll: read the movement and build the client. Runs in a short transaction. */
+export async function preparePoll(
   tx: RlsTransaction,
   orgId: string,
-  payload: { movementId: string; referenceNumber?: string | null; startedAt?: string | null; correlationId?: string | null },
-): Promise<{ status: string; changed: boolean; again: boolean; reason?: string }> {
+  payload: PollPayload,
+): Promise<PollPrepared> {
   const m = await requireMovement(tx, orgId, payload.movementId);
   if (m.status !== "sent" && m.status !== "accepted" && m.status !== "held") {
-    return { status: m.status, changed: false, again: false, reason: `movement is ${m.status}` };
+    return { skip: true, result: { status: m.status, changed: false, again: false, reason: `movement is ${m.status}` } };
   }
   const ref = payload.referenceNumber ?? m.customsReferenceNumber;
-  if (!ref) return { status: m.status, changed: false, again: false, reason: "no reference number" };
+  if (!ref) return { skip: true, result: { status: m.status, changed: false, again: false, reason: "no reference number" } };
   const { client, config } = await customsClientFor(tx, orgId, m.regime);
-  const started = Date.now();
-  const status = await client.fetchStatus(ref);
+  return { skip: false, m, ref, client, config };
+}
+
+/** Phase 3 of a poll: log, stamp the config and apply the status document. Runs in its own transaction. */
+export async function applyPoll(
+  tx: RlsTransaction,
+  orgId: string,
+  prepared: Extract<PollPrepared, { skip: false }>,
+  status: CustomsStatusMessage,
+  meta: { durationMs: number; correlationId: string | null; startedAt: string | null },
+): Promise<PollResult> {
+  const { m, ref, client, config } = prepared;
   await logIntegrationEvent(tx, {
     orgId,
     movementId: m.id,
@@ -660,17 +684,19 @@ export async function pollCustomsStatus(
     response: { status: status.status, message: status.message, events: status.events.length },
     statusCode: 200,
     success: true,
-    durationMs: Date.now() - started,
-    correlationId: payload.correlationId ?? null,
+    durationMs: meta.durationMs,
+    correlationId: meta.correlationId,
   });
   if (config) {
-    await tx
-      .update(integrationConfigs)
-      .set({ lastPolledAt: new Date() })
-      .where(eq(integrationConfigs.id, config.id));
+    await tx.update(integrationConfigs).set({ lastPolledAt: new Date() }).where(eq(integrationConfigs.id, config.id));
   }
-  const result = await applyStatusMessage(tx, { orgId, userId: null }, m, status);
-  const startedAt = payload.startedAt ? new Date(payload.startedAt).getTime() : Date.now();
+  // Re-read under lock: the snapshot in `prepared.m` predates the network call (Task 3).
+  const current = await requireMovement(tx, orgId, m.id);
+  if (current.status !== m.status) {
+    return { status: current.status, changed: false, again: false, reason: "movement changed during poll" };
+  }
+  const result = await applyStatusMessage(tx, { orgId, userId: null }, current, status);
+  const startedAt = meta.startedAt ? new Date(meta.startedAt).getTime() : Date.now();
   const withinWindow = Date.now() - startedAt < POLL_WINDOW_MS;
   return {
     status: result.status,
@@ -678,6 +704,29 @@ export async function pollCustomsStatus(
     again: !result.terminal && withinWindow,
     reason: result.terminal ? "terminal" : withinWindow ? undefined : "poll window elapsed",
   };
+}
+
+/**
+ * One poll of a gateway-mode filing (`customs.poll_status` job): a short
+ * transaction to prepare, the gateway call with NO transaction open, then a
+ * short transaction to apply. Same three-phase shape as `customs.decide`.
+ */
+export async function pollCustomsStatus(
+  db: DatabaseClient,
+  orgId: string,
+  payload: PollPayload,
+): Promise<PollResult> {
+  const prepared = await withServiceRole(db, (tx) => preparePoll(tx, orgId, payload));
+  if (prepared.skip) return prepared.result;
+  const started = Date.now();
+  const status = await prepared.client.fetchStatus(prepared.ref);
+  return withServiceRole(db, (tx) =>
+    applyPoll(tx, orgId, prepared, status, {
+      durationMs: Date.now() - started,
+      correlationId: payload.correlationId ?? null,
+      startedAt: payload.startedAt ?? null,
+    }),
+  );
 }
 
 /**

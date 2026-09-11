@@ -256,6 +256,12 @@ describe("job dispatch", () => {
       );
     }
   });
+
+  it("customs.poll_status is a detached handler (no transaction open across fetchStatus)", async () => {
+    const { detachedJobHandlers, jobHandlers } = await import("./services/jobs");
+    expect(jobHandlers["customs.poll_status"]).toBeUndefined();
+    expect(detachedJobHandlers["customs.poll_status"]).toBeTypeOf("function");
+  });
 });
 
 describe("processDueJobs scoped to one organization (integrations.jobs.runNow)", () => {

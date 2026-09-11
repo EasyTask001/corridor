@@ -93,39 +93,6 @@ export const jobHandlers: Partial<Record<JobType, Handler>> = {
     return deliverQueuedPush(tx, orgId, ids);
   },
 
-  /**
-   * Ask the customs gateway for its decision on a transmitted manifest and
-   * apply it. Chains the next decision (accepted → released/held → released)
-   * with a further delay so the timeline unfolds like a real crossing.
-   */
-  /**
-   * Gateway mode (0023): ask the gateway where the filing stands and apply
-   * it. Re-enqueues itself every POLL_INTERVAL_MS until the decision is
-   * terminal or 48 h have passed; the webhook may land first, in which case
-   * the poll simply finds nothing new.
-   */
-  "customs.poll_status": async (tx, job) => {
-    const orgId = job.organizationId;
-    if (!orgId) throw new Error("customs.poll_status requires organization_id");
-    const payload = {
-      movementId: String(job.payload.movementId),
-      referenceNumber: typeof job.payload.referenceNumber === "string" ? job.payload.referenceNumber : null,
-      startedAt: typeof job.payload.startedAt === "string" ? job.payload.startedAt : null,
-      correlationId: typeof job.payload.correlationId === "string" ? job.payload.correlationId : null,
-    };
-    const result = await pollCustomsStatus(tx, orgId, payload);
-    if (result.again) {
-      await enqueueJob(tx, {
-        orgId,
-        jobType: "customs.poll_status",
-        payload: { ...job.payload, startedAt: payload.startedAt ?? new Date().toISOString() },
-        runAt: new Date(Date.now() + POLL_INTERVAL_MS),
-        maxAttempts: 5,
-      });
-    }
-    return result;
-  },
-
   /** Driver sheet + entry numbers to dispatch and the driver (0025). */
   "driver.notify": async (tx, job) => {
     if (!job.organizationId) throw new Error("driver.notify requires organization_id");
@@ -234,6 +201,35 @@ export const detachedJobHandlers: Partial<Record<JobType, DetachedHandler>> = {
       }
       return { decision: decision.decision, status: updated.status };
     });
+  },
+  /**
+   * Gateway mode (0023): ask the gateway where the filing stands and apply
+   * it. Re-enqueues itself every POLL_INTERVAL_MS until the decision is
+   * terminal or 48 h have passed. Detached (ISSUE-005): the gateway call must
+   * not hold a pooled connection.
+   */
+  "customs.poll_status": async (db, job) => {
+    const orgId = job.organizationId;
+    if (!orgId) throw new Error("customs.poll_status requires organization_id");
+    const payload = {
+      movementId: String(job.payload.movementId),
+      referenceNumber: typeof job.payload.referenceNumber === "string" ? job.payload.referenceNumber : null,
+      startedAt: typeof job.payload.startedAt === "string" ? job.payload.startedAt : null,
+      correlationId: typeof job.payload.correlationId === "string" ? job.payload.correlationId : null,
+    };
+    const result = await pollCustomsStatus(db, orgId, payload);
+    if (result.again) {
+      await withServiceRole(db, (tx) =>
+        enqueueJob(tx, {
+          orgId,
+          jobType: "customs.poll_status",
+          payload: { ...job.payload, startedAt: payload.startedAt ?? new Date().toISOString() },
+          runAt: new Date(Date.now() + POLL_INTERVAL_MS),
+          maxAttempts: 5,
+        }),
+      );
+    }
+    return result;
   },
   /**
    * Push metered usage to Stripe. Queue-wide (organization_id is null): the

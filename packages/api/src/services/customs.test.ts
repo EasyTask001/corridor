@@ -154,7 +154,7 @@ describe("applyStatusMessage", () => {
 
 describe("pollCustomsStatus (gateway mode, fixture replay)", () => {
   it("polls the gateway, applies the answer, stamps last_polled_at and asks to poll again", async () => {
-    const { pollCustomsStatus } = await import("./customs");
+    const { preparePoll, applyPoll } = await import("./customs");
     const rows = gatewayRows("sent");
     rows.integrationConfigs = [
       {
@@ -171,11 +171,16 @@ describe("pollCustomsStatus (gateway mode, fixture replay)", () => {
     ];
     rows.integrationEvents = [];
     const db = createFakeDb({ rows });
-    const r = await pollCustomsStatus(db.tx, TEST_ORG_ID, {
+    const tx = db.tx;
+    const prepared = await preparePoll(tx, TEST_ORG_ID, {
       movementId: MOVEMENT_ID,
       referenceNumber: "ACE-FX00001",
       startedAt: new Date().toISOString(),
     });
+    expect(prepared.skip).toBe(false);
+    if (prepared.skip) throw new Error("unreachable");
+    const status = await prepared.client.fetchStatus(prepared.ref);
+    const r = await applyPoll(tx, TEST_ORG_ID, prepared, status, { durationMs: 0, correlationId: null, startedAt: new Date().toISOString() });
     // First fixture poll of an ACE filing: accepted — not terminal, keep polling.
     expect(r).toMatchObject({ status: "accepted", changed: true, again: true });
     expect(db.table("integrationEvents")[0]).toMatchObject({ operation: "poll", direction: "inbound" });
@@ -184,16 +189,25 @@ describe("pollCustomsStatus (gateway mode, fixture replay)", () => {
   });
 
   it("stops polling once the window has elapsed", async () => {
-    const { pollCustomsStatus } = await import("./customs");
+    const { preparePoll, applyPoll } = await import("./customs");
     const rows = gatewayRows("sent");
     rows.integrationConfigs = [
       { id: "cfg-1", organizationId: TEST_ORG_ID, provider: "cbp_ace", mode: "gateway", status: "active", environment: "sandbox", settings: {}, credentialsRef: null, baseUrl: null },
     ];
     rows.integrationEvents = [];
     const db = createFakeDb({ rows });
-    const r = await pollCustomsStatus(db.tx, TEST_ORG_ID, {
+    const tx = db.tx;
+    const prepared = await preparePoll(tx, TEST_ORG_ID, {
       movementId: MOVEMENT_ID,
       referenceNumber: "ACE-FX00001",
+      startedAt: new Date(Date.now() - 49 * 3_600_000).toISOString(),
+    });
+    expect(prepared.skip).toBe(false);
+    if (prepared.skip) throw new Error("unreachable");
+    const status = await prepared.client.fetchStatus(prepared.ref);
+    const r = await applyPoll(tx, TEST_ORG_ID, prepared, status, {
+      durationMs: 0,
+      correlationId: null,
       startedAt: new Date(Date.now() - 49 * 3_600_000).toISOString(),
     });
     expect(r.again).toBe(false);
