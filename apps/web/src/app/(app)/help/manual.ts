@@ -20,7 +20,8 @@ export async function listManualPages(): Promise<ManualPage[]> {
   let files: string[] = [];
   try {
     files = (await readdir(MANUAL_DIR)).filter((f) => f.endsWith(".md")).sort();
-  } catch {
+  } catch (e) {
+    console.error("[help] manual directory unreadable", e);
     return [];
   }
   return Promise.all(
@@ -37,7 +38,8 @@ export async function renderManualPage(slug: string): Promise<{ title: string; h
   try {
     const md = await readFile(path.join(MANUAL_DIR, `${slug}.md`), "utf8");
     return { title: titleOf(md, slug), html: await marked.parse(md, { async: true }) };
-  } catch {
+  } catch (e) {
+    console.error(`[help] manual page ${slug} unreadable`, e);
     return null;
   }
 }

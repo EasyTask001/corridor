@@ -23,7 +23,8 @@ export function parseListPrefs(raw: string | null, defaults: ListPrefs, validCol
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
-  } catch {
+  } catch (e) {
+    console.warn("[prefs] could not read list preferences; using defaults", e);
     return defaults;
   }
   if (!parsed || typeof parsed !== "object") return defaults;
@@ -46,7 +47,8 @@ function read(name: string, defaults: ListPrefs, validColumns: readonly string[]
   let raw: string | null = null;
   try {
     raw = window.localStorage.getItem(keyFor(name));
-  } catch {
+  } catch (e) {
+    console.warn("[prefs] could not read list preferences; using defaults", e);
     raw = null;
   }
   const hit = cache.get(name);
@@ -60,8 +62,8 @@ function write(name: string, prefs: ListPrefs) {
   const raw = JSON.stringify(prefs);
   try {
     window.localStorage.setItem(keyFor(name), raw);
-  } catch {
-    /* private mode: keep it for this page only */
+  } catch (e) {
+    console.warn("[prefs] could not save list preferences (private browsing?)", e);
   }
   cache.set(name, { raw, prefs });
   listeners.get(name)?.forEach((cb) => cb());

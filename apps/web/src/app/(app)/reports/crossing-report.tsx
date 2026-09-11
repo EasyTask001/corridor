@@ -38,7 +38,8 @@ function readStoredColumns(): CrossingColumn[] {
   let raw: string | null = null;
   try {
     raw = window.localStorage.getItem(STORAGE_KEY);
-  } catch {
+  } catch (e) {
+    console.warn("[crossing-report] stored column choice unreadable; using defaults", e);
     raw = null;
   }
   if (raw === cachedRaw) return cachedColumns;
@@ -49,7 +50,8 @@ function readStoredColumns(): CrossingColumn[] {
       ? parsed.filter((k) => crossingColumn.safeParse(k).success)
       : [];
     cachedColumns = cols.length > 0 ? (cols as CrossingColumn[]) : DEFAULT_CROSSING_COLUMNS;
-  } catch {
+  } catch (e) {
+    console.warn("[crossing-report] stored column choice unreadable; using defaults", e);
     cachedColumns = DEFAULT_CROSSING_COLUMNS;
   }
   return cachedColumns;
@@ -65,7 +67,8 @@ function subscribe(cb: () => void) {
 function storeColumns(next: CrossingColumn[]) {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-  } catch {
+  } catch (e) {
+    console.warn("[crossing-report] could not save column choice", e);
     cachedRaw = undefined;
     cachedColumns = next;
   }

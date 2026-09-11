@@ -6,6 +6,7 @@ import { z } from "zod";
 import { PERSIST_SESSION_COOKIE, PERSIST_SESSION_MAX_AGE } from "@corridor/auth";
 import { email as emailSchema } from "@corridor/domain";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { appCookieOptions } from "@/lib/cookies";
 import { passwordSignInBlockedFor } from "@/lib/sso";
 import { env } from "@/lib/env";
 
@@ -38,13 +39,7 @@ export async function signIn(_prev: AuthState, formData: FormData): Promise<Auth
   const persist = formData.get("remember") === "on";
   const cookieStore = await cookies();
   if (persist) {
-    cookieStore.set(PERSIST_SESSION_COOKIE, "1", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: PERSIST_SESSION_MAX_AGE,
-      path: "/",
-    });
+    cookieStore.set(PERSIST_SESSION_COOKIE, "1", appCookieOptions({ maxAge: PERSIST_SESSION_MAX_AGE }));
   } else {
     cookieStore.delete(PERSIST_SESSION_COOKIE);
   }

@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { authCookieOptions, persistSessionFrom } from "@corridor/auth";
+import { appCookieOptions } from "@/lib/cookies";
 import { env } from "@/lib/env";
 
 /**
@@ -21,9 +22,7 @@ export async function createSupabaseServerClient(options: { persist?: boolean } 
           for (const { name, value, options } of cookiesToSet) {
             cookieStore.set(name, value, {
               ...authCookieOptions(options, persist),
-              httpOnly: true,
-              secure: process.env.NODE_ENV === "production",
-              sameSite: "lax",
+              ...appCookieOptions(),
             });
           }
         } catch {

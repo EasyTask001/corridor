@@ -1,12 +1,12 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { authCookieOptions, persistSessionFrom } from "@corridor/auth";
+import { appCookieOptions } from "@/lib/cookies";
 
 const PUBLIC_PATHS = [
   "/login",
   "/signup",
   "/auth/callback",
-  "/auth/confirm",
   "/api/health",
   // Public PAPS/PARS lookup (0027): gated by carrier code + control number, rate limited.
   "/track",
@@ -40,9 +40,7 @@ export async function proxy(request: NextRequest) {
           for (const { name, value, options } of cookiesToSet) {
             response.cookies.set(name, value, {
               ...authCookieOptions(options, persist),
-              httpOnly: true,
-              secure: process.env.NODE_ENV === "production",
-              sameSite: "lax",
+              ...appCookieOptions(),
             });
           }
         },
