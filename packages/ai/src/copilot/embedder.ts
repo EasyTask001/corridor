@@ -10,6 +10,7 @@
  */
 import { embed, embedMany } from "ai";
 import { embeddingModel } from "../client";
+import { aiTimeoutSignal } from "../timeouts";
 import { mockEmbedder } from "./mock-embedder";
 import type { Embedder, EmbeddingResult } from "./types";
 
@@ -36,11 +37,15 @@ export function createEmbedder(env: NodeJS.ProcessEnv = process.env): Embedder |
     name: label,
     dimensions: EMBEDDING_DIMENSIONS,
     async embed(text: string): Promise<EmbeddingResult> {
-      const result = await embed({ model, value: text });
+      const result = await embed({ model, value: text, abortSignal: aiTimeoutSignal("embedding") });
       return { embedding: assertDimensions(result.embedding, id), model: id };
     },
     async embedMany(texts: string[]): Promise<EmbeddingResult[]> {
-      const result = await embedMany({ model, values: texts });
+      const result = await embedMany({
+        model,
+        values: texts,
+        abortSignal: aiTimeoutSignal("embedding"),
+      });
       return result.embeddings.map((embedding) => ({
         embedding: assertDimensions(embedding, id),
         model: id,

@@ -10,6 +10,8 @@
 import { generateObject } from "ai";
 import { extractedDocument, type DocumentType } from "@corridor/domain";
 import { aiConfigured, languageModel } from "../client";
+import { aiTimeoutSignal } from "../timeouts";
+import { EXTRACTION_TEXT_BYTES, readableText } from "./text";
 import type { DocumentInput, Extractor, ExtractorResult } from "./types";
 
 const SYSTEM = `You are a customs documentation specialist for cross-border trucking between Canada and the United States.
@@ -50,21 +52,23 @@ export function createModelExtractor(env: NodeJS.ProcessEnv = process.env): Extr
       input: DocumentInput,
       hint: { documentType: DocumentType },
     ): Promise<ExtractorResult> {
-      const isText = input.mimeType.startsWith("text/") || input.mimeType === "application/json";
-      const userContent = isText
-        ? [
-            {
-              type: "text" as const,
-              text: `Declared document type: ${hint.documentType}. Filename: ${input.filename}.\n\n--- DOCUMENT ---\n${new TextDecoder().decode(input.bytes)}`,
-            },
-          ]
-        : [
-            {
-              type: "text" as const,
-              text: `Declared document type: ${hint.documentType}. Filename: ${input.filename}. Extract the shipment data from the attached file.`,
-            },
-            { type: "file" as const, data: input.bytes, mediaType: input.mimeType },
-          ];
+      const text = readableText(input, EXTRACTION_TEXT_BYTES);
+      const truncated = input.bytes.length > EXTRACTION_TEXT_BYTES;
+      const userContent =
+        text !== undefined
+          ? [
+              {
+                type: "text" as const,
+                text: `Declared document type: ${hint.documentType}. Filename: ${input.filename}.\n\n--- DOCUMENT ---\n${text}${truncated ? `\n\n[document truncated to ${EXTRACTION_TEXT_BYTES} bytes]` : ""}`,
+              },
+            ]
+          : [
+              {
+                type: "text" as const,
+                text: `Declared document type: ${hint.documentType}. Filename: ${input.filename}. Extract the shipment data from the attached file.`,
+              },
+              { type: "file" as const, data: input.bytes, mediaType: input.mimeType },
+            ];
 
       const result = await generateObject({
         model,
@@ -72,6 +76,7 @@ export function createModelExtractor(env: NodeJS.ProcessEnv = process.env): Extr
         system: SYSTEM,
         messages: [{ role: "user", content: userContent }],
         temperature: 0,
+        abortSignal: aiTimeoutSignal("extraction"),
       });
 
       return {

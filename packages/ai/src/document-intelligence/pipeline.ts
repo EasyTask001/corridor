@@ -15,6 +15,7 @@ import {
 import { classifyByHints } from "./classify";
 import { mockExtractor } from "./mock-extractor";
 import { createModelExtractor } from "./model-extractor";
+import { CLASSIFIER_TEXT_BYTES, readableText } from "./text";
 import type { DocumentInput, Extractor, PipelineOutcome } from "./types";
 
 export interface PipelineOptions {
@@ -69,13 +70,6 @@ function roundMoneyFields(raw: unknown): unknown {
   return out;
 }
 
-/** Text we can hand the classifier; binary uploads (PDF/image) get filename cues only. */
-function readableText(input: DocumentInput): string | undefined {
-  if (!input.mimeType.startsWith("text/") && input.mimeType !== "application/json")
-    return undefined;
-  return new TextDecoder().decode(input.bytes.slice(0, 8192));
-}
-
 /**
  * Required-for-manifest fields and their confidences. A rate confirmation is a
  * load tender, not a customs document: it is not expected to carry cargo lines,
@@ -115,7 +109,7 @@ export async function runExtractionPipeline(
   const hinted: DocumentType = classifyByHints(
     input.filename,
     input.declaredType,
-    readableText(input),
+    readableText(input, CLASSIFIER_TEXT_BYTES),
   );
 
   let raw: unknown;
