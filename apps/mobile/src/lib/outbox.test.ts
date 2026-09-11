@@ -75,19 +75,16 @@ describe("validateOutboxInput", () => {
     if (!result.ok) expect(result.error).toContain("documentId");
   });
 
-  it("enforces the Expo token shape from the domain schema", () => {
-    expect(
-      validateOutboxInput("notifications.registerDevice", {
-        expoPushToken: "just-a-string",
-        platform: "ios",
-      }).ok,
-    ).toBe(false);
-    expect(
-      validateOutboxInput("notifications.registerDevice", {
-        expoPushToken: "ExponentPushToken[abc123]",
-        platform: "ios",
-      }).ok,
-    ).toBe(true);
+  it("accepts just the platform — the Expo token never enters outbox validation", () => {
+    expect(validateOutboxInput("notifications.registerDevice", { platform: "ios" })).toEqual({
+      ok: true,
+      value: { platform: "ios" },
+    });
+  });
+
+  it("rejects an unsupported platform", () => {
+    const result = validateOutboxInput("notifications.registerDevice", { platform: "windows" });
+    expect(result.ok).toBe(false);
   });
 });
 
@@ -242,6 +239,15 @@ describe("Outbox.submit", () => {
     expect(send).not.toHaveBeenCalled();
     expect(result.remaining).toBe(1);
     expect(storage.snapshot()).toHaveLength(1);
+  });
+
+  it("queues registerDevice without the token (it lives in SecureStore, not the outbox)", async () => {
+    const { outbox, storage, online } = build();
+    online.value = false;
+    await outbox.submit("notifications.registerDevice", { platform: "ios" });
+    const persisted = storage.snapshot();
+    expect(persisted[0]?.input).toEqual({ platform: "ios" });
+    expect(JSON.stringify(persisted)).not.toContain("ExponentPushToken");
   });
 });
 

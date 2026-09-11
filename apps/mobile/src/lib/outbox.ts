@@ -28,7 +28,10 @@ import {
 export const OUTBOX_OPERATIONS = {
   "documents.finalizeUpload": finalizeUploadInput,
   "notifications.markRead": notificationMarkReadInput,
-  "notifications.registerDevice": registerDeviceInput,
+  // The Expo push token is a bearer capability and never touches AsyncStorage:
+  // it lives in SecureStore (`push-token-store.ts`) and is merged back in by
+  // `outbox-client.ts` at send time, so the queued/validated shape here omits it.
+  "notifications.registerDevice": registerDeviceInput.omit({ expoPushToken: true }),
 } as const;
 
 export type OutboxOperation = keyof typeof OUTBOX_OPERATIONS;

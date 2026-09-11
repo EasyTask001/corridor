@@ -15,6 +15,7 @@ import {
   type OutboxScope,
   type OutboxSend,
 } from "./outbox";
+import { readPushToken } from "./push-token-store";
 import { trpc } from "./trpc";
 
 /** Optimistic: assume a connection until NetInfo says otherwise. */
@@ -28,16 +29,22 @@ let scope: OutboxScope = UNRESOLVED_SCOPE;
 
 export const isOnline = () => online;
 
-const send: OutboxSend = (op, input) => {
+const send: OutboxSend = async (op, input) => {
   switch (op) {
     case "documents.finalizeUpload":
       return trpc.documents.finalizeUpload.mutate(input as OutboxInput<"documents.finalizeUpload">);
     case "notifications.markRead":
       return trpc.notifications.markRead.mutate(input as OutboxInput<"notifications.markRead">);
-    case "notifications.registerDevice":
-      return trpc.notifications.registerDevice.mutate(
-        input as OutboxInput<"notifications.registerDevice">,
-      );
+    case "notifications.registerDevice": {
+      // The token never lives in the outbox (it's a bearer capability): read
+      // it from SecureStore at send time and merge it into the mutation.
+      const token = await readPushToken();
+      if (!token) throw new Error("push token missing from secure storage; re-register");
+      return trpc.notifications.registerDevice.mutate({
+        ...(input as OutboxInput<"notifications.registerDevice">),
+        expoPushToken: token,
+      });
+    }
   }
 };
 

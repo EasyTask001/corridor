@@ -110,7 +110,11 @@ Because it is targeted at one recipient rather than fanned out, it goes through
 `notifyUser` in a service-role transaction rather than `notify_organization` —
 dispatched by the router _after_ its own transaction commits.
 
-Push tokens are treated as bearer capabilities: `push_tokens_for` (migration 0015) is `EXECUTE`-granted to `service_role` only, so no authenticated caller —
+Push tokens are treated as bearer capabilities: on the device the token is held
+in `expo-secure-store` (`push-token-store.ts`), never in the AsyncStorage-backed
+outbox — the outbox queues only `{ platform }` for `notifications.registerDevice`
+and `outbox-client.ts` reads the token back at send time. Server-side,
+`push_tokens_for` (migration 0015) is `EXECUTE`-granted to `service_role` only, so no authenticated caller —
 in this org or any other — can read another member's handset tokens. Reaching
 the service role while a user's RLS transaction is open would hold two pooled
 connections per request, so nothing pushes inline: the org fan-out enqueues a

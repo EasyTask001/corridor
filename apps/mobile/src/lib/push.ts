@@ -10,6 +10,7 @@ import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { devicePlatform } from "@corridor/domain";
 import { outbox } from "./outbox-client";
+import { savePushToken } from "./push-token-store";
 
 export type PushRegistration =
   { status: "registered"; token: string } | { status: "skipped"; reason: string };
@@ -53,12 +54,13 @@ export async function registerForPushNotifications(): Promise<PushRegistration> 
     const { data: token } = await Notifications.getExpoPushTokenAsync(
       id ? { projectId: id } : undefined,
     );
+    // The token is a bearer capability, so it goes into SecureStore, not the
+    // AsyncStorage-backed outbox — only `{ platform }` is queued, and
+    // `outbox-client.ts` reads the token back at send time.
+    await savePushToken(token);
     // Queued rather than called directly: a driver often starts the app with
     // no signal, and the registration should survive until they have one.
-    await outbox.submit("notifications.registerDevice", {
-      expoPushToken: token,
-      platform: platform.data,
-    });
+    await outbox.submit("notifications.registerDevice", { platform: platform.data });
     return { status: "registered", token };
   } catch (error) {
     return {
