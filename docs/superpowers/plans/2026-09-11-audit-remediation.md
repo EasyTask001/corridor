@@ -4,7 +4,7 @@
 
 **Goal:** Close every one of the 41 findings in `docs/AUDIT-2026-09-11.md` — 1 CRITICAL, 5 HIGH, 20 MEDIUM, 15 LOW — with a test per behavioural change, and record each finding's resolution in the audit doc.
 
-**Architecture:** Fixes land as one conventional commit per task, ordered CRITICAL → HIGH → MEDIUM → LOW. Three append-only migrations (`0041` org-scoped `claim_jobs`, `0042` search + port indexes, `0043` address columns) are each mirrored in Drizzle and proven by `verify:mirror`, which itself gains FK and reverse-index checks. Network calls move out of DB transactions following the existing `customs.decide` detached-handler shape. Every external-service change keeps the credential-less mock path working.
+**Architecture:** Fixes land as one conventional commit per task, ordered CRITICAL → HIGH → MEDIUM → LOW. Three append-only migrations (`0041` org-scoped `claim_jobs`, `0042` address columns, `0043` search + port indexes) are each mirrored in Drizzle and proven by `verify:mirror`, which itself gains FK and reverse-index checks. Network calls move out of DB transactions following the existing `customs.decide` detached-handler shape. Every external-service change keeps the credential-less mock path working.
 
 **Tech Stack:** pnpm 10 / turbo, TypeScript strict, Supabase Postgres migrations, Drizzle ORM 0.45, tRPC 11, Zod 4, Vitest 5 (`unit` + `integration` projects), React Testing Library (packages/ui), Next 16 (apps/web), Expo (apps/mobile), Vercel AI SDK 7, Stripe SDK.
 
@@ -1315,11 +1315,11 @@ git commit -m "fix(api): rate limiter falls back to the in-process window on sto
 
 ---
 
-### Task 10: Normalise the four jsonb address columns into real columns (ISSUE-010) — migration `0043`
+### Task 10: Normalise the four jsonb address columns into real columns (ISSUE-010) — migration `0042`
 
 **Files:**
-- Create: `supabase/migrations/0043_address_columns.sql`
-- Modify: `packages/db/src/schema/registry.ts:19, 59, 240-250`, `packages/db/src/schema/movements.ts:343-353`, `packages/db/src/schema/core.ts:2, 68`, `packages/db/src/schema/index.ts` (header comment → "0001–0043")
+- Create: `supabase/migrations/0042_address_columns.sql`
+- Modify: `packages/db/src/schema/registry.ts:19, 59, 240-250`, `packages/db/src/schema/movements.ts:343-353`, `packages/db/src/schema/core.ts:2, 68`, `packages/db/src/schema/index.ts` (header comment → "0001–0042")
 - Modify: `packages/domain/src/registry.ts` (after line 39), `packages/domain/src/shipment.ts:173-180` (drop the local `address` copy, import the shared one)
 - Modify: `packages/api/src/router/party.ts`, `packages/api/src/router/shipment.ts`, `packages/api/src/router/movement.ts:1090`, `packages/api/src/router/organization.ts:288-338`, `packages/api/src/services/shipments.ts`, `packages/api/src/services/movements.ts:401-408`, `packages/api/src/router/movement.test.ts:134`
 - Modify: `apps/web/src/app/(app)/shipments/[shipmentId]/page.tsx:33` (cast goes); all other web sites keep the nested shape and are unchanged
@@ -1397,7 +1397,7 @@ describe("nestAddress", () => {
 - [ ] **Step 3: Implement the helpers** in `packages/domain/src/registry.ts` after `export type Address = …` (line 39):
 
 ```ts
-/** The six parts of an address, in column order (0043). */
+/** The six parts of an address, in column order (0042). */
 export const ADDRESS_PARTS = ["line1", "line2", "city", "region", "postalCode", "country"] as const;
 export type AddressPart = (typeof ADDRESS_PARTS)[number];
 
@@ -1450,7 +1450,7 @@ In `packages/domain/src/shipment.ts:173-180` delete the local `address` object a
 - [ ] **Step 4: Write the failing DB integration test** — `packages/db/src/address-columns.integration.test.ts` (bootstrap copied from `registry.integration.test.ts`: `createDb`, `withServiceRole`, seeded `owner@pathfinder.demo` actor as `ownerA`, `rejection` helper from `jobs.integration.test.ts:67-76`):
 
 ```ts
-describe("0043 address columns", () => {
+describe("0042 address columns", () => {
   const TABLES = [
     ["partners", "address", "address"], ["shipments", "delivery", "delivery_address"],
     ["organizations", "billing", "billing_address"], ["drivers", "us_address", "us_address"],
@@ -1503,12 +1503,12 @@ describe("0043 address columns", () => {
 });
 ```
 
-(Partner/driver/org fixture names come from `packages/db/scripts/seed.ts:203-306`; confirm them there. File header must state: after `db reset` the seed writes the new columns directly, so the `->>` backfill is only exercised when 0043 is applied to an existing database; this test proves shape, constraint and seed round-trip.) RED: columns absent.
+(Partner/driver/org fixture names come from `packages/db/scripts/seed.ts:203-306`; confirm them there. File header must state: after `db reset` the seed writes the new columns directly, so the `->>` backfill is only exercised when 0042 is applied to an existing database; this test proves shape, constraint and seed round-trip.) RED: columns absent.
 
-- [ ] **Step 5: Write the migration** — `supabase/migrations/0043_address_columns.sql`. One block per table; the partners block in full, the other three identical with their prefix/source column:
+- [ ] **Step 5: Write the migration** — `supabase/migrations/0042_address_columns.sql`. One block per table; the partners block in full, the other three identical with their prefix/source column:
 
 ```sql
--- Corridor — 0043 postal addresses as columns (ISSUE-010)
+-- Corridor — 0042 postal addresses as columns (ISSUE-010)
 --
 -- Why columns, not a table: an address is one-to-one with its owner row
 -- (CONTRIBUTING → Schema design #2) and the application reads its parts by
@@ -1554,7 +1554,7 @@ alter table public.partners drop column address;
 
 - [ ] **Step 6: Mirror in Drizzle and update the seed**
 
-`registry.ts:59` → six `text("us_address_…")` columns (`usAddressLine1 … usAddressCountry`); `registry.ts:240-250` → `addressLine1 … addressCountry`; drop the now-unused `jsonb` import (line 8) and `Address` type import (line 19). `movements.ts:343-353` → `deliveryLine1 … deliveryCountry` (`jsonb` stays; other columns use it). `core.ts:68` → `billingLine1 … billingCountry`; drop the `Address` import (line 2). Each block gets a one-line `// 0043 — … as columns; the API nests them back as \`<key>\`.` comment. Check constraints are not mirrored (consistent with `drivers.gender` from 0020; `verify:mirror` compares columns, indexes and — after Task 5 — FKs).
+`registry.ts:59` → six `text("us_address_…")` columns (`usAddressLine1 … usAddressCountry`); `registry.ts:240-250` → `addressLine1 … addressCountry`; drop the now-unused `jsonb` import (line 8) and `Address` type import (line 19). `movements.ts:343-353` → `deliveryLine1 … deliveryCountry` (`jsonb` stays; other columns use it). `core.ts:68` → `billingLine1 … billingCountry`; drop the `Address` import (line 2). Each block gets a one-line `// 0042 — … as columns; the API nests them back as \`<key>\`.` comment. Check constraints are not mirrored (consistent with `drivers.gender` from 0020; `verify:mirror` compares columns, indexes and — after Task 5 — FKs).
 
 `packages/db/scripts/seed.ts`: drivers insert (`:203-217`) — replace `us_address` with the five columns `us_address_line1, us_address_city, us_address_region, us_address_postal_code, us_address_country`, the four `${sql.json({})}` become `null, null, null, null, null`, Delgado's json becomes `'2200 Michigan Ave', 'Detroit', 'MI', '48216', 'US'`. Partners insert (`:270-283`) — `address` → `address_line1, address_city, address_region, address_postal_code, address_country` with literals (e.g. `'400 Industrial Pkwy', 'Hamilton', 'ON', 'L8E 2W1', 'CA'`). `:306` — `billing_address = …` → `billing_line1 = '1 Corridor Way', billing_city = 'Mississauga', billing_region = 'ON', billing_postal_code = 'L5T 2M8', billing_country = 'CA'`.
 
@@ -1570,7 +1570,7 @@ type Presented<Row, A extends AddressKey | undefined> = A extends AddressKey
   ? Omit<Row, keyof AddressColumns<A>> & { [k in A]: Address } : Row;
 interface RegistryConfig<T extends PgTable, I extends z.ZodObject, A extends AddressKey | undefined = undefined> {
   /* existing fields */
-  /** 0043 — the nested address on the API shape; stored as `<key>_*` columns (the key doubles as the column prefix). */
+  /** 0042 — the nested address on the API shape; stored as `<key>_*` columns (the key doubles as the column prefix). */
   address?: A;
 }
 function registryRouter<T extends PgTable, I extends z.ZodObject, A extends AddressKey | undefined = undefined>(cfg: RegistryConfig<T, I, A>) {
@@ -1615,7 +1615,7 @@ const partnerAddressJson = (partnerId: typeof shipments.shipperId) =>
 - [ ] **Step 9: Commit**
 
 ```bash
-git add supabase/migrations/0043_address_columns.sql packages/db packages/domain packages/api apps/web/src/app/\(app\)/shipments
+git add supabase/migrations/0042_address_columns.sql packages/db packages/domain packages/api apps/web/src/app/\(app\)/shipments
 git commit -m "refactor(db,api): store postal addresses as columns instead of jsonb"
 ```
 
@@ -1718,10 +1718,10 @@ git commit -m "chore(db): lint migrations for security definer search_path regre
 
 ---
 
-### Task 12: Port-FK and search indexes — migration `0042` (ISSUE-012, ISSUE-027)
+### Task 12: Port-FK and search indexes — migration `0043` (ISSUE-012, ISSUE-027)
 
 **Files:**
-- Create: `supabase/migrations/0042_search_and_port_indexes.sql`
+- Create: `supabase/migrations/0043_search_and_port_indexes.sql`
 - Modify: `packages/db/src/schema/movements.ts` (shipments, movements), `inbond.ts` (in_bond_records), `registry.ts` (drivers, trucks)
 - Test: `packages/db/src/security-invariants.integration.test.ts` (new `it`)
 
@@ -1730,7 +1730,7 @@ git commit -m "chore(db): lint migrations for security definer search_path regre
 Add a second `it` to `packages/db/src/security-invariants.integration.test.ts` (same `postgres(url)` pattern):
 
 ```ts
-  it("every FK to ports and every ILIKE search column is indexed (0042)", async () => {
+  it("every FK to ports and every ILIKE search column is indexed (0043)", async () => {
     const sql = postgres(url, { max: 1 });
     try {
       const rows = await sql<{ indexname: string }[]>`
@@ -1753,7 +1753,7 @@ Add a second `it` to `packages/db/src/security-invariants.integration.test.ts` (
 
 ```sql
 -- =============================================================================
--- Corridor — 0042 port FK indexes + trigram indexes for the movement search
+-- Corridor — 0043 port FK indexes + trigram indexes for the movement search
 --
 -- ISSUE-012: the six `ports(id)` foreign keys on shipments / in_bond_records
 -- had no index (0019, 0026); `movements.port_id` (0018) was the only one that
@@ -1819,7 +1819,7 @@ Expected: all green; `verify:mirror` 0 problems. Optionally `psql -c "explain (a
 - [ ] **Step 6: Commit**
 
 ```bash
-git add supabase/migrations/0042_search_and_port_indexes.sql packages/db/src/schema/ packages/db/src/security-invariants.integration.test.ts
+git add supabase/migrations/0043_search_and_port_indexes.sql packages/db/src/schema/ packages/db/src/security-invariants.integration.test.ts
 git commit -m "perf(db): index port foreign keys and the movement search predicates"
 ```
 
