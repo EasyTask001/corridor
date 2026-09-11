@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { isoDateTime, nonEmpty, uuid } from "./common";
 import { carrierCode, countryCode, currency, hsCode, regime } from "./movement";
+import { address } from "./registry";
 
 // ---------------------------------------------------------------------------
 // Kinds
@@ -169,15 +170,6 @@ export const controlReference = z
   .trim()
   .toUpperCase()
   .regex(/^[A-Z0-9]{4,20}$/, "Control reference must be 4–20 letters or digits");
-
-const address = z.object({
-  line1: z.string().trim().max(160).optional(),
-  line2: z.string().trim().max(160).optional(),
-  city: z.string().trim().max(80).optional(),
-  region: z.string().trim().max(80).optional(),
-  postalCode: z.string().trim().max(20).optional(),
-  country: z.string().trim().max(2).optional(),
-});
 
 const shipmentCommon = {
   controlReference,

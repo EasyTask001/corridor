@@ -38,6 +38,53 @@ export const address = z.object({
 });
 export type Address = z.infer<typeof address>;
 
+/** The six parts of an address, in column order (0042). */
+export const ADDRESS_PARTS = ["line1", "line2", "city", "region", "postalCode", "country"] as const;
+export type AddressPart = (typeof ADDRESS_PARTS)[number];
+
+/** Flat column keys an address occupies on a row: `AddressColumns<"billing">` = { billingLine1, …, billingCountry }. */
+export type AddressColumns<P extends string> = { [K in AddressPart as `${P}${Capitalize<K>}`]: string | null };
+
+export function addressColumnKey<P extends string, K extends AddressPart>(prefix: P, part: K): `${P}${Capitalize<K>}` {
+  return `${prefix}${part.charAt(0).toUpperCase()}${part.slice(1)}` as `${P}${Capitalize<K>}`;
+}
+export function addressColumnKeys<P extends string>(prefix: P): Array<keyof AddressColumns<P>> {
+  return ADDRESS_PARTS.map((part) => addressColumnKey(prefix, part)) as Array<keyof AddressColumns<P>>;
+}
+
+/** Flatten an API address onto a row. Blanks → null; country trimmed + upper-cased for the `^[A-Z]{2}$` check; null/undefined clears every part. */
+export function addressToColumns<P extends string>(prefix: P, a: Address | null | undefined): AddressColumns<P> {
+  const out: Record<string, string | null> = {};
+  for (const part of ADDRESS_PARTS) {
+    const raw = a?.[part];
+    const value = typeof raw === "string" ? raw.trim() : "";
+    out[addressColumnKey(prefix, part)] = value === "" ? null : part === "country" ? value.toUpperCase() : value;
+  }
+  return out as AddressColumns<P>;
+}
+
+/** The inverse: null / blank columns are omitted, so an empty address is `{}`. */
+export function addressFromColumns<P extends string>(prefix: P, row: Partial<AddressColumns<P>>): Address {
+  const out: Address = {};
+  for (const part of ADDRESS_PARTS) {
+    const value = (row as Record<string, unknown>)[addressColumnKey(prefix, part)];
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed === "") continue;
+    out[part] = part === "country" ? trimmed.toUpperCase() : trimmed;
+  }
+  return out;
+}
+
+/** A row with its flat address columns replaced by one nested `key`: `nestAddress("billing", "billingAddress", org)`. */
+export function nestAddress<P extends string, K extends string, R extends AddressColumns<P>>(
+  prefix: P, key: K, row: R,
+): Omit<R, keyof AddressColumns<P>> & { [k in K]: Address } {
+  const rest: Record<string, unknown> = { ...row };
+  for (const k of addressColumnKeys(prefix)) delete rest[k as string];
+  return { ...rest, [key]: addressFromColumns(prefix, row) } as Omit<R, keyof AddressColumns<P>> & { [k in K]: Address };
+}
+
 // ---------------------------------------------------------------------------
 // Drivers
 // ---------------------------------------------------------------------------
