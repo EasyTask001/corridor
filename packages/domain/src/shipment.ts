@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { isoDateTime, nonEmpty, uuid } from "./common";
-import { carrierCode, countryCode, currency, hsCode, regime } from "./movement";
+import { carrierCode, countryCode, currency, hsCode, moneyAmount, regime } from "./movement";
 import { address } from "./registry";
 
 // ---------------------------------------------------------------------------
@@ -144,7 +144,7 @@ export const commodityInput = z.object({
   packagingType: z.string().trim().max(60).nullable().optional(),
   marksAndNumbers: z.string().trim().max(300).nullable().optional(),
   isConsolidated: z.boolean().default(false),
-  valueAmount: z.number().nonnegative().nullable().optional(),
+  valueAmount: moneyAmount.nullable().optional(),
   valueCurrency: currency.nullable().optional(),
   countryOfOrigin: countryCode.nullable().optional(),
   sourceDocumentId: uuid.nullable().optional(),

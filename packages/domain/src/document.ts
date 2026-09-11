@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { isoDate, isoDateTime, uuid } from "./common";
-import { countryCode, currency, hsCode } from "./movement";
+import { countryCode, currency, hsCode, moneyAmount } from "./movement";
 import { commodityInput, controlReference } from "./shipment";
 
 export const documentType = z.enum(["bol", "invoice", "rate_confirmation", "other"]);
@@ -42,7 +42,7 @@ export const extractedCargoLine = z.object({
   weightKg: z.number().positive().max(100_000).nullable(),
   pieceCount: z.number().int().positive().nullable(),
   packagingType: z.string().trim().max(60).nullable(),
-  valueAmount: z.number().nonnegative().nullable(),
+  valueAmount: moneyAmount.nullable(),
   valueCurrency: currency.nullable(),
   countryOfOrigin: countryCode.nullable(),
   confidence,
@@ -102,7 +102,7 @@ export const extractedDocument = z.object({
     .object({
       weightKg: z.number().nonnegative().nullable(),
       pieceCount: z.number().int().nonnegative().nullable(),
-      valueAmount: z.number().nonnegative().nullable(),
+      valueAmount: moneyAmount.nullable(),
       valueCurrency: currency.nullable(),
     })
     .nullable(),

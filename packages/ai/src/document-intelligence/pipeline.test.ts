@@ -172,6 +172,43 @@ describe("runExtractionPipeline", () => {
     expect(out.document.rateConfirmation).toBeNull();
   });
 
+  it("rounds AI-extracted money fields to cents before validation", async () => {
+    const raw = {
+      documentType: "bol",
+      documentNumber: null,
+      documentDate: null,
+      shipper: { name: "A Co", address: null, taxId: null, confidence: 0.9 },
+      consignee: { name: "B Inc", address: null, taxId: null, confidence: 0.9 },
+      broker: null,
+      cargo: [
+        {
+          commodityDescription: "Widgets",
+          hsCode: null,
+          weightKg: 100,
+          pieceCount: 2,
+          packagingType: null,
+          valueAmount: 12.345,
+          valueCurrency: "USD",
+          countryOfOrigin: null,
+          confidence: 0.9,
+        },
+      ],
+      rateConfirmation: null,
+      totals: { weightKg: 100, pieceCount: 2, valueAmount: 12.345, valueCurrency: "USD" },
+      notes: [],
+      confidence: 0.9,
+    };
+    const stub: Extractor = {
+      name: "stub",
+      extract: async () => ({ raw, model: "stub" }),
+    };
+    const out = await runExtractionPipeline(textDoc("irrelevant"), { extractor: stub });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.document.cargo[0]?.valueAmount).toBe(12.35);
+    expect(out.document.totals?.valueAmount).toBe(12.35);
+  });
+
   it("lowConfidenceFields handles empty cargo", () => {
     expect(
       lowConfidenceFields({ shipper: { confidence: 1 }, consignee: { confidence: 1 }, cargo: [] }),

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { moneyAmount } from "./movement";
 import {
   SHIPMENT_TRANSITIONS,
   canTransitionShipment,
@@ -83,6 +84,20 @@ describe("shipmentInput", () => {
       shipmentType: "in_bond",
     });
     expect("shipmentType" in parsed).toBe(false);
+  });
+});
+
+describe("moneyAmount", () => {
+  it("accepts cents-precision values up to numeric(14,2)", () => {
+    expect(moneyAmount.parse(0)).toBe(0);
+    expect(moneyAmount.parse(1234.56)).toBe(1234.56);
+    expect(moneyAmount.parse(999_999_999_999.99)).toBe(999_999_999_999.99);
+  });
+
+  it("rejects sub-cent precision, negatives and values the column cannot hold", () => {
+    expect(moneyAmount.safeParse(0.001).success).toBe(false);
+    expect(moneyAmount.safeParse(-1).success).toBe(false);
+    expect(moneyAmount.safeParse(1_000_000_000_000).success).toBe(false);
   });
 });
 

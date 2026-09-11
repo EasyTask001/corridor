@@ -6,7 +6,12 @@
  * with `extractedDocument` — a malformed model response is a failure the
  * reviewer sees, never a silently-accepted cargo row.
  */
-import { LOW_CONFIDENCE_THRESHOLD, extractedDocument, type DocumentType } from "@corridor/domain";
+import {
+  LOW_CONFIDENCE_THRESHOLD,
+  extractedDocument,
+  roundToCents,
+  type DocumentType,
+} from "@corridor/domain";
 import { classifyByHints } from "./classify";
 import { mockExtractor } from "./mock-extractor";
 import { createModelExtractor } from "./model-extractor";
@@ -24,6 +29,44 @@ export function selectExtractor(input: DocumentInput, opts: PipelineOptions = {}
   if (env.CORRIDOR_EXTRACTOR === "mock") return mockExtractor;
   if (/\.mock\./i.test(input.filename)) return mockExtractor;
   return createModelExtractor(env) ?? mockExtractor;
+}
+
+/**
+ * The model is told to return money but may emit 3+ decimal places; round
+ * `cargo[].valueAmount`, `totals.valueAmount` and `rateConfirmation.rateAmount`
+ * to cents before the domain schema validates the raw output, so the review
+ * form never sees a sub-cent value.
+ */
+function roundMoneyFields(raw: unknown): unknown {
+  if (raw === null || typeof raw !== "object") return raw;
+  const doc = raw as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...doc };
+
+  if (Array.isArray(doc.cargo)) {
+    out.cargo = doc.cargo.map((line) => {
+      if (line === null || typeof line !== "object") return line;
+      const l = line as Record<string, unknown>;
+      return typeof l.valueAmount === "number"
+        ? { ...l, valueAmount: roundToCents(l.valueAmount) }
+        : l;
+    });
+  }
+
+  if (doc.totals !== null && typeof doc.totals === "object") {
+    const totals = doc.totals as Record<string, unknown>;
+    if (typeof totals.valueAmount === "number") {
+      out.totals = { ...totals, valueAmount: roundToCents(totals.valueAmount) };
+    }
+  }
+
+  if (doc.rateConfirmation !== null && typeof doc.rateConfirmation === "object") {
+    const rc = doc.rateConfirmation as Record<string, unknown>;
+    if (typeof rc.rateAmount === "number") {
+      out.rateConfirmation = { ...rc, rateAmount: roundToCents(rc.rateAmount) };
+    }
+  }
+
+  return out;
 }
 
 /** Text we can hand the classifier; binary uploads (PDF/image) get filename cues only. */
@@ -87,7 +130,7 @@ export async function runExtractionPipeline(
     return { ok: false, model, error: e instanceof Error ? e.message : String(e) };
   }
 
-  const parsed = extractedDocument.safeParse(raw);
+  const parsed = extractedDocument.safeParse(roundMoneyFields(raw));
   if (!parsed.success) {
     return {
       ok: false,

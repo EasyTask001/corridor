@@ -203,6 +203,10 @@ export type MovementEvent = z.infer<typeof movementEventSchema>;
 // ---------------------------------------------------------------------------
 
 export const currency = z.enum(["USD", "CAD"]);
+/** Money as the DB stores it: numeric(14,2) — cents precision, non-negative, < 10^12. */
+export const moneyAmount = z.number().nonnegative().max(999_999_999_999.99).multipleOf(0.01);
+/** Round a raw (e.g. AI-extracted) amount to cents before it hits `moneyAmount`. */
+export const roundToCents = (n: number): number => Math.round(n * 100) / 100;
 export const hsCode = z
   .string()
   .trim()
