@@ -45,6 +45,7 @@ import {
 } from "@corridor/domain";
 import { mergeRouters, permissionProcedure, router } from "../trpc";
 import { writeAudit } from "../services/audit";
+import { mapDbError } from "../services/db-errors";
 import { exportTable } from "../services/reporting-export";
 import {
   findingsForDriver,
@@ -98,33 +99,6 @@ function exportCell(value: unknown): string | number | null {
   if (typeof value === "number") return value;
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
-}
-function mapDbError(e: unknown): never {
-  const cause = (e as { cause?: { code?: string; constraint_name?: string; constraint?: string } })
-    ?.cause;
-  const constraint = cause?.constraint_name ?? cause?.constraint ?? "";
-  if (cause?.code === "23505") {
-    const which = constraint.includes("vin")
-      ? "VIN"
-      : constraint.includes("document")
-        ? "document number"
-        : constraint.includes("license")
-          ? "license number"
-          : constraint.includes("plates")
-            ? "plate position"
-            : "unit number";
-    throw new TRPCError({
-      code: "CONFLICT",
-      message: `A record with this ${which} already exists`,
-    });
-  }
-  if (cause?.code === "23514") {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "A field failed validation" });
-  }
-  if (cause?.code === "23503" && constraint.includes("trailer_type")) {
-    throw new TRPCError({ code: "BAD_REQUEST", message: "Unknown equipment type code" });
-  }
-  throw e;
 }
 
 type PlateRow = Awaited<ReturnType<typeof platesFor>>[number];

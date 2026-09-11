@@ -16,6 +16,7 @@ import {
 } from "@corridor/domain";
 import { permissionProcedure, router, type OrgContext } from "../trpc";
 import { writeAudit } from "../services/audit";
+import { mapDbError } from "../services/db-errors";
 import {
   addInBondEvent,
   listInBondRecords,
@@ -110,11 +111,7 @@ export const inbondRouter = router({
             .set(set)
             .where(eq(inBondRecords.id, id))
             .returning()
-            .catch((e: unknown) => {
-              const cause = (e as { cause?: { code?: string; message?: string } })?.cause;
-              if (cause?.code === "P0001") throw new TRPCError({ code: "PRECONDITION_FAILED", message: cause.message ?? "Rejected" });
-              throw e;
-            });
+            .catch(mapDbError);
           await writeAudit(tx, ctx.orgId, "inbond.record_update", "in_bond_record", id, before, row!);
           return row!;
         }),
