@@ -74,6 +74,9 @@ export const drivers = pgTable(
       "gin",
       sql`to_tsvector('simple', ${t.firstName} || ' ' || ${t.lastName})`,
     ),
+    // 0034
+    index("drivers_first_name_trgm_idx").using("gin", t.firstName),
+    index("drivers_last_name_trgm_idx").using("gin", t.lastName),
     uniqueIndex("drivers_org_user_unique")
       .on(t.organizationId, t.userId)
       .where(sql`${t.userId} is not null`),
@@ -258,5 +261,9 @@ export const partners = pgTable(
     index("partners_org_created_idx").on(t.organizationId, t.createdAt.desc()),
     index("partners_org_type_idx").on(t.organizationId, t.type),
     index("partners_name_search_idx").using("gin", sql`to_tsvector('simple', ${t.name})`),
+    // 0034
+    index("partners_name_trgm_idx").using("gin", t.name),
+    /** 0031 — target for the composite keys on shipments. */
+    uniqueIndex("partners_id_organization_unique").on(t.id, t.organizationId),
   ],
 );

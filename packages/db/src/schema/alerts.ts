@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   date,
+  foreignKey,
   index,
   jsonb,
   pgTable,
@@ -22,10 +23,11 @@ export const complianceAlerts = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    movementId: uuid("movement_id").references(() => movements.id, { onDelete: "cascade" }),
-    driverId: uuid("driver_id").references(() => drivers.id, { onDelete: "cascade" }),
-    truckId: uuid("truck_id").references(() => trucks.id, { onDelete: "cascade" }),
-    trailerId: uuid("trailer_id").references(() => trailers.id, { onDelete: "cascade" }),
+    /** FKs are composite — see compliance_alerts_*_org_fkey below. */
+    movementId: uuid("movement_id"),
+    driverId: uuid("driver_id"),
+    truckId: uuid("truck_id"),
+    trailerId: uuid("trailer_id"),
     alertType: text("alert_type", {
       enum: ["document_expiry", "hold_prediction", "risk_flag", "missing_data", "hs_code_mismatch"],
     }).notNull(),
@@ -71,5 +73,30 @@ export const complianceAlerts = pgTable(
       .where(sql`${t.dedupeKey} is not null and ${t.status} in ('open','acknowledged')`),
     // 0011
     index("compliance_alerts_org_created_idx").on(t.organizationId, t.createdAt.desc()),
+    // 0031
+    index("compliance_alerts_org_driver_idx").on(t.organizationId, t.driverId),
+    index("compliance_alerts_org_movement_idx").on(t.organizationId, t.movementId),
+    index("compliance_alerts_org_trailer_idx").on(t.organizationId, t.trailerId),
+    index("compliance_alerts_org_truck_idx").on(t.organizationId, t.truckId),
+    foreignKey({
+      name: "compliance_alerts_driver_org_fkey",
+      columns: [t.driverId, t.organizationId],
+      foreignColumns: [drivers.id, drivers.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "compliance_alerts_movement_org_fkey",
+      columns: [t.movementId, t.organizationId],
+      foreignColumns: [movements.id, movements.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "compliance_alerts_trailer_org_fkey",
+      columns: [t.trailerId, t.organizationId],
+      foreignColumns: [trailers.id, trailers.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "compliance_alerts_truck_org_fkey",
+      columns: [t.truckId, t.organizationId],
+      foreignColumns: [trucks.id, trucks.organizationId],
+    }).onDelete("cascade"),
   ],
 );

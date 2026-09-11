@@ -1,5 +1,16 @@
 import { sql } from "drizzle-orm";
-import { bigint, index, jsonb, numeric, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import {
+  bigint,
+  foreignKey,
+  index,
+  jsonb,
+  numeric,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 import type { ExtractedDocument } from "@corridor/domain";
 import { authUsers, organizations } from "./core";
 import { movements } from "./movements";
@@ -13,7 +24,8 @@ export const sourceDocuments = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    movementId: uuid("movement_id").references(() => movements.id, { onDelete: "set null" }),
+    /** FK is composite — see source_documents_movement_org_fkey below. */
+    movementId: uuid("movement_id"),
     documentType: text("document_type", { enum: ["bol", "invoice", "rate_confirmation", "other"] })
       .notNull()
       .default("other"),
@@ -39,9 +51,8 @@ export const sourceDocuments = pgTable(
     extractionCompletedAt: timestamp("extraction_completed_at", { withTimezone: true }),
     reviewedBy: uuid("reviewed_by").references(() => authUsers.id, { onDelete: "set null" }),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
-    appliedMovementId: uuid("applied_movement_id").references(() => movements.id, {
-      onDelete: "set null",
-    }),
+    /** FK is composite — see source_documents_applied_movement_org_fkey below. */
+    appliedMovementId: uuid("applied_movement_id"),
     uploadedBy: uuid("uploaded_by").references(() => authUsers.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -52,6 +63,27 @@ export const sourceDocuments = pgTable(
     index("source_documents_movement_idx")
       .on(t.movementId)
       .where(sql`${t.movementId} is not null`),
+    // 0034
+    index("source_documents_filename_trgm_idx").using("gin", t.originalFilename),
+    // 0031
+    index("source_documents_org_applied_movement_idx")
+      .on(t.organizationId, t.appliedMovementId)
+      .where(sql`${t.appliedMovementId} is not null`),
+    index("source_documents_org_movement_idx")
+      .on(t.organizationId, t.movementId)
+      .where(sql`${t.movementId} is not null`),
+    /** 0031 — target for the composite keys on commodities and shipments. */
+    uniqueIndex("source_documents_id_organization_unique").on(t.id, t.organizationId),
+    foreignKey({
+      name: "source_documents_applied_movement_org_fkey",
+      columns: [t.appliedMovementId, t.organizationId],
+      foreignColumns: [movements.id, movements.organizationId],
+    }).onDelete("set null"),
+    foreignKey({
+      name: "source_documents_movement_org_fkey",
+      columns: [t.movementId, t.organizationId],
+      foreignColumns: [movements.id, movements.organizationId],
+    }).onDelete("set null"),
   ],
 );
 
@@ -73,7 +105,8 @@ export const generatedDocuments = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    movementId: uuid("movement_id").references(() => movements.id, { onDelete: "cascade" }),
+    /** FK is composite — see generated_documents_movement_org_fkey below. */
+    movementId: uuid("movement_id"),
     kind: text("kind", { enum: GENERATED_DOCUMENT_KINDS }).notNull(),
     storagePath: text("storage_path").notNull().unique(),
     contentType: text("content_type").notNull().default("application/pdf"),
@@ -88,5 +121,16 @@ export const generatedDocuments = pgTable(
     index("generated_documents_movement_idx")
       .on(t.movementId, t.createdAt.desc())
       .where(sql`${t.movementId} is not null`),
+    // 0031
+    index("generated_documents_org_movement_idx")
+      .on(t.organizationId, t.movementId)
+      .where(sql`${t.movementId} is not null`),
+    // 0031 — parent key, ready for a future composite FK onto this table.
+    uniqueIndex("generated_documents_id_organization_unique").on(t.id, t.organizationId),
+    foreignKey({
+      name: "generated_documents_movement_org_fkey",
+      columns: [t.movementId, t.organizationId],
+      foreignColumns: [movements.id, movements.organizationId],
+    }).onDelete("cascade"),
   ],
 );

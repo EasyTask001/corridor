@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -9,6 +10,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { organizations } from "./core";
@@ -64,7 +66,8 @@ export const integrationEvents = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    movementId: uuid("movement_id").references(() => movements.id, { onDelete: "set null" }),
+    /** FK is composite — see integration_events_movement_org_fkey below. */
+    movementId: uuid("movement_id"),
     provider: text("provider").notNull(),
     direction: text("direction", { enum: ["outbound", "inbound"] }).notNull(),
     operation: text("operation").notNull(),
@@ -85,6 +88,17 @@ export const integrationEvents = pgTable(
     index("integration_events_correlation_idx")
       .on(t.correlationId)
       .where(sql`${t.correlationId} is not null`),
+    // 0031
+    index("integration_events_org_movement_idx")
+      .on(t.organizationId, t.movementId)
+      .where(sql`${t.movementId} is not null`),
+    // 0031 — parent key, ready for a future composite FK onto this table.
+    uniqueIndex("integration_events_id_organization_unique").on(t.id, t.organizationId),
+    foreignKey({
+      name: "integration_events_movement_org_fkey",
+      columns: [t.movementId, t.organizationId],
+      foreignColumns: [movements.id, movements.organizationId],
+    }).onDelete("set null"),
   ],
 );
 
@@ -121,6 +135,10 @@ export const backgroundJobs = pgTable(
     index("background_jobs_lease_expiry_idx")
       .on(t.leaseExpiresAt)
       .where(sql`${t.status} = 'running' and ${t.leaseExpiresAt} is not null`),
+    // 0033 — was never mirrored; caught by verify:mirror's unmirrored-index check.
+    uniqueIndex("background_jobs_org_idempotency_unique")
+      .on(t.organizationId, t.idempotencyKey)
+      .where(sql`${t.idempotencyKey} is not null`),
   ],
 );
 
@@ -150,7 +168,8 @@ export const customsSubmissions = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    movementId: uuid("movement_id").references(() => movements.id, { onDelete: "cascade" }),
+    /** FK is composite — see customs_submissions_movement_org_fkey below. */
+    movementId: uuid("movement_id"),
     kind: text("kind", { enum: CUSTOMS_SUBMISSION_KINDS }).notNull(),
     provider: text("provider", { enum: ["cbp_ace", "cbsa_aci"] }).notNull(),
     mode: text("mode", { enum: ["mock", "gateway"] }).notNull(),
@@ -170,6 +189,17 @@ export const customsSubmissions = pgTable(
     index("customs_submissions_reference_idx")
       .on(t.referenceNumber)
       .where(sql`${t.referenceNumber} is not null`),
+    // 0031
+    index("customs_submissions_org_movement_idx")
+      .on(t.organizationId, t.movementId)
+      .where(sql`${t.movementId} is not null`),
+    // 0031 — parent key, ready for a future composite FK onto this table.
+    uniqueIndex("customs_submissions_id_organization_unique").on(t.id, t.organizationId),
+    foreignKey({
+      name: "customs_submissions_movement_org_fkey",
+      columns: [t.movementId, t.organizationId],
+      foreignColumns: [movements.id, movements.organizationId],
+    }).onDelete("cascade"),
   ],
 );
 

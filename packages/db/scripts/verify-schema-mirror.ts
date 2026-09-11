@@ -40,10 +40,16 @@ export async function verifySchemaMirror(url = DB_URL) {
   try {
     // indoption bit 0 carries DESC; attname is null for expression keys.
     const indexRows = await sql<
-      { index_name: string; column_name: string | null; ord: number; is_desc: boolean }[]
+      {
+        table_name: string;
+        index_name: string;
+        column_name: string | null;
+        ord: number;
+        is_desc: boolean;
+      }[]
     >`
-      select i.relname as index_name, a.attname as column_name, k.ord::int as ord,
-             (x.indoption[k.ord - 1] & 1) = 1 as is_desc
+      select t.relname as table_name, i.relname as index_name, a.attname as column_name,
+             k.ord::int as ord, (x.indoption[k.ord - 1] & 1) = 1 as is_desc
       from pg_index x
       join pg_class i on i.oid = x.indexrelid
       join pg_class t on t.oid = x.indrelid
@@ -52,10 +58,45 @@ export async function verifySchemaMirror(url = DB_URL) {
       left join pg_attribute a on a.attrelid = x.indrelid and a.attnum = k.attnum
       order by i.relname, k.ord`;
     const dbIndexes = new Map<string, string[]>();
+    const dbIndexesByTable = new Map<string, Set<string>>();
     for (const r of indexRows) {
       const key = `${r.column_name ?? "(expr)"}:${r.is_desc ? "desc" : "asc"}`;
       dbIndexes.set(r.index_name, [...(dbIndexes.get(r.index_name) ?? []), key]);
+      if (!dbIndexesByTable.has(r.table_name)) dbIndexesByTable.set(r.table_name, new Set());
+      if (!r.index_name.endsWith("_pkey")) dbIndexesByTable.get(r.table_name)!.add(r.index_name);
     }
+
+    const fkRows = await sql<
+      {
+        table_name: string;
+        conname: string;
+        cols: string[];
+        ref_table: string;
+        ref_cols: string[];
+        ondelete: string;
+      }[]
+    >`
+      select t.relname as table_name, c.conname,
+             array(select a.attname from unnest(c.conkey) with ordinality k(attnum, ord)
+                   join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum order by k.ord) as cols,
+             rt.relname as ref_table,
+             array(select a.attname from unnest(c.confkey) with ordinality k(attnum, ord)
+                   join pg_attribute a on a.attrelid = c.confrelid and a.attnum = k.attnum order by k.ord) as ref_cols,
+             c.confdeltype as ondelete
+      from pg_constraint c
+      join pg_class t on t.oid = c.conrelid
+      join pg_class rt on rt.oid = c.confrelid
+      join pg_namespace n on n.oid = t.relnamespace and n.nspname = 'public'
+      where c.contype = 'f'`;
+    const dbFks = new Map<string, (typeof fkRows)[number]>();
+    for (const r of fkRows) dbFks.set(`${r.table_name}.${[...r.cols].sort().join(",")}`, r);
+    const DELETE_ACTION: Record<string, string> = {
+      a: "no action",
+      r: "restrict",
+      c: "cascade",
+      n: "set null",
+      d: "set default",
+    };
 
     const columnRows = await sql<
       { table_name: string; column_name: string; data_type: string; is_nullable: string }[]
@@ -74,6 +115,8 @@ export async function verifySchemaMirror(url = DB_URL) {
 
     let tables = 0;
     let indexes = 0;
+    let fks = 0;
+    const seenTables = new Set<string>();
     for (const value of Object.values(schema)) {
       let table;
       try {
@@ -83,6 +126,7 @@ export async function verifySchemaMirror(url = DB_URL) {
       }
       if (table.schema && table.schema !== "public") continue;
       tables++;
+      seenTables.add(table.name);
 
       const columns = dbColumns.get(table.name);
       if (!columns) {
@@ -130,16 +174,56 @@ export async function verifySchemaMirror(url = DB_URL) {
           problems.push(`index ${name}: Drizzle [${expected}] vs DB [${actual}]`);
         }
       }
+
+      for (const fk of table.foreignKeys) {
+        fks++;
+        const ref = fk.reference();
+        const cols = ref.columns.map((c) => c.name);
+        const key = `${table.name}.${[...cols].sort().join(",")}`;
+        const label = `fk ${table.name}(${cols.join(",")})`;
+        const actual = dbFks.get(key);
+        if (!actual) {
+          problems.push(`${label}: missing from the database`);
+          continue;
+        }
+        const refCols = ref.foreignColumns.map((c) => c.name).join(",");
+        const refTable = getTableConfig(ref.foreignTable).name;
+        if (refTable !== actual.ref_table || refCols !== actual.ref_cols.join(","))
+          problems.push(`${label}: Drizzle -> ${refTable}(${refCols}) vs DB -> ${actual.ref_table}(${actual.ref_cols})`);
+        const expectedAction = fk.onDelete ?? "no action";
+        if (expectedAction !== DELETE_ACTION[actual.ondelete])
+          problems.push(`${label}: on delete Drizzle=${expectedAction} DB=${DELETE_ACTION[actual.ondelete]}`);
+        dbFks.delete(key);
+      }
+      const declared = new Set(table.indexes.map((i) => i.config.name!));
+      // Column-level `.unique()` backs a single-column unique index whose DB
+      // name (Postgres default `<table>_<col>_key`) never matches Drizzle's
+      // own default (`<table>_<col>_unique`) — match by column, not name,
+      // same as the FK check above.
+      const uniqueCols = new Set(
+        table.columns.filter((c) => (c as { isUnique?: boolean }).isUnique).map((c) => c.name),
+      );
+      for (const name of dbIndexesByTable.get(table.name) ?? []) {
+        if (declared.has(name) || name.endsWith("_pkey")) continue;
+        if (table.uniqueConstraints.some((u) => u.name === name)) continue;
+        const cols = dbIndexes.get(name) ?? [];
+        if (cols.length === 1 && uniqueCols.has(cols[0]!.split(":")[0]!)) continue;
+        problems.push(`index ${name}: exists in the database but not in the Drizzle mirror`);
+      }
     }
-    return { tables, indexes, problems };
+    for (const [key, row] of dbFks) {
+      if (seenTables.has(row.table_name))
+        problems.push(`fk ${key}: exists in the database but not in the Drizzle mirror`);
+    }
+    return { tables, indexes, fks, problems };
   } finally {
     await sql.end();
   }
 }
 
 verifySchemaMirror()
-  .then(({ tables, indexes, problems }) => {
-    console.log(`checked ${tables} tables and ${indexes} declared indexes`);
+  .then(({ tables, indexes, fks, problems }) => {
+    console.log(`checked ${tables} tables, ${indexes} declared indexes and ${fks} foreign keys`);
     if (problems.length === 0) {
       console.log("no drift");
       return;

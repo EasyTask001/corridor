@@ -1,5 +1,14 @@
 import { sql } from "drizzle-orm";
-import { index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import {
+  foreignKey,
+  index,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 import { authUsers, organizations } from "./core";
 import { shipments } from "./movements";
 import { ports } from "./reference";
@@ -38,6 +47,8 @@ export const externalShipments = pgTable(
   (t) => [
     index("external_shipments_organization_id_idx").on(t.organizationId),
     index("external_shipments_org_status_idx").on(t.organizationId, t.status),
+    /** 0031 — target for the composite key on in_bond_records. */
+    uniqueIndex("external_shipments_id_organization_unique").on(t.id, t.organizationId),
   ],
 );
 
@@ -51,10 +62,10 @@ export const inBondRecords = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    shipmentId: uuid("shipment_id").references(() => shipments.id, { onDelete: "cascade" }),
-    externalShipmentId: uuid("external_shipment_id").references(() => externalShipments.id, {
-      onDelete: "cascade",
-    }),
+    /** FK is composite — see in_bond_records_shipment_org_fkey below. */
+    shipmentId: uuid("shipment_id"),
+    /** FK is composite — see in_bond_records_external_shipment_org_fkey below. */
+    externalShipmentId: uuid("external_shipment_id"),
     bondNumber: text("bond_number"),
     entryType: text("entry_type", { enum: ["IT", "TE", "IE"] }).notNull(),
     arrivalPortId: uuid("arrival_port_id").references(() => ports.id),
@@ -78,6 +89,21 @@ export const inBondRecords = pgTable(
     index("in_bond_records_bond_idx")
       .on(t.bondNumber)
       .where(sql`${t.bondNumber} is not null`),
+    // 0031
+    index("in_bond_records_org_external_idx").on(t.organizationId, t.externalShipmentId),
+    index("in_bond_records_org_shipment_idx").on(t.organizationId, t.shipmentId),
+    /** 0031 — target for the composite key on in_bond_events. */
+    uniqueIndex("in_bond_records_id_organization_unique").on(t.id, t.organizationId),
+    foreignKey({
+      name: "in_bond_records_external_shipment_org_fkey",
+      columns: [t.externalShipmentId, t.organizationId],
+      foreignColumns: [externalShipments.id, externalShipments.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "in_bond_records_shipment_org_fkey",
+      columns: [t.shipmentId, t.organizationId],
+      foreignColumns: [shipments.id, shipments.organizationId],
+    }).onDelete("cascade"),
   ],
 );
 
@@ -91,9 +117,8 @@ export const inBondEvents = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    inBondRecordId: uuid("in_bond_record_id")
-      .notNull()
-      .references(() => inBondRecords.id, { onDelete: "cascade" }),
+    /** FK is composite — see in_bond_events_in_bond_record_org_fkey below. */
+    inBondRecordId: uuid("in_bond_record_id").notNull(),
     kind: text("kind", {
       enum: [
         "arrival_sent",
@@ -112,5 +137,14 @@ export const inBondEvents = pgTable(
   (t) => [
     index("in_bond_events_organization_id_idx").on(t.organizationId),
     index("in_bond_events_record_idx").on(t.inBondRecordId, t.occurredAt.desc()),
+    // 0031
+    index("in_bond_events_org_record_idx").on(t.organizationId, t.inBondRecordId),
+    // 0031 — parent key, ready for a future composite FK onto this table.
+    uniqueIndex("in_bond_events_id_organization_unique").on(t.id, t.organizationId),
+    foreignKey({
+      name: "in_bond_events_in_bond_record_org_fkey",
+      columns: [t.inBondRecordId, t.organizationId],
+      foreignColumns: [inBondRecords.id, inBondRecords.organizationId],
+    }).onDelete("cascade"),
   ],
 );

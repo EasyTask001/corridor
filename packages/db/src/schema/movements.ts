@@ -14,7 +14,6 @@ import {
   unique,
   uniqueIndex,
   uuid,
-  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import {
   ACE_SHIPMENT_TYPES,
@@ -76,7 +75,8 @@ export const movements = pgTable(
      * must not move if the org edits its codes later. */
     carrierCode: text("carrier_code"),
     scheduledCrossingAt: timestamp("scheduled_crossing_at", { withTimezone: true }),
-    truckId: uuid("truck_id").references(() => trucks.id, { onDelete: "restrict" }),
+    /** FK is composite — see movements_truck_org_fkey below. */
+    truckId: uuid("truck_id"),
     /** 0021 — "Empty Trailer" (ACE) / "Empty Trip" (ACI): no goods on board. */
     isEmpty: boolean("is_empty").notNull().default(false),
     // 0022 — manifest flags
@@ -110,6 +110,22 @@ export const movements = pgTable(
       .on(t.portId)
       .where(sql`${t.portId} is not null`),
     unique("movements_organization_id_movement_number_key").on(t.organizationId, t.movementNumber),
+    // 0034
+    index("movements_number_trgm_idx").using("gin", t.movementNumber),
+    // 0031
+    index("movements_org_truck_idx")
+      .on(t.organizationId, t.truckId)
+      .where(sql`${t.truckId} is not null`),
+    /** 0031 — target for the composite keys on movement_crew, movement_trailers,
+     * movement_events, movement_amendments, movement_suggestions, seals,
+     * integration_events, source_documents, shipments, customs_submissions,
+     * generated_documents. */
+    uniqueIndex("movements_id_organization_unique").on(t.id, t.organizationId),
+    foreignKey({
+      name: "movements_truck_org_fkey",
+      columns: [t.truckId, t.organizationId],
+      foreignColumns: [trucks.id, trucks.organizationId],
+    }).onDelete("restrict"),
   ],
 );
 
@@ -127,9 +143,8 @@ export const movementCrew = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    movementId: uuid("movement_id")
-      .notNull()
-      .references(() => movements.id, { onDelete: "cascade" }),
+    /** FK is composite — see movement_crew_movement_org_fkey below. */
+    movementId: uuid("movement_id").notNull(),
     /** FK is composite — see movement_crew_driver_id_fkey below. */
     driverId: uuid("driver_id").notNull(),
     role: text("role", { enum: CREW_ROLES }).notNull().default("crew_member"),
@@ -144,11 +159,18 @@ export const movementCrew = pgTable(
       .on(t.movementId)
       .where(sql`${t.role} = 'person_in_charge'`),
     unique("movement_crew_movement_id_driver_id_key").on(t.movementId, t.driverId),
+    // 0031
+    index("movement_crew_org_movement_idx").on(t.organizationId, t.movementId),
     foreignKey({
       name: "movement_crew_driver_id_fkey",
       columns: [t.driverId, t.organizationId],
       foreignColumns: [drivers.id, drivers.organizationId],
     }).onDelete("restrict"),
+    foreignKey({
+      name: "movement_crew_movement_org_fkey",
+      columns: [t.movementId, t.organizationId],
+      foreignColumns: [movements.id, movements.organizationId],
+    }).onDelete("cascade"),
   ],
 );
 
@@ -165,9 +187,8 @@ export const movementTrailers = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    movementId: uuid("movement_id")
-      .notNull()
-      .references(() => movements.id, { onDelete: "cascade" }),
+    /** FK is composite — see movement_trailers_movement_org_fkey below. */
+    movementId: uuid("movement_id").notNull(),
     /** FK is composite — see movement_trailers_trailer_id_fkey below. */
     trailerId: uuid("trailer_id").notNull(),
     position: integer("position").notNull().default(1),
@@ -178,11 +199,20 @@ export const movementTrailers = pgTable(
     index("movement_trailers_movement_idx").on(t.movementId, t.position),
     index("movement_trailers_trailer_idx").on(t.trailerId),
     unique("movement_trailers_movement_id_trailer_id_key").on(t.movementId, t.trailerId),
+    // 0031
+    index("movement_trailers_org_movement_idx").on(t.organizationId, t.movementId),
+    /** 0031 — target for the composite key on seals. */
+    uniqueIndex("movement_trailers_id_organization_unique").on(t.id, t.organizationId),
     foreignKey({
       name: "movement_trailers_trailer_id_fkey",
       columns: [t.trailerId, t.organizationId],
       foreignColumns: [trailers.id, trailers.organizationId],
     }).onDelete("restrict"),
+    foreignKey({
+      name: "movement_trailers_movement_org_fkey",
+      columns: [t.movementId, t.organizationId],
+      foreignColumns: [movements.id, movements.organizationId],
+    }).onDelete("cascade"),
   ],
 );
 
@@ -195,12 +225,10 @@ export const movementSuggestions = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    movementId: uuid("movement_id")
-      .notNull()
-      .references(() => movements.id, { onDelete: "cascade" }),
-    sourceMovementId: uuid("source_movement_id")
-      .notNull()
-      .references(() => movements.id, { onDelete: "cascade" }),
+    /** FK is composite — see movement_suggestions_movement_org_fkey below. */
+    movementId: uuid("movement_id").notNull(),
+    /** FK is composite — see movement_suggestions_source_movement_org_fkey below. */
+    sourceMovementId: uuid("source_movement_id").notNull(),
     score: numeric("score", { precision: 5, scale: 2, mode: "number" }).notNull(),
     reasons: text("reasons").array().notNull(),
     suggestedPayload: jsonb("suggested_payload").$type<MovementSuggestionPayload>().notNull(),
@@ -215,6 +243,21 @@ export const movementSuggestions = pgTable(
   (t) => [
     index("movement_suggestions_org_created_idx").on(t.organizationId, t.createdAt.desc()),
     index("movement_suggestions_movement_idx").on(t.movementId, t.createdAt.desc()),
+    // 0031
+    index("movement_suggestions_org_movement_idx").on(t.organizationId, t.movementId),
+    index("movement_suggestions_org_source_movement_idx").on(t.organizationId, t.sourceMovementId),
+    // 0031 — parent key, ready for a future composite FK onto this table.
+    uniqueIndex("movement_suggestions_id_organization_unique").on(t.id, t.organizationId),
+    foreignKey({
+      name: "movement_suggestions_movement_org_fkey",
+      columns: [t.movementId, t.organizationId],
+      foreignColumns: [movements.id, movements.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "movement_suggestions_source_movement_org_fkey",
+      columns: [t.sourceMovementId, t.organizationId],
+      foreignColumns: [movements.id, movements.organizationId],
+    }).onDelete("cascade"),
   ],
 );
 
@@ -224,16 +267,14 @@ export const movementEvents = pgTable(
     id: uuid("id")
       .primaryKey()
       .default(sql`gen_random_uuid()`),
-    movementId: uuid("movement_id")
-      .notNull()
-      .references(() => movements.id, { onDelete: "cascade" }),
+    /** FK is composite — see movement_events_movement_org_fkey below. */
+    movementId: uuid("movement_id").notNull(),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    /** 0019 — the shipment this row is about, when it is about one. */
-    shipmentId: uuid("shipment_id").references((): AnyPgColumn => shipments.id, {
-      onDelete: "set null",
-    }),
+    /** 0019 — the shipment this row is about, when it is about one.
+     * FK is composite — see movement_events_shipment_org_fkey below. */
+    shipmentId: uuid("shipment_id"),
     eventType: text("event_type", {
       enum: ["status_change", "amendment", "note", "customs_response", "ai_flag", "customs_event"],
     }).notNull(),
@@ -248,6 +289,23 @@ export const movementEvents = pgTable(
   (t) => [
     index("movement_events_movement_idx").on(t.movementId, t.occurredAt),
     index("movement_events_org_idx").on(t.organizationId, t.occurredAt.desc()),
+    // 0031
+    index("movement_events_org_movement_idx").on(t.organizationId, t.movementId),
+    index("movement_events_org_shipment_idx")
+      .on(t.organizationId, t.shipmentId)
+      .where(sql`${t.shipmentId} is not null`),
+    // 0031 — parent key, ready for a future composite FK onto this table.
+    uniqueIndex("movement_events_id_organization_unique").on(t.id, t.organizationId),
+    foreignKey({
+      name: "movement_events_movement_org_fkey",
+      columns: [t.movementId, t.organizationId],
+      foreignColumns: [movements.id, movements.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "movement_events_shipment_org_fkey",
+      columns: [t.shipmentId, t.organizationId],
+      foreignColumns: [shipments.id, shipments.organizationId],
+    }).onDelete("set null"),
   ],
 );
 
@@ -257,18 +315,16 @@ export const movementAmendments = pgTable(
     id: uuid("id")
       .primaryKey()
       .default(sql`gen_random_uuid()`),
-    movementId: uuid("movement_id")
-      .notNull()
-      .references(() => movements.id, { onDelete: "cascade" }),
+    /** FK is composite — see movement_amendments_movement_org_fkey below. */
+    movementId: uuid("movement_id").notNull(),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     amendmentNumber: integer("amendment_number").notNull(),
     reason: text("reason").notNull(),
-    /** 0022 — the shipment the amendment is about; null = the trip header. */
-    shipmentId: uuid("shipment_id").references((): AnyPgColumn => shipments.id, {
-      onDelete: "set null",
-    }),
+    /** 0022 — the shipment the amendment is about; null = the trip header.
+     * FK is composite — see movement_amendments_shipment_org_fkey below. */
+    shipmentId: uuid("shipment_id"),
     /** 0022 — CBSA ECCRD reason code, required on an ACI amendment (trigger). */
     reasonCode: text("reason_code", { enum: CBSA_AMENDMENT_REASON_CODE_VALUES }),
     diff: jsonb("diff")
@@ -293,6 +349,23 @@ export const movementAmendments = pgTable(
     index("movement_amendments_shipment_idx")
       .on(t.shipmentId)
       .where(sql`${t.shipmentId} is not null`),
+    // 0031
+    index("movement_amendments_org_movement_idx").on(t.organizationId, t.movementId),
+    index("movement_amendments_org_shipment_idx")
+      .on(t.organizationId, t.shipmentId)
+      .where(sql`${t.shipmentId} is not null`),
+    // 0031 — parent key, ready for a future composite FK onto this table.
+    uniqueIndex("movement_amendments_id_organization_unique").on(t.id, t.organizationId),
+    foreignKey({
+      name: "movement_amendments_movement_org_fkey",
+      columns: [t.movementId, t.organizationId],
+      foreignColumns: [movements.id, movements.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "movement_amendments_shipment_org_fkey",
+      columns: [t.shipmentId, t.organizationId],
+      foreignColumns: [shipments.id, shipments.organizationId],
+    }).onDelete("set null"),
   ],
 );
 
@@ -318,8 +391,9 @@ export const shipments = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     regime: text("regime", { enum: ["ACE", "ACI"] }).notNull(),
-    /** Null while the shipment is waiting to be put on a trip. */
-    movementId: uuid("movement_id").references(() => movements.id, { onDelete: "set null" }),
+    /** Null while the shipment is waiting to be put on a trip.
+     * FK is composite — see shipments_movement_org_fkey below. */
+    movementId: uuid("movement_id"),
     carrierCode: text("carrier_code").notNull(),
     shipmentType: text("shipment_type", { enum: ACE_SHIPMENT_TYPES }),
     cargoType: text("cargo_type", { enum: ACI_CARGO_TYPES }),
@@ -333,8 +407,10 @@ export const shipments = pgTable(
     inBondEntryType: text("in_bond_entry_type", { enum: ["IT", "TE", "IE"] }),
     inBondDestinationPortId: uuid("in_bond_destination_port_id").references(() => ports.id),
     inBondNumber: text("in_bond_number"),
-    shipperId: uuid("shipper_id").references(() => partners.id, { onDelete: "restrict" }),
-    consigneeId: uuid("consignee_id").references(() => partners.id, { onDelete: "restrict" }),
+    /** FK is composite — see shipments_shipper_org_fkey below. */
+    shipperId: uuid("shipper_id"),
+    /** FK is composite — see shipments_consignee_org_fkey below. */
+    consigneeId: uuid("consignee_id"),
     destinationPortId: uuid("destination_port_id").references(() => ports.id),
     sublocationPortId: uuid("sublocation_port_id").references(() => ports.id),
     loadingCountry: text("loading_country"),
@@ -357,13 +433,11 @@ export const shipments = pgTable(
     releasedAt: timestamp("released_at", { withTimezone: true }),
     arrivedAt: timestamp("arrived_at", { withTimezone: true }),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
-    /** 0028 — the CSV batch that created the row. */
-    importBatchId: uuid("import_batch_id").references((): AnyPgColumn => importBatches.id, {
-      onDelete: "set null",
-    }),
-    sourceDocumentId: uuid("source_document_id").references((): AnyPgColumn => sourceDocuments.id, {
-      onDelete: "set null",
-    }),
+    /** 0028 — the CSV batch that created the row.
+     * FK is composite — see shipments_import_batch_org_fkey below. */
+    importBatchId: uuid("import_batch_id"),
+    /** FK is composite — see shipments_source_document_org_fkey below. */
+    sourceDocumentId: uuid("source_document_id"),
     notes: text("notes"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -383,6 +457,52 @@ export const shipments = pgTable(
     index("shipments_import_batch_idx")
       .on(t.importBatchId)
       .where(sql`${t.importBatchId} is not null`),
+    // 0034
+    index("shipments_control_number_trgm_idx").using("gin", t.controlNumber),
+    // 0031
+    index("shipments_org_consignee_idx")
+      .on(t.organizationId, t.consigneeId)
+      .where(sql`${t.consigneeId} is not null`),
+    index("shipments_org_import_batch_idx")
+      .on(t.organizationId, t.importBatchId)
+      .where(sql`${t.importBatchId} is not null`),
+    index("shipments_org_movement_idx")
+      .on(t.organizationId, t.movementId)
+      .where(sql`${t.movementId} is not null`),
+    index("shipments_org_shipper_idx")
+      .on(t.organizationId, t.shipperId)
+      .where(sql`${t.shipperId} is not null`),
+    index("shipments_org_source_document_idx")
+      .on(t.organizationId, t.sourceDocumentId)
+      .where(sql`${t.sourceDocumentId} is not null`),
+    /** 0031 — target for the composite keys on commodities, movement_events,
+     * movement_amendments, in_bond_records, pars_rns_events. */
+    uniqueIndex("shipments_id_organization_unique").on(t.id, t.organizationId),
+    foreignKey({
+      name: "shipments_consignee_org_fkey",
+      columns: [t.consigneeId, t.organizationId],
+      foreignColumns: [partners.id, partners.organizationId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "shipments_import_batch_org_fkey",
+      columns: [t.importBatchId, t.organizationId],
+      foreignColumns: [importBatches.id, importBatches.organizationId],
+    }).onDelete("set null"),
+    foreignKey({
+      name: "shipments_movement_org_fkey",
+      columns: [t.movementId, t.organizationId],
+      foreignColumns: [movements.id, movements.organizationId],
+    }).onDelete("set null"),
+    foreignKey({
+      name: "shipments_shipper_org_fkey",
+      columns: [t.shipperId, t.organizationId],
+      foreignColumns: [partners.id, partners.organizationId],
+    }).onDelete("restrict"),
+    foreignKey({
+      name: "shipments_source_document_org_fkey",
+      columns: [t.sourceDocumentId, t.organizationId],
+      foreignColumns: [sourceDocuments.id, sourceDocuments.organizationId],
+    }).onDelete("set null"),
   ],
 );
 
@@ -393,9 +513,8 @@ export const commodities = pgTable(
     id: uuid("id")
       .primaryKey()
       .default(sql`gen_random_uuid()`),
-    shipmentId: uuid("shipment_id")
-      .notNull()
-      .references(() => shipments.id, { onDelete: "cascade" }),
+    /** FK is composite — see commodities_shipment_org_fkey below. */
+    shipmentId: uuid("shipment_id").notNull(),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -415,18 +534,16 @@ export const commodities = pgTable(
     valueAmount: numeric("value_amount", { precision: 14, scale: 2, mode: "number" }),
     valueCurrency: text("value_currency", { enum: ["USD", "CAD"] }),
     countryOfOrigin: text("country_of_origin"),
-    sourceDocumentId: uuid("source_document_id").references((): AnyPgColumn => sourceDocuments.id, {
-      onDelete: "set null",
-    }),
+    /** FK is composite — see commodities_source_document_org_fkey below. */
+    sourceDocumentId: uuid("source_document_id"),
     extractionConfidence: numeric("extraction_confidence", {
       precision: 4,
       scale: 3,
       mode: "number",
     }),
-    /** 0028 — the CSV batch that created the line. */
-    importBatchId: uuid("import_batch_id").references((): AnyPgColumn => importBatches.id, {
-      onDelete: "set null",
-    }),
+    /** 0028 — the CSV batch that created the line.
+     * FK is composite — see commodities_import_batch_org_fkey below. */
+    importBatchId: uuid("import_batch_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -441,6 +558,31 @@ export const commodities = pgTable(
     index("commodities_import_batch_idx")
       .on(t.importBatchId)
       .where(sql`${t.importBatchId} is not null`),
+    // 0031
+    index("commodities_org_import_batch_idx")
+      .on(t.organizationId, t.importBatchId)
+      .where(sql`${t.importBatchId} is not null`),
+    index("commodities_org_shipment_idx").on(t.organizationId, t.shipmentId),
+    index("commodities_org_source_document_idx")
+      .on(t.organizationId, t.sourceDocumentId)
+      .where(sql`${t.sourceDocumentId} is not null`),
+    /** 0031 — target for the composite key on commodity_hazmat. */
+    uniqueIndex("commodities_id_organization_unique").on(t.id, t.organizationId),
+    foreignKey({
+      name: "commodities_import_batch_org_fkey",
+      columns: [t.importBatchId, t.organizationId],
+      foreignColumns: [importBatches.id, importBatches.organizationId],
+    }).onDelete("set null"),
+    foreignKey({
+      name: "commodities_shipment_org_fkey",
+      columns: [t.shipmentId, t.organizationId],
+      foreignColumns: [shipments.id, shipments.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "commodities_source_document_org_fkey",
+      columns: [t.sourceDocumentId, t.organizationId],
+      foreignColumns: [sourceDocuments.id, sourceDocuments.organizationId],
+    }).onDelete("set null"),
   ],
 );
 
@@ -471,6 +613,8 @@ export const importBatches = pgTable(
   (t) => [
     index("import_batches_organization_id_idx").on(t.organizationId),
     index("import_batches_org_created_idx").on(t.organizationId, t.createdAt.desc()),
+    /** 0031 — target for the composite keys on commodities and shipments. */
+    uniqueIndex("import_batches_id_organization_unique").on(t.id, t.organizationId),
   ],
 );
 
@@ -484,9 +628,8 @@ export const commodityHazmat = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    commodityId: uuid("commodity_id")
-      .notNull()
-      .references(() => commodities.id, { onDelete: "cascade" }),
+    /** FK is composite — see commodity_hazmat_commodity_org_fkey below. */
+    commodityId: uuid("commodity_id").notNull(),
     position: integer("position").notNull(),
     unCode: text("un_code").notNull(),
     description: text("description"),
@@ -497,6 +640,15 @@ export const commodityHazmat = pgTable(
   (t) => [
     index("commodity_hazmat_organization_id_idx").on(t.organizationId),
     unique("commodity_hazmat_commodity_id_position_key").on(t.commodityId, t.position),
+    // 0031
+    index("commodity_hazmat_org_commodity_idx").on(t.organizationId, t.commodityId),
+    // 0031 — parent key, ready for a future composite FK onto this table.
+    uniqueIndex("commodity_hazmat_id_organization_unique").on(t.id, t.organizationId),
+    foreignKey({
+      name: "commodity_hazmat_commodity_org_fkey",
+      columns: [t.commodityId, t.organizationId],
+      foreignColumns: [commodities.id, commodities.organizationId],
+    }).onDelete("cascade"),
   ],
 );
 
@@ -506,16 +658,14 @@ export const seals = pgTable(
     id: uuid("id")
       .primaryKey()
       .default(sql`gen_random_uuid()`),
-    movementId: uuid("movement_id")
-      .notNull()
-      .references(() => movements.id, { onDelete: "cascade" }),
+    /** FK is composite — see seals_movement_org_fkey below. */
+    movementId: uuid("movement_id").notNull(),
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    /** 0021 — the trailer slot the seal is on; null = a seal on the truck. */
-    movementTrailerId: uuid("movement_trailer_id").references(() => movementTrailers.id, {
-      onDelete: "cascade",
-    }),
+    /** 0021 — the trailer slot the seal is on; null = a seal on the truck.
+     * FK is composite — see seals_movement_trailer_org_fkey below. */
+    movementTrailerId: uuid("movement_trailer_id"),
     sealNumber: text("seal_number").notNull(),
     sealType: text("seal_type"),
     appliedBy: text("applied_by"),
@@ -531,6 +681,21 @@ export const seals = pgTable(
     index("seals_movement_trailer_idx")
       .on(t.movementTrailerId)
       .where(sql`${t.movementTrailerId} is not null`),
+    // 0031
+    index("seals_org_movement_idx").on(t.organizationId, t.movementId),
+    index("seals_org_movement_trailer_idx").on(t.organizationId, t.movementTrailerId),
+    // 0031 — parent key, ready for a future composite FK onto this table.
+    uniqueIndex("seals_id_organization_unique").on(t.id, t.organizationId),
+    foreignKey({
+      name: "seals_movement_org_fkey",
+      columns: [t.movementId, t.organizationId],
+      foreignColumns: [movements.id, movements.organizationId],
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "seals_movement_trailer_org_fkey",
+      columns: [t.movementTrailerId, t.organizationId],
+      foreignColumns: [movementTrailers.id, movementTrailers.organizationId],
+    }).onDelete("cascade"),
   ],
 );
 
@@ -547,9 +712,8 @@ export const parsRnsEvents = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    shipmentId: uuid("shipment_id").references((): AnyPgColumn => shipments.id, {
-      onDelete: "set null",
-    }),
+    /** FK is composite — see pars_rns_events_shipment_org_fkey below. */
+    shipmentId: uuid("shipment_id"),
     parsNumber: text("pars_number").notNull(),
     releaseCode: text("release_code"),
     releasedAt: timestamp("released_at", { withTimezone: true }),
@@ -564,5 +728,16 @@ export const parsRnsEvents = pgTable(
     index("pars_rns_events_organization_id_idx").on(t.organizationId),
     index("pars_rns_events_org_received_idx").on(t.organizationId, t.receivedAt.desc()),
     index("pars_rns_events_pars_idx").on(t.parsNumber),
+    // 0031
+    index("pars_rns_events_org_shipment_idx")
+      .on(t.organizationId, t.shipmentId)
+      .where(sql`${t.shipmentId} is not null`),
+    // 0031 — parent key, ready for a future composite FK onto this table.
+    uniqueIndex("pars_rns_events_id_organization_unique").on(t.id, t.organizationId),
+    foreignKey({
+      name: "pars_rns_events_shipment_org_fkey",
+      columns: [t.shipmentId, t.organizationId],
+      foreignColumns: [shipments.id, shipments.organizationId],
+    }).onDelete("set null"),
   ],
 );

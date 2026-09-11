@@ -4,6 +4,7 @@ import {
   bigint,
   boolean,
   customType,
+  foreignKey,
   index,
   jsonb,
   pgSchema,
@@ -105,6 +106,8 @@ export const roles = pgTable(
     uniqueIndex("roles_organization_name_unique")
       .on(t.organizationId, sql`lower(${t.name})`)
       .where(sql`${t.organizationId} is not null`),
+    /** 0031 — target for the composite key on organization_members. */
+    uniqueIndex("roles_id_organization_unique").on(t.id, t.organizationId),
   ],
 );
 
@@ -136,9 +139,8 @@ export const organizationMembers = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     userId: uuid("user_id").references(() => authUsers.id, { onDelete: "cascade" }),
-    roleId: uuid("role_id")
-      .notNull()
-      .references(() => roles.id, { onDelete: "restrict" }),
+    /** FK is composite — see organization_members_role_org_fkey below. */
+    roleId: uuid("role_id").notNull(),
     status: text("status", { enum: ["invited", "active", "suspended"] })
       .notNull()
       .default("invited"),
@@ -160,6 +162,13 @@ export const organizationMembers = pgTable(
     uniqueIndex("organization_members_org_invite_email_unique")
       .on(t.organizationId, t.invitedEmail)
       .where(sql`${t.status} = 'invited'`),
+    // 0031
+    index("organization_members_org_role_idx").on(t.organizationId, t.roleId),
+    foreignKey({
+      name: "organization_members_role_org_fkey",
+      columns: [t.roleId, t.organizationId],
+      foreignColumns: [roles.id, roles.organizationId],
+    }).onDelete("restrict"),
   ],
 );
 
