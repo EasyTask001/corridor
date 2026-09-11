@@ -20,7 +20,7 @@ import {
   manifestFor,
   pollCustomsStatus,
 } from "./customs";
-import { applyCustomsDecision, loadFull, loadOrganization, requireMovement } from "./movements";
+import { applyCustomsDecision, loadFull, loadOrganization, lockMovement, requireMovement } from "./movements";
 import { recordUsage, reportPendingUsage } from "./usage";
 
 const { backgroundJobs, movements } = schema;
@@ -188,7 +188,11 @@ export const detachedJobHandlers: Partial<Record<JobType, DetachedHandler>> = {
         statusCode: 200, success: true, durationMs: 0,
         correlationId: typeof job.payload.correlationId === "string" ? job.payload.correlationId : null,
       });
-      const updated = await applyCustomsDecision(tx, { orgId, userId: null }, prepared.m, {
+      const current = await lockMovement(tx, orgId, movementId);
+      if (current.status !== prepared.m.status) {
+        return { skipped: true, reason: `movement moved to ${current.status} during the gateway call` };
+      }
+      const updated = await applyCustomsDecision(tx, { orgId, userId: null }, current, {
         decision: decision.decision, referenceNumber: decision.referenceNumber, message: decision.message,
         simulated: prepared.client.environment === "sandbox", raw: decision.raw,
         events: decision.events, shipments: decision.shipments,

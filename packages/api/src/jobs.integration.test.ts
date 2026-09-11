@@ -19,7 +19,7 @@ const DB_URL =
 
 const conn = createDb(DB_URL, { max: 4 });
 const db = conn.db;
-const { organizations, usageRecords } = schema;
+const { organizations, usageRecords, movements } = schema;
 
 const HOUR = 60 * 60 * 1000;
 const ago = (ms: number) => new Date(Date.now() - ms);
@@ -289,6 +289,36 @@ describe("processDueJobs scoped to one organization (integrations.jobs.runNow)",
       await withServiceRole(db, (tx) =>
         tx.delete(schema.backgroundJobs).where(inArray(schema.backgroundJobs.id, [a!.id, b!.id])),
       );
+    }
+  });
+});
+
+describe("applyTransition concurrency guard (ISSUE-028)", () => {
+  it("applyTransition refuses a stale snapshot", async () => {
+    const { applyTransition, requireMovement } = await import("./services/movements");
+    const [org] = await db
+      .insert(organizations)
+      .values({ name: `Guard Test ${Date.now()}` })
+      .returning({ id: organizations.id });
+    const ORG_A = org!.id;
+    try {
+      const [seeded] = await withServiceRole(db, (tx) =>
+        tx
+          .insert(movements)
+          .values({ organizationId: ORG_A, regime: "ACE", movementNumber: `GUARD-${Date.now()}` })
+          .returning({ id: movements.id }),
+      );
+      const seededDraftMovementId = seeded!.id;
+      const m = await withServiceRole(db, (tx) => requireMovement(tx, ORG_A, seededDraftMovementId));
+      // Someone else moves it first. (draft → sent is the first legal
+      // MOVEMENT_TRANSITIONS pair; "validated" is not a movement status.)
+      await withServiceRole(db, (tx) => applyTransition(tx, { orgId: ORG_A, userId: null }, m, "sent", "system"));
+      // The stale snapshot (still "draft") must not be applied over it.
+      await expect(
+        withServiceRole(db, (tx) => applyTransition(tx, { orgId: ORG_A, userId: null }, m, "sent", "system")),
+      ).rejects.toMatchObject({ code: "CONFLICT" });
+    } finally {
+      await db.delete(organizations).where(eq(organizations.id, ORG_A));
     }
   });
 });

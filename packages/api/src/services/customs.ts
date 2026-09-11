@@ -28,6 +28,7 @@ import {
   applyTransition,
   loadFull,
   loadOrganization,
+  lockMovement,
   markShipmentsSent,
   requireMovement,
   validationFor,
@@ -691,7 +692,7 @@ export async function applyPoll(
     await tx.update(integrationConfigs).set({ lastPolledAt: new Date() }).where(eq(integrationConfigs.id, config.id));
   }
   // Re-read under lock: the snapshot in `prepared.m` predates the network call (Task 3).
-  const current = await requireMovement(tx, orgId, m.id);
+  const current = await lockMovement(tx, orgId, m.id);
   if (current.status !== m.status) {
     return { status: current.status, changed: false, again: false, reason: "movement changed during poll" };
   }

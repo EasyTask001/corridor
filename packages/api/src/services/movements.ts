@@ -54,6 +54,20 @@ export async function requireMovement(tx: Tx, orgId: string, id: string) {
   return m;
 }
 
+type MovementRow = typeof movements.$inferSelect;
+
+/** `requireMovement` with a row lock, for the apply phase of a two-transaction flow. */
+export async function lockMovement(tx: Tx, orgId: string, id: string): Promise<MovementRow> {
+  const [row] = await tx
+    .select()
+    .from(movements)
+    .where(and(eq(movements.id, id), eq(movements.organizationId, orgId)))
+    .for("update")
+    .limit(1);
+  if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Movement not found" });
+  return row;
+}
+
 export async function addEvent(
   tx: Tx,
   actor: Actor,
@@ -260,8 +274,14 @@ export async function applyTransition(
   const [row] = await tx
     .update(movements)
     .set({ status: to, ...extra })
-    .where(eq(movements.id, m.id))
+    .where(and(eq(movements.id, m.id), eq(movements.status, from)))
     .returning();
+  if (!row) {
+    throw new TRPCError({
+      code: "CONFLICT",
+      message: `Movement changed while this action was in flight (expected ${from}) — reload and try again`,
+    });
+  }
   await addEvent(tx, actor, m.id, {
     eventType: "status_change",
     fromStatus: from,
