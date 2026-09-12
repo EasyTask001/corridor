@@ -1,0 +1,10 @@
+{
+  "data": "ACI_RESPONSE",
+  "companyKey": "c-9000-2bcd8ae5954e0c48",
+  "tripNumber": "ABCD260912001",
+  "cbsaDateTime": "2026-09-12 09:15:00",
+  "type": "REJECT",
+  "errorResponses": [
+    { "errorCode": "E100", "errorField": "shipment.consignee", "errorDescription": "Missing consignee name" }
+  ]
+}

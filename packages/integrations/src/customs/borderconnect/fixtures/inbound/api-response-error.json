@@ -1,0 +1,11 @@
+{
+  "data": "API_RESPONSE",
+  "companyKey": "c-9000-2bcd8ae5954e0c48",
+  "sendId": "SEND-0002",
+  "status": "DATA_ERROR",
+  "tripNumber": "ABCD260912001",
+  "errors": [
+    { "identifier": "shipments[0].consignee.name", "note": "required field is missing" },
+    { "identifier": "truck.vinNumber", "note": "invalid format" }
+  ]
+}

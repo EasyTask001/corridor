@@ -1,0 +1,14 @@
+{
+  "data": "ACE_RESPONSE",
+  "companyKey": "c-9000-2bcd8ae5954e0c48",
+  "tripNumber": "ABCD260912001",
+  "cbpDateTime": "2026-09-12 17:00:00",
+  "shipmentStatusList": [
+    {
+      "shipmentControlNumber": "1234PARS0001",
+      "code": "11",
+      "description": "Arrival reported",
+      "port": "0901"
+    }
+  ]
+}

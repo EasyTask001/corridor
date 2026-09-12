@@ -1,0 +1,10 @@
+{
+  "data": "ACE_RESPONSE",
+  "companyKey": "c-9000-2bcd8ae5954e0c48",
+  "tripNumber": "ABCD260912001",
+  "cbpDateTime": "2026-09-12 14:05:00",
+  "validationResponses": [
+    { "code": "E203", "description": "Shipment control number already on file" },
+    { "code": "E410", "description": "Missing shipper address" }
+  ]
+}

@@ -16,6 +16,14 @@ export const CUSTOMS_EVENT_CODES = [
   "held",
   "entered_and_released",
   "cancelled",
+  // BorderConnect-specific (task 6): CBSA ACI_NOTICE / API_RESPONSE vocabulary
+  // with no earlier gateway/mock equivalent.
+  "pars_matched",
+  "pars_not_matched",
+  "review_time_warning",
+  "csa_reported",
+  "import_error",
+  "entry_number_assigned",
 ] as const;
 export const customsEventCode = z.enum(CUSTOMS_EVENT_CODES);
 export type CustomsEventCode = z.infer<typeof customsEventCode>;
@@ -31,6 +39,12 @@ export const CUSTOMS_EVENT_LABELS: Record<CustomsEventCode, string> = {
   held: "Held for inspection",
   entered_and_released: "Entered and released",
   cancelled: "Cancelled",
+  pars_matched: "PARS matched",
+  pars_not_matched: "PARS not matched",
+  review_time_warning: "Insufficient review time",
+  csa_reported: "CSA reported",
+  import_error: "Import error",
+  entry_number_assigned: "Entry number assigned",
 };
 
 /** Payload of a `customs_event` timeline row. */

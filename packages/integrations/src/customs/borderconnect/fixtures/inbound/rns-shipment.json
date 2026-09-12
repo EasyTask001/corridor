@@ -1,0 +1,9 @@
+{
+  "data": "RNS_SHIPMENT",
+  "cargoControlNumber": "1234PARS0001",
+  "transactionNumber": "816-1234567-8",
+  "releaseCode": "R",
+  "releaseName": "Released",
+  "officeCode": "0901",
+  "cbpDateTime": "2026-09-12 11:00:00"
+}
