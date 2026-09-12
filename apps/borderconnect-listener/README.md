@@ -88,6 +88,20 @@ docker run --rm \
   corridor-borderconnect-listener
 ```
 
+## What's been verified live vs. what hasn't
+
+While self-reviewing this app locally (`pnpm --filter @corridor/borderconnect-listener
+deploy --legacy <dir>` then running the deployed folder directly with
+`tsx`), a throwaway invalid key genuinely reached
+`wss://borderconnect.com/api/sockets/{suffix}` and the app correctly parsed
+the real server's `ACCESS_DENIED_ERROR` frame and did not reconnect — so
+the endpoint path, the `deploy --legacy` packaging, and this app's
+access-denied handling are confirmed against the real server, not just the
+test's fake `WebSocket`. What is **not** verified live: a real key's
+`API_RESPONSE`/"Connected" ack shape, real inbound message frame shapes, and
+the polling-divergence question above — all of that needs real credentials,
+which this task doesn't have.
+
 ## Tests
 
 `pnpm --filter @corridor/borderconnect-listener test` runs `src/socket.test.ts`

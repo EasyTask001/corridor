@@ -12,12 +12,21 @@
 # the monorepo present), and the app still runs via `tsx` at container
 # runtime — `tsx` is a devDependency here specifically so it survives into
 # the deployed folder alongside the app's own devDependencies.
+#
+# `--legacy` is required: pnpm v10's default `deploy` needs
+# `inject-workspace-packages=true` in `.npmrc` (this repo has none, and
+# adding one repo-wide is out of scope for an undeployed app); `--legacy`
+# is pnpm's own documented fallback and was verified locally to produce a
+# working, runnable deploy folder (`pnpm --filter @corridor/borderconnect-listener
+# deploy --legacy <dir>`, then `node_modules/.bin/tsx src/index.ts` from
+# inside it — confirmed to actually reach BorderConnect's real socket
+# endpoint and parse its response).
 FROM node:22-alpine AS build
 WORKDIR /repo
 RUN corepack enable && corepack prepare pnpm@10.32.0 --activate
 COPY . .
 RUN pnpm install --frozen-lockfile
-RUN pnpm --filter @corridor/borderconnect-listener... deploy /deploy/listener
+RUN pnpm --filter @corridor/borderconnect-listener deploy --legacy /deploy/listener
 
 FROM node:22-alpine
 WORKDIR /app
