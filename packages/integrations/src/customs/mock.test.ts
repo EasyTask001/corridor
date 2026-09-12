@@ -10,6 +10,9 @@ const src: ManifestSource = {
     name: "Pathfinder",
     filerCode: "F01",
     usDotNumber: "1234567",
+    scacCode: "PFTR",
+    canadianCarrierCode: "1234567",
+    timezone: "America/Toronto",
   },
   movement: {
     regime: "ACE",
@@ -35,6 +38,7 @@ const src: ManifestSource = {
       licenseNumber: "L1",
       licenseJurisdiction: "ON",
       citizenship: "CA",
+      dateOfBirth: "1985-03-14",
       hazmatEndorsement: true,
       documents: [
         {
@@ -54,6 +58,7 @@ const src: ManifestSource = {
       licenseNumber: null,
       licenseJurisdiction: null,
       citizenship: "US",
+      dateOfBirth: "1990-07-02",
       hazmatEndorsement: false,
       documents: [],
     },
@@ -64,6 +69,7 @@ const src: ManifestSource = {
     plateNumber: "AB1",
     plateJurisdiction: "ON",
     dotNumber: "1234567",
+    truckType: "TR",
     insurancePolicyNumber: "POL-1",
     insuranceCompany: "Northbridge",
     insuranceAmount: 2000000,
@@ -99,6 +105,10 @@ const src: ManifestSource = {
       inBondEntryType: null,
       inBondDestinationPortCode: null,
       inBondNumber: null,
+      loadingCountry: "CA",
+      loadingProvince: "ON",
+      loadingCity: "Hamilton",
+      deliveryAddress: null,
       shipperName: "A",
       shipperAddress: { line1: "1 Mill Rd", city: "Hamilton", region: "ON", country: "CA" },
       consigneeName: "B",
@@ -110,6 +120,8 @@ const src: ManifestSource = {
           quantity: 2,
           quantityUnit: "Coil",
           weightKg: 100,
+          weightUnit: "KG",
+          packagingType: "Skid",
           marksAndNumbers: null,
           countryOfOrigin: "CA",
           valueAmount: 10,
@@ -163,8 +175,16 @@ describe("buildManifest", () => {
     expect(m.shipments[0]?.shipper).toEqual({
       name: "A",
       address: "1 Mill Rd, Hamilton, ON, CA",
+      postal: {
+        line1: "1 Mill Rd",
+        line2: null,
+        city: "Hamilton",
+        region: "ON",
+        postalCode: null,
+        country: "CA",
+      },
     });
-    expect(m.shipments[0]?.consignee).toEqual({ name: "B", address: null });
+    expect(m.shipments[0]?.consignee).toEqual({ name: "B", address: null, postal: null });
     expect(m.shipments[0]?.commodities[0]?.value).toEqual({ amount: 10, currency: "USD" });
     expect(m.shipments[0]?.commodities[0]?.hazmat).toEqual([
       { unCode: "UN1203", description: "Gasoline" },

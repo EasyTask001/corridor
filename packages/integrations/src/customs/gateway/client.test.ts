@@ -7,7 +7,15 @@ import { createFixtureTransport, createHttpTransport, type GatewayTransport } fr
 
 const manifest: ManifestPayload = {
   regime: "ACE",
-  carrier: { code: "PFTR", filerCode: null, usDotNumber: "1234567", name: "Pathfinder" },
+  carrier: {
+    code: "PFTR",
+    filerCode: null,
+    usDotNumber: "1234567",
+    name: "Pathfinder",
+    scac: "PFTR",
+    canadianCarrierCode: "1234567",
+    timezone: "America/Toronto",
+  },
   trip: {
     movementNumber: "ACE-26-00001",
     tripNumber: "TRIP-1",
@@ -24,6 +32,7 @@ const manifest: ManifestPayload = {
     plate: "AB1",
     plateJurisdiction: "ON",
     plates: [],
+    truckType: "TR",
     dotNumber: null,
     insurance: null,
     seals: [],
@@ -37,6 +46,8 @@ const manifest: ManifestPayload = {
       entryNumber: null,
       entryPort: null,
       inBond: null,
+      loading: { country: null, province: null, city: null },
+      delivery: null,
       shipper: null,
       consignee: null,
       commodities: [],

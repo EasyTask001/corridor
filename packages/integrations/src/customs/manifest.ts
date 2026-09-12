@@ -7,6 +7,9 @@ export interface ManifestSource {
     name: string;
     usDotNumber: string | null;
     filerCode: string | null;
+    scacCode: string | null;
+    canadianCarrierCode: string | null;
+    timezone: string;
   };
   movement: {
     regime: Regime;
@@ -31,6 +34,9 @@ export interface ManifestSource {
     licenseNumber: string | null;
     licenseJurisdiction: string | null;
     citizenship: string | null;
+    /** ISO date (YYYY-MM-DD) — drivers.date_of_birth is a Drizzle `date` column,
+     * which comes back as a plain string, not a `Date`. */
+    dateOfBirth: string | null;
     hazmatEndorsement: boolean;
     documents: Array<{
       documentType: DriverDocumentType;
@@ -46,6 +52,7 @@ export interface ManifestSource {
     plateNumber: string;
     plateJurisdiction: string;
     dotNumber: string | null;
+    truckType: string;
     insurancePolicyNumber: string | null;
     insuranceCompany: string | null;
     insuranceAmount: number | null;
@@ -72,6 +79,10 @@ export interface ManifestSource {
     inBondEntryType: string | null;
     inBondDestinationPortCode: string | null;
     inBondNumber: string | null;
+    loadingCountry: string | null;
+    loadingProvince: string | null;
+    loadingCity: string | null;
+    deliveryAddress: PostalAddress | null;
     shipperName: string | null;
     shipperAddress: PostalAddress | null;
     consigneeName: string | null;
@@ -82,6 +93,8 @@ export interface ManifestSource {
       quantity: number | null;
       quantityUnit: string | null;
       weightKg: number | null;
+      weightUnit: "KG" | "LB" | null;
+      packagingType: string | null;
       marksAndNumbers: string | null;
       countryOfOrigin: string | null;
       valueAmount: number | null;
@@ -121,8 +134,22 @@ function formatAddress(address: PostalAddress | null | undefined): string | null
   return parts.length > 0 ? parts.join(", ") : null;
 }
 
+/** The structured half of an address — same parts `formatAddress` prints as one line. */
+function postalOf(address: PostalAddress | null | undefined): ManifestParty["postal"] {
+  return address
+    ? {
+        line1: address.line1 ?? null,
+        line2: address.line2 ?? null,
+        city: address.city ?? null,
+        region: address.region ?? null,
+        postalCode: address.postalCode ?? null,
+        country: address.country ?? null,
+      }
+    : null;
+}
+
 const party = (name: string | null, address: PostalAddress | null): ManifestParty | null =>
-  name ? { name, address: formatAddress(address) } : null;
+  name ? { name, address: formatAddress(address), postal: postalOf(address) } : null;
 
 export function buildManifest(src: ManifestSource): ManifestPayload {
   if (!src.crew.some((c) => c.role === "person_in_charge"))
@@ -148,6 +175,9 @@ export function buildManifest(src: ManifestSource): ManifestPayload {
       filerCode: src.organization.filerCode,
       usDotNumber: src.organization.usDotNumber,
       name: src.organization.name,
+      scac: src.organization.scacCode,
+      canadianCarrierCode: src.organization.canadianCarrierCode,
+      timezone: src.organization.timezone,
     },
     trip: {
       movementNumber: src.movement.movementNumber,
@@ -172,6 +202,7 @@ export function buildManifest(src: ManifestSource): ManifestPayload {
       licenseNumber: c.licenseNumber,
       licenseJurisdiction: c.licenseJurisdiction,
       citizenship: c.citizenship,
+      dateOfBirth: c.dateOfBirth,
       hazmatEndorsement: c.hazmatEndorsement,
       documents: c.documents.map((d) => ({
         type: d.documentType,
@@ -187,6 +218,7 @@ export function buildManifest(src: ManifestSource): ManifestPayload {
       plate: src.truck.plateNumber,
       plateJurisdiction: src.truck.plateJurisdiction,
       plates: plates(src.truck.plates),
+      truckType: src.truck.truckType,
       dotNumber: src.truck.dotNumber,
       insurance:
         src.truck.insuranceCompany ||
@@ -223,6 +255,12 @@ export function buildManifest(src: ManifestSource): ManifestPayload {
             number: s.inBondNumber,
           }
         : null,
+      loading: {
+        country: s.loadingCountry,
+        province: s.loadingProvince,
+        city: s.loadingCity,
+      },
+      delivery: postalOf(s.deliveryAddress),
       shipper: party(s.shipperName, s.shipperAddress),
       consignee: party(s.consigneeName, s.consigneeAddress),
       commodities: s.commodities.map((c) => ({
@@ -231,6 +269,8 @@ export function buildManifest(src: ManifestSource): ManifestPayload {
         quantity: c.quantity,
         quantityUnit: c.quantityUnit,
         weightKg: c.weightKg,
+        weightUnit: c.weightUnit,
+        packagingType: c.packagingType,
         marksAndNumbers: c.marksAndNumbers,
         hazmat: c.hazmat.map((h) => ({ unCode: h.unCode, description: h.description })),
         countryOfOrigin: c.countryOfOrigin,
