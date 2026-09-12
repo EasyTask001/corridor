@@ -3,7 +3,6 @@ import { crossingReadiness, type CrossingReadinessInput, type ReadinessEvent } f
 
 const T0 = "2026-09-10T08:00:00Z";
 const T1 = "2026-09-10T09:00:00Z";
-const T2 = "2026-09-10T10:00:00Z";
 
 function aceShipment(overrides: Partial<CrossingReadinessInput["shipments"][number]> = {}) {
   return {
