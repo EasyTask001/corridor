@@ -21,6 +21,40 @@ importers:
         specifier: ^5.9.2
         version: 5.9.3
 
+  apps/borderconnect-listener:
+    dependencies:
+      '@corridor/api':
+        specifier: workspace:*
+        version: link:../../packages/api
+      '@corridor/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.3
+    devDependencies:
+      '@corridor/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@types/node':
+        specifier: ^22.18.0
+        version: 22.20.1
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
+      eslint:
+        specifier: ^9.35.0
+        version: 9.39.5(jiti@2.7.0)
+      tsx:
+        specifier: ^4.20.5
+        version: 4.23.13
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: ^5.0.0
+        version: 5.0.0(@opentelemetry/api@1.9.0)(@types/node@22.20.1)(jsdom@30.0.1(@noble/hashes@1.8.0))(vite@8.2.2(@types/node@22.20.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.0))
+
   apps/mobile:
     dependencies:
       '@corridor/api':
@@ -3215,6 +3249,9 @@ packages:
 
   '@types/stack-utils@2.0.3':
     resolution: {integrity: sha512-9aEbYZ3TbYMznPdcdr3SmIrLXwC/AKZXQeCf9Pgao5CKb8CyHuEX5jzWPTkvregvhRJHcpRO6BFoGW9ycaOkYw==}
+
+  '@types/ws@8.18.1':
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
   '@types/yargs-parser@21.0.3':
     resolution: {integrity: sha512-I4q9QU9MQv4oEOz4tAHJtNz1cwuLxn2F3xcc2iV5WdqLPpUnj30aUuxt1mAxYTG+oe8CZMV/+6rU4S4gRDzqtQ==}
@@ -9951,6 +9988,10 @@ snapshots:
       csstype: 3.2.3
 
   '@types/stack-utils@2.0.3': {}
+
+  '@types/ws@8.18.1':
+    dependencies:
+      '@types/node': 22.20.1
 
   '@types/yargs-parser@21.0.3': {}
 

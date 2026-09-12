@@ -26,18 +26,19 @@ services degrades to a deterministic local mock.
 
 ## Layout
 
-| Path                    | Purpose                                                                          |
-| ----------------------- | -------------------------------------------------------------------------------- |
-| `apps/web`              | Next.js App Router UI + tRPC endpoint                                            |
-| `apps/mobile`           | Expo driver app — same tRPC router over a Bearer token (`apps/mobile/README.md`) |
-| `packages/domain`       | Zod schemas, permission keys, movement state machine — shared with mobile        |
-| `packages/db`           | Drizzle schema + `withRls()` / `withServiceRole()` transaction helpers           |
-| `packages/auth`         | Session resolution (cookie **or** Bearer), permission helpers                    |
-| `packages/api`          | tRPC routers, context and services                                               |
-| `packages/ai`           | Provider resolver + extraction, copilot, reporting and predictive pipelines      |
-| `packages/integrations` | Stripe, customs gateways, SSO, tariff, email and Expo push clients               |
-| `packages/ui`           | shadcn-style component library + design tokens (`@corridor/ui`)                  |
-| `supabase/migrations`   | SQL source of truth for schema, RLS, functions                                   |
+| Path                          | Purpose                                                                                                                             |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/web`                    | Next.js App Router UI + tRPC endpoint                                                                                               |
+| `apps/mobile`                 | Expo driver app — same tRPC router over a Bearer token (`apps/mobile/README.md`)                                                    |
+| `apps/borderconnect-listener` | Standalone BorderConnect WebSocket listener — writes to `customs_inbox`; **not deployed** (`apps/borderconnect-listener/README.md`) |
+| `packages/domain`             | Zod schemas, permission keys, movement state machine — shared with mobile                                                           |
+| `packages/db`                 | Drizzle schema + `withRls()` / `withServiceRole()` transaction helpers                                                              |
+| `packages/auth`               | Session resolution (cookie **or** Bearer), permission helpers                                                                       |
+| `packages/api`                | tRPC routers, context and services                                                                                                  |
+| `packages/ai`                 | Provider resolver + extraction, copilot, reporting and predictive pipelines                                                         |
+| `packages/integrations`       | Stripe, customs gateways, SSO, tariff, email and Expo push clients                                                                  |
+| `packages/ui`                 | shadcn-style component library + design tokens (`@corridor/ui`)                                                                     |
+| `supabase/migrations`         | SQL source of truth for schema, RLS, functions                                                                                      |
 
 ## Principles
 

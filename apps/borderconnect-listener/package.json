@@ -1,0 +1,27 @@
+{
+  "name": "@corridor/borderconnect-listener",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@corridor/api": "workspace:*",
+    "@corridor/db": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@corridor/config": "workspace:*",
+    "@types/node": "^22.18.0",
+    "@types/ws": "^8.5.13",
+    "eslint": "^9.35.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^5.0.0"
+  }
+}
