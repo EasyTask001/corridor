@@ -203,10 +203,13 @@ export const movementRouter = router({
                * `rejected` are always `blocked`; `accepted`/`released` are
                * `ready` when every attached shipment already clears the
                * regime's own gate — ACE: has an entry number; ACI: has a
-               * `pars_rns_events` row — and `pending` otherwise; any other
-               * status (draft/sent/arrived/cancelled) is `null` (no readiness
-               * opinion). A movement with zero shipments has no shipment
-               * failing either `not exists` check, so it reads `ready` once
+               * `pars_rns_events` row (PARS shipments only — a non-PARS
+               * shipment never gets one, mirroring `rnsReleaseCheck`'s own
+               * `isPars` filter in readiness.ts) — and `pending` otherwise;
+               * any other status (draft/sent/arrived/cancelled) is `null`
+               * (no readiness opinion). A movement with zero shipments (or,
+               * for ACI, zero PARS shipments) has no shipment failing either
+               * `not exists` check, so it reads `ready` once
                * accepted/released — the same outcome `crossingReadiness()`
                * gives an empty trip, which only carries the `manifest` and
                * `rejects` checks (see readiness.ts). The panel on the
@@ -227,6 +230,7 @@ export const movementRouter = router({
                         case when not exists (
                           select 1 from public.shipments s
                           where s.movement_id = ${movements.id}
+                            and s.is_pars
                             and not exists (
                               select 1 from public.pars_rns_events e where e.shipment_id = s.id
                             )
