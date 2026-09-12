@@ -215,7 +215,7 @@ describe("parseInbound — RNS_SHIPMENT and SYSTEM_ALERT", () => {
     if (msg.kind !== "rns") throw new Error("wrong kind");
     expect(msg.cargoControlNumber).toBe(CCN);
     expect(msg.transactionNumber).toBe("816-1234567-8");
-    expect(msg.releaseCode).toBe("R");
+    expect(msg.releaseCode).toBe("4");
     expect(msg.releaseName).toBe("Released");
     expect(msg.officeCode).toBe("0901");
     expect(msg.releasedAt).toBe("2026-09-12T11:00:00.000Z");

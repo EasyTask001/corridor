@@ -412,15 +412,32 @@ function parseAciNotice(d: Record<string, unknown>): BorderConnectInbound {
 // RNS_SHIPMENT / SYSTEM_ALERT
 // ---------------------------------------------------------------------------
 
+/**
+ * RNS_SHIPMENT's release code, office and timestamp are nested — confirmed
+ * against the RNS Shipment JSON Reference Manual
+ * (`.../emanifest-api/manual/rns-shipment-json-reference.pdf`, sections
+ * 1.7/1.11): `rnsShipment.releaseOffice.number`, `rnsShipment.status.
+ * releaseCode.{number,shortName}` and `rnsShipment.status.dateTime` — not
+ * the flat `d.officeCode`/`d.releaseCode`/`d.releaseName` this used to read
+ * (which never matched a real message, and `occurredAt(d)`'s top-level
+ * `cbpDateTime`/`cbsaDateTime`/`dateTime` check never finds RNS's
+ * `status.dateTime` either, so it silently fell back to "now"). `obj()`
+ * never throws on a missing/malformed `status`/`releaseOffice`, matching
+ * this file's never-throws guarantee for the rest of Task 6's parser.
+ */
 function parseRnsShipment(d: Record<string, unknown>): BorderConnectInbound {
+  const status = obj(d.status);
+  const releaseCode = obj(status.releaseCode);
+  const releaseOffice = obj(d.releaseOffice);
+  const dateTime = str(status.dateTime);
   return {
     kind: "rns",
     cargoControlNumber: str(d.cargoControlNumber) ?? "",
     transactionNumber: str(d.transactionNumber),
-    releaseCode: str(d.releaseCode),
-    releaseName: str(d.releaseName),
-    releasedAt: occurredAt(d),
-    officeCode: str(d.officeCode),
+    releaseCode: str(releaseCode.number),
+    releaseName: str(releaseCode.shortName),
+    releasedAt: dateTime ? toIso(dateTime) : new Date().toISOString(),
+    officeCode: str(releaseOffice.number),
     raw: d,
   };
 }

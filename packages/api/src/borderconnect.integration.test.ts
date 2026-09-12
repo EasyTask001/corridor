@@ -425,14 +425,18 @@ describe("RNS releases and SYSTEM_ALERT notices (Task 11)", () => {
   });
 
   it("routes an RNS release for a PARS shipment: pars_rns_events row, shipment released, a released customs_event on the movement", async () => {
+    // Real BorderConnect wire shape (RNS Shipment JSON Reference Manual,
+    // sections 1.7/1.11): releaseOffice and the release code/timestamp are
+    // nested under `status`, not flat top-level fields.
     const rnsMessage = {
       data: "RNS_SHIPMENT",
       cargoControlNumber: rnsControlNumber,
       transactionNumber: "73423483212345",
-      releaseCode: "4",
-      releaseName: "Released",
-      officeCode: "0470",
-      dateTime: "2026-09-12 10:00:00",
+      releaseOffice: { number: "0470", name: "Test Office" },
+      status: {
+        dateTime: "2026-09-12 10:00:00",
+        releaseCode: { number: "4", shortName: "Released", longName: "Goods Released" },
+      },
     };
 
     const result = await drainBorderConnectInbox(db, { transport: fakeTransport([rnsMessage]) });
@@ -481,10 +485,11 @@ describe("RNS releases and SYSTEM_ALERT notices (Task 11)", () => {
       data: "RNS_SHIPMENT",
       cargoControlNumber: unknownCcn,
       transactionNumber: "00000000000000",
-      releaseCode: "4",
-      releaseName: "Released",
-      officeCode: "0470",
-      dateTime: "2026-09-12 10:00:00",
+      releaseOffice: { number: "0470", name: "Test Office" },
+      status: {
+        dateTime: "2026-09-12 10:00:00",
+        releaseCode: { number: "4", shortName: "Released", longName: "Goods Released" },
+      },
     };
 
     const result = await drainBorderConnectInbox(db, { transport: fakeTransport([rnsMessage]) });
