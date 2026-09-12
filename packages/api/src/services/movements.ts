@@ -111,6 +111,32 @@ const SHIPMENT_STAMP: Partial<
 };
 
 /**
+ * Move one shipment's status forward through its own state machine (the
+ * single-shipment version of the per-step loop in `applyShipmentOutcomes`),
+ * stamping the same lifecycle timestamp column that loop stamps
+ * (`SHIPMENT_STAMP`). Used by callers with no movement-wide decision to
+ * cascade (e.g. a BorderConnect RNS release naming one PARS shipment
+ * directly) — returns the status actually applied, or `null` if the
+ * shipment's current status doesn't allow moving to `target` (the caller's
+ * write is skipped, matching how a cascade silently no-ops for a shipment
+ * already past the target state).
+ */
+export async function stampShipmentStatus(
+  tx: Tx,
+  shipmentId: string,
+  current: ShipmentStatus,
+  target: ShipmentStatus,
+): Promise<ShipmentStatus | null> {
+  const next = cascadedShipmentStatus(current, target);
+  if (!next) return null;
+  const set: Partial<typeof shipments.$inferInsert> = { status: next };
+  const stamp = SHIPMENT_STAMP[next];
+  if (stamp) set[stamp] = new Date();
+  await tx.update(shipments).set(set).where(eq(shipments.id, shipmentId));
+  return next;
+}
+
+/**
  * Record the provider-agnostic, decision-independent part of a customs
  * message: every event becomes a `customs_event` timeline row (linked to its
  * shipment when it names one, and fed to the PARS RNS feed when it carries

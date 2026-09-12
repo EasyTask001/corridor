@@ -10,17 +10,18 @@
  * interpreting any of it (so a bug in routing can never lose a message —
  * only delay it), then route and apply each unprocessed row.
  *
- * `alert`/`rns` messages (`SYSTEM_ALERT`/`RNS_SHIPMENT`) belong to no
- * tenant and are recognized-but-left-untouched here (Task 11 owns them):
- * `processed_at` stays null so a later drain — or Task 11's own logic —
- * can still find them, rather than this task guessing at handling and
- * silently marking them done.
+ * `alert` (`SYSTEM_ALERT`) and `rns` (`RNS_SHIPMENT`) messages belong to no
+ * single tenant — an alert fans out to every org (`recordCarrierNotices`,
+ * shared with `syncCarrierNotices`'s own carrier-notice sync), and an RNS
+ * release is routed by `shipments.control_number` across every org (there is
+ * no companyKey on RNS_SHIPMENT — see `findShipmentsForRns` below).
  */
 import { createHash } from "node:crypto";
 import {
   and,
   desc,
   eq,
+  inArray,
   isNotNull,
   isNull,
   schema,
@@ -33,14 +34,18 @@ import {
   createBorderConnectHttpTransport,
   createFixtureBorderConnectTransport,
   inboundKeys,
+  isAciReleaseCode,
   parseInbound,
   type BorderConnectInbound,
   type BorderConnectTransport,
+  type CarrierNotice,
 } from "@corridor/integrations";
 import { applyStatusMessage, logIntegrationEvent } from "./customs";
-import { lockMovement, requireMovement } from "./movements";
+import { lockMovement, recordCustomsEvents, requireMovement, stampShipmentStatus } from "./movements";
+import { recordCarrierNotices } from "./notices";
 
-const { customsInbox, customsSubmissions, organizations, shipments } = schema;
+const { customsInbox, customsSubmissions, movements, organizations, parsRnsEvents, shipments } =
+  schema;
 
 type CustomsInboxRow = typeof customsInbox.$inferSelect;
 type CustomsSubmissionRow = typeof customsSubmissions.$inferSelect;
@@ -226,6 +231,51 @@ async function findSubmissionForCustomsStatus(
   return null;
 }
 
+/**
+ * RNS routing (Task 11): `RNS_SHIPMENT` carries no companyKey — CBSA's
+ * Release Notification System has no concept of a filing "company account",
+ * only the PARS cargo control number — and `shipments.control_number` is
+ * unique only per organization
+ * (`shipments_organization_id_control_number_key`), so this must search
+ * across every org rather than assume one. If the CCN happens to collide
+ * across two different orgs' shipments (their own carrier codes/references
+ * would have to coincide, extremely unlikely but not schema-impossible),
+ * narrowing to the ACI movements still `sent`/`accepted`/`held` resolves it
+ * in the realistic case — a shipment whose movement is done (`released`,
+ * `rejected`, `cancelled`, `arrived`) or has none yet is not a plausible
+ * target for a fresh release notice. Only when exactly one candidate
+ * remains is the message routed at all.
+ */
+async function findShipmentsForRns(tx: RlsTransaction, cargoControlNumber: string) {
+  const candidates = await tx
+    .select({
+      id: shipments.id,
+      organizationId: shipments.organizationId,
+      movementId: shipments.movementId,
+      status: shipments.status,
+    })
+    .from(shipments)
+    .where(eq(shipments.controlNumber, cargoControlNumber));
+
+  if (candidates.length <= 1) return candidates;
+
+  const movementIds = [...new Set(candidates.map((c) => c.movementId).filter((id): id is string => !!id))];
+  const eligible = movementIds.length
+    ? await tx
+        .select({ id: movements.id })
+        .from(movements)
+        .where(
+          and(
+            inArray(movements.id, movementIds),
+            eq(movements.regime, "ACI"),
+            inArray(movements.status, ["sent", "accepted", "held"]),
+          ),
+        )
+    : [];
+  const eligibleIds = new Set(eligible.map((m) => m.id));
+  return candidates.filter((c) => c.movementId && eligibleIds.has(c.movementId));
+}
+
 type ProcessOutcome = {
   outcome: "applied" | "acknowledged" | "unroutable" | "ignored" | "rns" | "alert";
   detail?: string;
@@ -257,9 +307,95 @@ export async function processInboxRow(db: DatabaseClient, rowId: number): Promis
 
       const parsed = parseInbound(row.payload);
 
-      // Task 11 owns these two kinds — recognized here, left untouched.
-      if (parsed.kind === "rns") return { outcome: "rns" };
-      if (parsed.kind === "alert") return { outcome: "alert" };
+      if (parsed.kind === "rns") {
+        const candidates = await findShipmentsForRns(tx, parsed.cargoControlNumber);
+        if (candidates.length !== 1) {
+          const error =
+            candidates.length === 0
+              ? "unknown CCN"
+              : `ambiguous CCN (${candidates.length} candidates)`;
+          await markRow(tx, rowId, { processedAt: new Date(), processingError: error });
+          return { outcome: "unroutable", detail: error };
+        }
+        const shipment = candidates[0]!;
+        const releasedAt = new Date(parsed.releasedAt);
+
+        // Always logged to the PARS RNS feed (0027), regardless of whether
+        // this particular code denotes a release — same column shape
+        // `recordCustomsEvents` writes for a decision that carries RNS
+        // fields (movements.ts).
+        await tx.insert(parsRnsEvents).values({
+          organizationId: shipment.organizationId,
+          shipmentId: shipment.id,
+          parsNumber: parsed.cargoControlNumber,
+          releaseCode: parsed.releaseCode,
+          releasedAt,
+          officeCode: parsed.officeCode,
+          transactionNumber: parsed.transactionNumber,
+          raw: parsed.raw,
+        });
+
+        if (isAciReleaseCode(parsed.releaseCode)) {
+          await stampShipmentStatus(tx, shipment.id, shipment.status, "released");
+          if (shipment.movementId) {
+            const m = await lockMovement(tx, shipment.organizationId, shipment.movementId);
+            await recordCustomsEvents(
+              tx,
+              { orgId: shipment.organizationId, userId: null },
+              m,
+              [
+                {
+                  code: "released",
+                  label: CUSTOMS_EVENT_LABELS.released,
+                  occurredAt: releasedAt.toISOString(),
+                  entryPortCode: parsed.officeCode,
+                  // Deliberately not set: `recordCustomsEvents` would itself
+                  // insert a second, duplicate `pars_rns_events` row keyed off
+                  // `raw.rns === true` + a matching shipmentControlNumber —
+                  // the audit row above is already that insert.
+                  shipmentControlNumber: null,
+                  raw: {
+                    rns: true,
+                    releaseCode: parsed.releaseCode,
+                    officeCode: parsed.officeCode,
+                    transactionNumber: parsed.transactionNumber,
+                    cargoControlNumber: parsed.cargoControlNumber,
+                  },
+                },
+              ],
+              [],
+            );
+          }
+        }
+
+        await markRow(tx, rowId, {
+          organizationId: shipment.organizationId,
+          movementId: shipment.movementId,
+          processedAt: new Date(),
+        });
+        return { outcome: "rns" };
+      }
+
+      if (parsed.kind === "alert") {
+        const notices: CarrierNotice[] = (["cbp_ace", "cbsa_aci"] as const).map((provider) => ({
+          provider,
+          // Reuses the row's own dedup hash (simplest — it's already computed
+          // and stored) rather than hashing the message again; suffixed per
+          // provider because `carrier_notices.external_id` is unique across
+          // the whole table, not per provider, and this branch always writes
+          // one row per provider for the same alert.
+          externalId: `borderconnect:${row.payloadSha256}:${provider}`,
+          severity: "warning",
+          title: "BorderConnect system alert",
+          body: parsed.message,
+          startsAt: null,
+          endsAt: null,
+          publishedAt: row.receivedAt.toISOString(),
+        }));
+        await recordCarrierNotices(tx, notices);
+        await markRow(tx, rowId, { processedAt: new Date() });
+        return { outcome: "alert" };
+      }
 
       const companyKey = parsed.companyKey;
       const [org] = companyKey

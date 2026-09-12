@@ -501,3 +501,72 @@ export const BC_OPERATION_TYPES = [
   { value: "SYNC" },
   { value: "CANCEL_SYNC" },
 ] as const;
+
+// ---------------------------------------------------------------------------
+// Source: https://borderconnect.com/data/ca/aci/release-codes.json (Task 11 —
+// the task brief's own `.../ca/rns/release-codes.json` 404s; this is the
+// confirmed-live URL). CBSA's RNS message carries one of these under
+// `rnsShipment.status.releaseCode.number` per the RNS Shipment JSON Reference
+// Manual (`.../emanifest-api/manual/rns-shipment-json-reference.pdf`,
+// section 1.11.2.1), whose own worked example is exactly code "4": "the
+// goods are released by customs, and the carrier can proceed to deliver
+// them to the consignee in Canada."
+// ---------------------------------------------------------------------------
+export const BC_ACI_RELEASE_CODES = [
+  { number: "1", shortName: "Content Accepted", longName: "Message Content Accepted" },
+  { number: "4", shortName: "Released", longName: "Goods Released" },
+  {
+    number: "5",
+    shortName: "Examination Required",
+    longName: "Goods required for examination - referred",
+  },
+  {
+    number: "8",
+    shortName: "Released (CFIA)",
+    longName: "Customs Release, But Hold at Destination for CFIA",
+  },
+  {
+    number: "9",
+    shortName: "Declaration Accepted",
+    longName: "Declaration Accepted, Awaiting arrival of goods",
+  },
+  { number: "14", shortName: "Error", longName: "Error message" },
+  {
+    number: "23",
+    shortName: "CSA Authorized Delivery",
+    longName: "Authorised to Deliver - CSA Shipment",
+  },
+  {
+    number: "24",
+    shortName: "Awaiting CBSA Processing",
+    longName: "Declaration Accepted, Awaiting Customs Processing",
+  },
+  {
+    number: "34",
+    shortName: "Awaiting CBSA Processing",
+    longName: "Declaration Accepted, Awaiting CBSA Processing",
+  },
+] as const;
+
+/**
+ * The subset of `BC_ACI_RELEASE_CODES` that mean customs itself released the
+ * goods, for the purpose of stamping `shipments.status = "released"`.
+ *
+ *  - `4` "Released" is unambiguous (the manual's own example).
+ *  - `8` "Released (CFIA)" is included too: its `longName` reads "Customs
+ *    Release, But Hold at Destination for CFIA" — customs already released
+ *    the goods; the hold is a downstream CFIA logistics matter at the
+ *    destination, not a customs-status one. (Judgment call — flagged in the
+ *    task report; the manual's own text doesn't spell out code 8 beyond the
+ *    release-codes.json wording quoted above.)
+ *
+ * Every other code (`1`, `5`, `9`, `14`, `23`, `24`, `34`) is either
+ * acknowledgement, a hold, an error, or still pending — none of them mean
+ * the goods are clear to move.
+ */
+const RELEASING_ACI_CODES: ReadonlySet<string> = new Set(["4", "8"]);
+
+/** Does this CBSA RNS release code mean customs released the goods? */
+export function isAciReleaseCode(releaseCode: string | null | undefined): boolean {
+  return !!releaseCode && RELEASING_ACI_CODES.has(releaseCode);
+}

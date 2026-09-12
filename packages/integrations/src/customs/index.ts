@@ -37,6 +37,7 @@ export {
   type BorderConnectTransport,
 } from "./borderconnect/transport";
 export { parseInbound, inboundKeys, type BorderConnectInbound } from "./borderconnect/inbound";
+export { isAciReleaseCode, BC_ACI_RELEASE_CODES } from "./borderconnect/code-lists";
 
 export const providerForRegime = (regime: Regime): "cbp_ace" | "cbsa_aci" =>
   regime === "ACE" ? "cbp_ace" : "cbsa_aci";

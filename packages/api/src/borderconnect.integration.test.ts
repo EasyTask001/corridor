@@ -8,7 +8,7 @@
  *   pnpm db:reset && pnpm db:seed && pnpm --filter @corridor/api test:integration
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createDb, eq, inArray, schema, withServiceRole } from "@corridor/db";
+import { createDb, desc, eq, inArray, schema, withServiceRole } from "@corridor/db";
 import type { BorderConnectTransport } from "@corridor/integrations";
 import { drainBorderConnectInbox, storeInboundMessages } from "./services/borderconnect";
 
@@ -336,6 +336,234 @@ describe("storeInboundMessages dedup", () => {
         tx.delete(customsInbox).where(eq(customsInbox.companyKey, marker)),
       );
     }
+  });
+});
+
+describe("RNS releases and SYSTEM_ALERT notices (Task 11)", () => {
+  const { shipments, parsRnsEvents, carrierNotices, movementEvents } = schema;
+  let rnsOrgId: string;
+  let rnsMovementId: string;
+  let rnsShipmentId: string;
+  let rnsControlNumber: string;
+  const rnsInboxIds: number[] = [];
+  const alertInboxIds: number[] = [];
+  const alertExternalIds: string[] = [];
+
+  beforeAll(async () => {
+    const [org] = await db
+      .insert(organizations)
+      .values({ name: `BC RNS ${Date.now()}` })
+      .returning({ id: organizations.id });
+    rnsOrgId = org!.id;
+
+    // shipments_guard() only allows INSERTing a shipment onto a movement that
+    // is draft/rejected (movement_is_editable) — so the movement starts
+    // draft and is advanced through its own state machine (draft -> sent ->
+    // accepted) afterward, same as the app's real flow.
+    const [m] = await db
+      .insert(movements)
+      .values({
+        organizationId: rnsOrgId,
+        regime: "ACI",
+        movementNumber: `BC-RNS-${Date.now()}`,
+        tripNumber: `TRIP-RNS-${Date.now()}`,
+        status: "draft",
+      })
+      .returning({ id: movements.id });
+    rnsMovementId = m!.id;
+
+    const [s] = await withServiceRole(db, (tx) =>
+      tx
+        .insert(shipments)
+        .values({
+          organizationId: rnsOrgId,
+          movementId: rnsMovementId,
+          regime: "ACI",
+          carrierCode: "7ELU",
+          cargoType: "regular",
+          controlReference: `RNS${Date.now()}`.slice(0, 20),
+          isPars: true,
+        })
+        .returning({ id: shipments.id, controlNumber: shipments.controlNumber }),
+    );
+    rnsShipmentId = s!.id;
+    rnsControlNumber = s!.controlNumber;
+
+    await db.update(movements).set({ status: "sent" }).where(eq(movements.id, rnsMovementId));
+    await db.update(movements).set({ status: "accepted" }).where(eq(movements.id, rnsMovementId));
+    // The shipment's own status cascade (`markShipmentsSent`/
+    // `applyShipmentOutcomes`) is a separate app-level concern from this
+    // fixture — set directly to the end state this test needs (an accepted
+    // shipment ready for RNS to release).
+    await db.update(shipments).set({ status: "accepted" }).where(eq(shipments.id, rnsShipmentId));
+  });
+
+  afterAll(async () => {
+    // pars_rns_events is append-only (0027's `reject_modification` trigger
+    // fires on DELETE too, including one raised by this org's own `on delete
+    // cascade` FK) — so the org itself is left behind rather than deleted;
+    // this is disposable local test data, cleaned up wholesale by
+    // `pnpm db:reset`, not per-run.
+    await withServiceRole(db, (tx) =>
+      tx.delete(customsInbox).where(eq(customsInbox.organizationId, rnsOrgId)),
+    );
+    if (rnsInboxIds.length > 0) {
+      await withServiceRole(db, (tx) =>
+        tx.delete(customsInbox).where(inArray(customsInbox.id, rnsInboxIds)),
+      );
+    }
+    if (alertInboxIds.length > 0) {
+      await withServiceRole(db, (tx) =>
+        tx.delete(customsInbox).where(inArray(customsInbox.id, alertInboxIds)),
+      );
+    }
+    if (alertExternalIds.length > 0) {
+      await withServiceRole(db, (tx) =>
+        tx.delete(carrierNotices).where(inArray(carrierNotices.externalId, alertExternalIds)),
+      );
+    }
+  });
+
+  it("routes an RNS release for a PARS shipment: pars_rns_events row, shipment released, a released customs_event on the movement", async () => {
+    const rnsMessage = {
+      data: "RNS_SHIPMENT",
+      cargoControlNumber: rnsControlNumber,
+      transactionNumber: "73423483212345",
+      releaseCode: "4",
+      releaseName: "Released",
+      officeCode: "0470",
+      dateTime: "2026-09-12 10:00:00",
+    };
+
+    const result = await drainBorderConnectInbox(db, { transport: fakeTransport([rnsMessage]) });
+    expect(result.processed.rns).toBe(1);
+
+    const [inboxRow] = await withServiceRole(db, (tx) =>
+      tx
+        .select()
+        .from(customsInbox)
+        .where(eq(customsInbox.cargoControlNumber, rnsControlNumber)),
+    );
+    expect(inboxRow).toBeDefined();
+    rnsInboxIds.push(inboxRow!.id);
+    expect(inboxRow!.processedAt).not.toBeNull();
+    expect(inboxRow!.organizationId).toBe(rnsOrgId);
+    expect(inboxRow!.movementId).toBe(rnsMovementId);
+
+    const [rnsRow] = await withServiceRole(db, (tx) =>
+      tx.select().from(parsRnsEvents).where(eq(parsRnsEvents.shipmentId, rnsShipmentId)),
+    );
+    expect(rnsRow).toBeDefined();
+    expect(rnsRow!.organizationId).toBe(rnsOrgId);
+    expect(rnsRow!.parsNumber).toBe(rnsControlNumber);
+    expect(rnsRow!.releaseCode).toBe("4");
+    expect(rnsRow!.transactionNumber).toBe("73423483212345");
+
+    const [shipment] = await db.select().from(shipments).where(eq(shipments.id, rnsShipmentId));
+    expect(shipment?.status).toBe("released");
+    expect(shipment?.releasedAt).not.toBeNull();
+
+    const events = await withServiceRole(db, (tx) =>
+      tx.select().from(movementEvents).where(eq(movementEvents.movementId, rnsMovementId)),
+    );
+    expect(
+      events.some(
+        (e) =>
+          e.eventType === "customs_event" &&
+          (e.payload as { code?: string } | null)?.code === "released",
+      ),
+    ).toBe(true);
+  });
+
+  it("marks an RNS message for an unknown CCN unroutable", async () => {
+    const unknownCcn = `NOPE${Date.now()}`;
+    const rnsMessage = {
+      data: "RNS_SHIPMENT",
+      cargoControlNumber: unknownCcn,
+      transactionNumber: "00000000000000",
+      releaseCode: "4",
+      releaseName: "Released",
+      officeCode: "0470",
+      dateTime: "2026-09-12 10:00:00",
+    };
+
+    const result = await drainBorderConnectInbox(db, { transport: fakeTransport([rnsMessage]) });
+    expect(result.processed.unroutable).toBeGreaterThanOrEqual(1);
+
+    const [inboxRow] = await withServiceRole(db, (tx) =>
+      tx.select().from(customsInbox).where(eq(customsInbox.cargoControlNumber, unknownCcn)),
+    );
+    expect(inboxRow).toBeDefined();
+    rnsInboxIds.push(inboxRow!.id);
+    expect(inboxRow!.organizationId).toBeNull();
+    expect(inboxRow!.processedAt).not.toBeNull();
+    expect(inboxRow!.processingError).toBe("unknown CCN");
+  });
+
+  it("fans a SYSTEM_ALERT out to both providers' carrier_notices, deduped by external_id", async () => {
+    const alertMessage = {
+      data: "SYSTEM_ALERT",
+      message: `Scheduled maintenance ${Date.now()}`,
+    };
+
+    const result = await drainBorderConnectInbox(db, { transport: fakeTransport([alertMessage]) });
+    expect(result.processed.alert).toBe(1);
+
+    const [inboxRow] = await withServiceRole(db, (tx) =>
+      tx
+        .select()
+        .from(customsInbox)
+        .where(eq(customsInbox.dataType, "SYSTEM_ALERT"))
+        .orderBy(desc(customsInbox.id))
+        .limit(1),
+    );
+    expect(inboxRow).toBeDefined();
+    expect((inboxRow!.payload as { message?: string }).message).toBe(alertMessage.message);
+    alertInboxIds.push(inboxRow!.id);
+    expect(inboxRow!.processedAt).not.toBeNull();
+
+    const expectedIds = [
+      `borderconnect:${inboxRow!.payloadSha256}:cbp_ace`,
+      `borderconnect:${inboxRow!.payloadSha256}:cbsa_aci`,
+    ];
+    alertExternalIds.push(...expectedIds);
+    const notices = await withServiceRole(db, (tx) =>
+      tx.select().from(carrierNotices).where(inArray(carrierNotices.externalId, expectedIds)),
+    );
+    expect(notices).toHaveLength(2);
+    expect(notices.map((n) => n.provider).sort()).toEqual(["cbp_ace", "cbsa_aci"]);
+    for (const n of notices) {
+      expect(n.severity).toBe("warning");
+      expect(n.title).toBe("BorderConnect system alert");
+      expect(n.body).toBe(alertMessage.message);
+    }
+
+    // Directly exercises the external_id dedup a re-delivered/re-raced alert
+    // relies on: recordCarrierNotices is idempotent on a second call with the
+    // same externalIds (a literal duplicate wire message never reaches here
+    // twice — storeInboundMessages's payload_sha256 dedup already prevents
+    // that upstream — so this asserts the DB-level guarantee directly).
+    const { recordCarrierNotices } = await import("./services/notices");
+    const second = await withServiceRole(db, (tx) =>
+      recordCarrierNotices(
+        tx,
+        notices.map((n) => ({
+          provider: n.provider,
+          externalId: n.externalId,
+          severity: n.severity,
+          title: n.title,
+          body: n.body,
+          startsAt: n.startsAt?.toISOString() ?? null,
+          endsAt: n.endsAt?.toISOString() ?? null,
+          publishedAt: n.publishedAt.toISOString(),
+        })),
+      ),
+    );
+    expect(second.inserted).toBe(0);
+    const stillTwo = await withServiceRole(db, (tx) =>
+      tx.select().from(carrierNotices).where(inArray(carrierNotices.externalId, expectedIds)),
+    );
+    expect(stillTwo).toHaveLength(2);
   });
 });
 
