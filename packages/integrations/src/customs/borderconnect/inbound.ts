@@ -102,6 +102,28 @@ function makeEvent(
   };
 }
 
+/**
+ * Routing keys for a `kind: "customs_status"` message — mirrors
+ * `inboundKeys()` below (same fallbacks: a bare `cargoControlNumber` or the
+ * first `references[]` entry's), so a message that only carries a CCN (the
+ * four ACI_NOTICE sub-types below `ARRIVAL_REPORTED` never echo a
+ * `tripNumber`) doesn't silently lose its only identifier. Optional fields
+ * are omitted, not empty strings, matching `tripNumber?: string`'s shape.
+ */
+function messageKeys(
+  d: Record<string, unknown>,
+): { tripNumber?: string; cargoControlNumber?: string; shipmentControlNumber?: string } {
+  const references = arr(d.references).map(obj);
+  const tripNumber = str(d.tripNumber);
+  const cargoControlNumber = str(d.cargoControlNumber) ?? str(references[0]?.cargoControlNumber);
+  const shipmentControlNumber = str(d.shipmentControlNumber);
+  return {
+    ...(tripNumber ? { tripNumber } : {}),
+    ...(cargoControlNumber ? { cargoControlNumber } : {}),
+    ...(shipmentControlNumber ? { shipmentControlNumber } : {}),
+  };
+}
+
 function statusMessage(
   status: CustomsStatusMessage["status"],
   decision: CustomsDecision | null,
@@ -214,7 +236,7 @@ function parseAceResponse(d: Record<string, unknown>): BorderConnectInbound {
     return {
       kind: "customs_status",
       companyKey,
-      keys: { tripNumber },
+      keys: messageKeys(d),
       status: statusMessage("rejected", "rejected", message, events, [], tripNumber, d),
       raw: d,
     };
@@ -225,7 +247,7 @@ function parseAceResponse(d: Record<string, unknown>): BorderConnectInbound {
     return {
       kind: "customs_status",
       companyKey,
-      keys: { tripNumber },
+      keys: messageKeys(d),
       status: statusMessage("accepted", "accepted", null, [event], [], tripNumber, d),
       raw: d,
     };
@@ -237,7 +259,7 @@ function parseAceResponse(d: Record<string, unknown>): BorderConnectInbound {
     return {
       kind: "customs_status",
       companyKey,
-      keys: { tripNumber },
+      keys: messageKeys(d),
       status: statusMessage("pending", null, null, [event], [], tripNumber, d),
       raw: d,
     };
@@ -247,7 +269,7 @@ function parseAceResponse(d: Record<string, unknown>): BorderConnectInbound {
     return {
       kind: "customs_status",
       companyKey,
-      keys: { tripNumber },
+      keys: messageKeys(d),
       status: statusMessage("released", "released", null, [event], [], tripNumber, d),
       raw: d,
     };
@@ -257,7 +279,7 @@ function parseAceResponse(d: Record<string, unknown>): BorderConnectInbound {
     return {
       kind: "customs_status",
       companyKey,
-      keys: { tripNumber },
+      keys: messageKeys(d),
       status: statusMessage("held", "held", null, [event], [], tripNumber, d),
       raw: d,
     };
@@ -277,7 +299,7 @@ function parseAceResponse(d: Record<string, unknown>): BorderConnectInbound {
     return {
       kind: "customs_status",
       companyKey,
-      keys: { tripNumber },
+      keys: messageKeys(d),
       status: held
         ? statusMessage("held", "held", null, events, shipments, tripNumber, d)
         : statusMessage("pending", null, null, events, shipments, tripNumber, d),
@@ -290,7 +312,7 @@ function parseAceResponse(d: Record<string, unknown>): BorderConnectInbound {
   return {
     kind: "customs_status",
     companyKey,
-    keys: { tripNumber },
+    keys: messageKeys(d),
     status: statusMessage("pending", null, null, [], [], tripNumber, d),
     raw: d,
   };
@@ -311,7 +333,7 @@ function parseAciResponse(d: Record<string, unknown>): BorderConnectInbound {
     return {
       kind: "customs_status",
       companyKey,
-      keys: { tripNumber },
+      keys: messageKeys(d),
       status: statusMessage("accepted", "accepted", null, [event], [], tripNumber, d),
       raw: d,
     };
@@ -329,7 +351,7 @@ function parseAciResponse(d: Record<string, unknown>): BorderConnectInbound {
   return {
     kind: "customs_status",
     companyKey,
-    keys: { tripNumber },
+    keys: messageKeys(d),
     status: statusMessage("rejected", "rejected", message || null, [event], [], tripNumber, d),
     raw: d,
   };
@@ -366,7 +388,7 @@ function parseAciNotice(d: Record<string, unknown>): BorderConnectInbound {
     return {
       kind: "customs_status",
       companyKey,
-      keys: { tripNumber },
+      keys: messageKeys(d),
       status: statusMessage("pending", null, null, events, [], tripNumber, d),
       raw: d,
     };
@@ -380,7 +402,7 @@ function parseAciNotice(d: Record<string, unknown>): BorderConnectInbound {
   return {
     kind: "customs_status",
     companyKey,
-    keys: { tripNumber },
+    keys: messageKeys(d),
     status: statusMessage("pending", null, null, [event], [], tripNumber, d),
     raw: d,
   };

@@ -56,6 +56,7 @@ describe("parseInbound — ACE_RESPONSE", () => {
       "E203 – Shipment control number already on file",
       "E410 – Missing shipper address",
     ]);
+    expect(msg.keys).toEqual({ tripNumber: TRIP_NUMBER });
   });
 
   it("processingResponse with no validation errors → accepted", () => {
@@ -100,6 +101,7 @@ describe("parseInbound — ACE_RESPONSE", () => {
     expect(event.entryNumber).toBe("816-1234567-8");
     expect(event.entryPortCode).toBe("0901");
     expect(msg.status.shipments).toEqual([]);
+    expect(msg.keys).toEqual({ tripNumber: TRIP_NUMBER });
   });
 
   it("code 1C → entered_and_released event, shipments[] status released", () => {
@@ -149,6 +151,7 @@ describe("parseInbound — ACI_RESPONSE", () => {
     expect(msg.status.status).toBe("accepted");
     expect(msg.status.decision).toBe("accepted");
     expect(msg.status.events.map((e) => e.code)).toEqual(["accepted"]);
+    expect(msg.keys).toEqual({ tripNumber: TRIP_NUMBER });
   });
 
   it("type REJECT → rejected, message joined from errorResponses[]", () => {
@@ -158,6 +161,7 @@ describe("parseInbound — ACI_RESPONSE", () => {
     expect(msg.status.decision).toBe("rejected");
     expect(msg.status.message).toBe("E100 shipment.consignee: Missing consignee name");
     expect(msg.status.events.map((e) => e.code)).toEqual(["rejected"]);
+    expect(msg.keys).toEqual({ tripNumber: TRIP_NUMBER });
   });
 });
 
@@ -168,30 +172,39 @@ describe("parseInbound — ACI_NOTICE", () => {
     expect(msg.status.decision).toBeNull();
     expect(msg.status.events.map((e) => e.code)).toEqual(["arrival_recorded"]);
     expect(msg.status.events[0]!.shipmentControlNumber).toBe(CCN);
+    expect(msg.keys).toEqual({ tripNumber: TRIP_NUMBER, cargoControlNumber: CCN });
   });
 
-  it("type MATCHED → pars_matched", () => {
+  it("type MATCHED → pars_matched, keys carry only the CCN (no tripNumber on this message)", () => {
     const msg = parseInbound(loadFixture("aci-notice-matched"));
     if (msg.kind !== "customs_status") throw new Error("wrong kind");
     expect(msg.status.events.map((e) => e.code)).toEqual(["pars_matched"]);
+    expect(msg.keys).toEqual({ cargoControlNumber: CCN });
+    expect(msg.keys.tripNumber).toBeUndefined();
   });
 
-  it("type NOT_MATCHED → pars_not_matched", () => {
+  it("type NOT_MATCHED → pars_not_matched, keys carry only the CCN", () => {
     const msg = parseInbound(loadFixture("aci-notice-not-matched"));
     if (msg.kind !== "customs_status") throw new Error("wrong kind");
     expect(msg.status.events.map((e) => e.code)).toEqual(["pars_not_matched"]);
+    expect(msg.keys).toEqual({ cargoControlNumber: CCN });
+    expect(msg.keys.tripNumber).toBeUndefined();
   });
 
-  it("type CSA_REPORTED → csa_reported", () => {
+  it("type CSA_REPORTED → csa_reported, keys carry only the CCN", () => {
     const msg = parseInbound(loadFixture("aci-notice-csa-reported"));
     if (msg.kind !== "customs_status") throw new Error("wrong kind");
     expect(msg.status.events.map((e) => e.code)).toEqual(["csa_reported"]);
+    expect(msg.keys).toEqual({ cargoControlNumber: CCN });
+    expect(msg.keys.tripNumber).toBeUndefined();
   });
 
-  it("type INSUFFICIENT_REVIEW_TIME_WARNING → review_time_warning", () => {
+  it("type INSUFFICIENT_REVIEW_TIME_WARNING → review_time_warning, keys carry only the CCN", () => {
     const msg = parseInbound(loadFixture("aci-notice-review-time-warning"));
     if (msg.kind !== "customs_status") throw new Error("wrong kind");
     expect(msg.status.events.map((e) => e.code)).toEqual(["review_time_warning"]);
+    expect(msg.keys).toEqual({ cargoControlNumber: CCN });
+    expect(msg.keys.tripNumber).toBeUndefined();
   });
 });
 
