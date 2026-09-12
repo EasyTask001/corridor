@@ -194,6 +194,53 @@ test.describe("integrations settings", () => {
   });
 });
 
+test.describe("BorderConnect filing mode (Task 13)", () => {
+  test("no company key warns, setting one on Organization clears it, and the mode persists", async ({
+    page,
+  }) => {
+    await login(page, "owner@pathfinder.demo");
+    await page.goto("/settings/integrations");
+    const card = () => page.locator("form", { hasText: "CBP ACE (US)" });
+
+    // Selecting BorderConnect hides the gateway inputs and, with no company
+    // key on file yet, shows the warning rather than "set ✓".
+    await card().getByLabel("Filing mode").selectOption("border_connect");
+    await expect(card().getByLabel("Gateway base URL")).toHaveCount(0);
+    await expect(card().getByLabel("Decision delay (ms)")).toHaveCount(0);
+    await expect(card().getByText(/missing — set it in/)).toBeVisible();
+    await expect(card().getByRole("button", { name: "Check inbox" })).toBeVisible();
+
+    // Set the company key on Settings → Organization.
+    const companyKey = `E2E-BC-${Date.now()}`;
+    await page.goto("/settings/organization");
+    await page.getByLabel("BorderConnect company key").fill(companyKey);
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByText("Saved.")).toBeVisible();
+
+    // Back on Integrations, the warning is gone and the status reads "set".
+    await page.goto("/settings/integrations");
+    await card().getByLabel("Filing mode").selectOption("border_connect");
+    await expect(card().getByText("set ✓")).toBeVisible();
+    await expect(card().getByText(/missing — set it in/)).toHaveCount(0);
+
+    // Saving persists the mode.
+    await card().getByRole("button", { name: "Save" }).click();
+    await expect(card().getByText("Saved.")).toBeVisible();
+    await page.reload();
+    await expect(card().getByLabel("Filing mode")).toHaveValue("border_connect");
+
+    // Restore both to their prior state so the seeded fixture and other specs
+    // (which expect CBP ACE in mock mode) are unaffected by this run.
+    await card().getByLabel("Filing mode").selectOption("mock");
+    await card().getByRole("button", { name: "Save" }).click();
+    await expect(card().getByText("Saved.")).toBeVisible();
+    await page.goto("/settings/organization");
+    await page.getByLabel("BorderConnect company key").fill("");
+    await page.getByRole("button", { name: "Save changes" }).click();
+    await expect(page.getByText("Saved.")).toBeVisible();
+  });
+});
+
 test.describe("billing (mock mode)", () => {
   test("owner upgrades via mock checkout and the plan syncs to the organization", async ({
     page,

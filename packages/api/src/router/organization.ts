@@ -395,9 +395,13 @@ export const organizationRouter = router({
               includeParsInCargoNumbers: input.includeParsInCargoNumbers,
             }),
             ...(input.dispatchEmails !== undefined && { dispatchEmails: input.dispatchEmails }),
+            ...(input.borderConnectCompanyKey !== undefined && {
+              borderConnectCompanyKey: input.borderConnectCompanyKey,
+            }),
           })
           .where(eq(organizations.id, ctx.orgId))
-          .returning();
+          .returning()
+          .catch(mapDbError);
         if (!row) throw new TRPCError({ code: "NOT_FOUND" });
         await writeAudit(
           tx,

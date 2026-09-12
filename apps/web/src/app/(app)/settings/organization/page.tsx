@@ -43,6 +43,7 @@ export default async function OrganizationSettingsPage() {
           filerCode: org.filerCode ?? "",
           billingEmail: org.billingEmail ?? "",
           timezone: org.timezone,
+          borderConnectCompanyKey: org.borderConnectCompanyKey ?? "",
         }}
         simpleDriverSheet={org.simpleDriverSheet}
         includeParsInCargoNumbers={org.includeParsInCargoNumbers}

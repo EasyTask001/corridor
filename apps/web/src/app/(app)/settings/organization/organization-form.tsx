@@ -16,6 +16,7 @@ type Fields = {
   filerCode: string;
   billingEmail: string;
   timezone: string;
+  borderConnectCompanyKey: string;
 };
 
 type AddressFields = {
@@ -27,7 +28,7 @@ type AddressFields = {
   country: string;
 };
 
-const FIELDS: { key: keyof Fields; label: string; mono?: boolean }[] = [
+const FIELDS: { key: keyof Fields; label: string; mono?: boolean; helper?: string }[] = [
   { key: "name", label: "Display name" },
   { key: "legalName", label: "Legal name" },
   { key: "scacCode", label: "SCAC (US)", mono: true },
@@ -37,6 +38,12 @@ const FIELDS: { key: keyof Fields; label: string; mono?: boolean }[] = [
   { key: "filerCode", label: "Filer code", mono: true },
   { key: "billingEmail", label: "Billing email" },
   { key: "timezone", label: "Time zone (IANA)", mono: true },
+  {
+    key: "borderConnectCompanyKey",
+    label: "BorderConnect company key",
+    mono: true,
+    helper: "Issued by BorderConnect for your carrier account; required for BorderConnect filing mode.",
+  },
 ];
 
 const ADDRESS: { key: keyof AddressFields; label: string; wide?: boolean }[] = [
@@ -103,7 +110,13 @@ export function OrganizationForm({
         const payload: Record<string, unknown> = {};
         for (const { key } of FIELDS) {
           const v = form[key].trim();
-          if (v !== (initial[key] ?? "")) payload[key] = v || undefined;
+          if (v !== (initial[key] ?? "")) {
+            // Every other field treats "blank" as "leave unchanged" (send
+            // `undefined`). The company key is the one field a dispatcher must
+            // be able to actually clear — e.g. to unassign a decommissioned
+            // BorderConnect account — so a blank here sends `null` instead.
+            payload[key] = v || (key === "borderConnectCompanyKey" ? null : undefined);
+          }
         }
         if (simpleDriverSheet !== initialSimple) payload.simpleDriverSheet = simpleDriverSheet;
         if (includePars !== initialPars) payload.includeParsInCargoNumbers = includePars;
@@ -121,7 +134,7 @@ export function OrganizationForm({
       }}
     >
       <div className="grid gap-4 sm:grid-cols-2">
-        {FIELDS.map(({ key, label, mono }) => (
+        {FIELDS.map(({ key, label, mono, helper }) => (
           <div key={key} className={key === "name" || key === "legalName" ? "sm:col-span-2" : ""}>
             <label htmlFor={key} className="label">
               {label}
@@ -132,7 +145,13 @@ export function OrganizationForm({
               readOnly={readOnly}
               onChange={(e) => setForm({ ...form, [key]: e.target.value })}
               className={cls(mono)}
+              aria-describedby={helper ? `${key}-helper` : undefined}
             />
+            {helper && (
+              <p id={`${key}-helper`} className="mt-1 text-xs text-fg-secondary">
+                {helper}
+              </p>
+            )}
           </div>
         ))}
       </div>

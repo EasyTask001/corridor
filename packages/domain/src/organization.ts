@@ -93,6 +93,13 @@ export const updateOrganizationInput = createOrganizationInput.partial().extend(
   includeParsInCargoNumbers: z.boolean().optional(),
   /** Where driver sheets and entry notices are e-mailed (at most five). */
   dispatchEmails: z.array(email).max(5).optional(),
+  /**
+   * BorderConnect's Service Provider account key (migration 0047,
+   * `organizations.border_connect_company_key`) — required for `border_connect`
+   * filing mode; `null` clears it. Unique across organizations at the DB layer
+   * (`packages/api/src/services/db-errors.ts` maps the violation to CONFLICT).
+   */
+  borderConnectCompanyKey: z.string().trim().min(1).max(64).nullable().optional(),
 });
 export type UpdateOrganizationInput = z.infer<typeof updateOrganizationInput>;
 

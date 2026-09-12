@@ -19,6 +19,12 @@ export function mapDbError(e: unknown): never {
   )?.cause;
   const constraint = cause?.constraint_name ?? cause?.constraint ?? "";
   if (cause?.code === "23505") {
+    if (constraint.includes("border_connect_company_key")) {
+      throw new TRPCError({
+        code: "CONFLICT",
+        message: "This BorderConnect company key is already assigned to another organization",
+      });
+    }
     const which = constraint.includes("vin")
       ? "VIN"
       : constraint.includes("document")
