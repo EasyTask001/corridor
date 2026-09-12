@@ -218,7 +218,7 @@ export interface CustomsCancelAck {
   raw: Record<string, unknown>;
 }
 
-export type CustomsClientMode = "mock" | "gateway";
+export type CustomsClientMode = "mock" | "gateway" | "border_connect";
 
 /** An in-bond move as CBP wants to hear about it (0026). */
 export interface InBondMessage {

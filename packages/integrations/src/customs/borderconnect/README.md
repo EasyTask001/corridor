@@ -90,3 +90,140 @@ never emits a separate `estimatedArrivalTimeZone` field.
   master plan's ruling was updated to match. `iitIndicator` is already a
   trip-scoped field in `ManifestPayload`, consistent with the corrected
   placement.)
+
+## Inbound parsing (`inbound.ts`)
+
+`parseInbound(msg)` turns one message off the shared queue (`GET
+/api/receive`, drained by a later task's `customs.borderconnect_drain`) into
+a normalised, typed `BorderConnectInbound`. It never throws — a message this
+adapter doesn't recognize, or that isn't shaped like an object, comes back as
+`kind: "unknown"` rather than crashing the drain job. `inboundKeys(msg)` pulls
+the routing keys (`companyKey`, `sendId`, `tripNumber`,
+`cargoControlNumber`/`shipmentControlNumber`) the drain job needs to resolve
+`organization_id` and `customs_submission_id`/`movement_id` *before*
+`parseInbound` runs, also without throwing.
+
+`ACE_RESPONSE`/`ACI_RESPONSE`/`ACI_NOTICE` all become `kind: "customs_status"`
+carrying the same `CustomsStatusMessage` shape `gateway/mapping.ts`'s
+`fromGatewayStatus` produces, so the rest of Corridor applies a BorderConnect
+status update exactly like a gateway one.
+
+## The `CustomsClient` adapter (`client.ts`)
+
+`createBorderConnectCustomsClient` wraps everything above behind the same
+`CustomsClient` interface `mock` and `gateway` already implement, so the rest
+of Corridor (movement transmit/amend/cancel, the readiness panel, …) can use
+BorderConnect as a third mode without knowing its wire protocol.
+`createCustomsClient({ mode: "border_connect", ... })` (`../index.ts`)
+resolves to it.
+
+### Mode selection / env vars
+
+| Input | Source | Notes |
+| --- | --- | --- |
+| `apiUrlSuffix` | `BORDERCONNECT_API_URL_SUFFIX` | One Service Provider account for all of Corridor — shared across every tenant. |
+| `apiKey` | `BORDERCONNECT_API_KEY` | Same account-wide key. |
+| `companyKey` | `organizations.border_connect_company_key` | Per-tenant — BorderConnect's way of telling one carrier's messages apart on a shared account. |
+| `tenantKey` | the organization id | Never sent over the wire; scopes the fixture queue only. |
+
+`live = !!(apiUrlSuffix && apiKey)`. With both set, `transmit`/`amend`/`cancel`
+go over `createBorderConnectHttpTransport` (`transport.ts`); with either
+missing, they replay `createFixtureBorderConnectTransport` instead — every
+test in `client.test.ts` runs with **no credentials**, per the repo-wide rule
+that every external service degrades to a deterministic mock/fixture when its
+env var is unset. A caller may also inject its own `transport` (what every
+test above the fixture-replay-specific ones does), which always wins over
+both.
+
+A **live** client refuses to `transmit`/`amend`/`cancel` with `companyKey:
+null` (a 422 `CustomsTransportError` — there is no tenant to attribute the
+filing to on a shared account). The **fixture** transport doesn't care whose
+key it is, so a null `companyKey` there is filled in with a harmless
+`"fixture"` placeholder rather than blocking the test/demo path.
+
+### Message flow
+
+```
+transmit/amend  ──▶  toAceTrip/toAciTrip  ──▶  POST /api/send/{suffix}  (ACE_TRIP / ACI_TRIP)
+cancel           ──▶  toCancelSendRequest  ──▶  POST /api/send/{suffix}  (ACE_SEND_REQUEST / ACI_SEND_REQUEST)
+                                                        │
+                                                        ▼
+                                         (async, no synchronous decision)
+                                                        │
+                                                        ▼
+GET /api/receive/{suffix}  ◀── shared inbox ◀── API_RESPONSE (IMPORTED/TRANSMITTED/…)
+                                             ◀── ACE_RESPONSE | ACI_RESPONSE | ACI_NOTICE
+                                             ◀── RNS_SHIPMENT | SYSTEM_ALERT
+```
+
+BorderConnect never answers `send` with a decision — only an ack that the
+message reached its queue. The real accepted/held/rejected/released answer
+always arrives later, through the same shared inbox every tenant's messages
+land in, keyed back to the sender by `companyKey`/`sendId`/`tripNumber`. That
+is why `fetchStatus`, `fetchDecision`, `fetchNotices` and every `inBond*`
+method on this client throw a 501 `CustomsTransportError` naming themselves
+and pointing at the inbox — there is no request/response round trip to serve
+them from in this mode. `parseInbound` returns `null` for the same reason:
+there is no signed webhook to verify here (a later task drains the inbox
+directly with `parseInbound`/`inboundKeys` from `inbound.ts`).
+
+`ping()` calls `transport.receive()` and reports how many messages were
+waiting — **never call it in production**, since it drains the same queue
+the inbox-drain job needs. It exists for the fixture path and this module's
+tests; a later task points the Settings "Test connection" button at the
+drain job instead.
+
+### Fixture replay (`createFixtureBorderConnectTransport`)
+
+With no live credentials (or when a test injects one directly),
+`send()` drops the outbound message into a per-tenant queue
+(`borderConnectQueue`, `../fixture-state.ts`) and immediately enqueues the
+canned inbound replies a real crossing would eventually push back:
+
+1. An `API_RESPONSE` ack — `IMPORTED` for a trip (`ACE_TRIP`/`ACI_TRIP`),
+   `TRANSMITTED` for a cancel send-request (`ACE_SEND_REQUEST`/
+   `ACI_SEND_REQUEST`).
+2. For a trip only, the regime's outcome fixture
+   (`fixtures/outcomes/<regime>-<outcome>.json`), keyed on the same
+   control-number-suffix convention `gateway/client.ts`'s `fixtureOutcomeFor`
+   uses (reused here, not reimplemented):
+
+   | First shipment's control number ends in | Outcome | ACE file enqueued | ACI file enqueued |
+   | --- | --- | --- | --- |
+   | `H` | held | `ace-held.json` (`ACE_RESPONSE`, `tripStatus: "HTR"`) | `aci-held.json` (`ACI_NOTICE`, `type: "INSUFFICIENT_REVIEW_TIME_WARNING"` — ACI has no `ACE`-style "held" trip status, so the closest documented CBSA signal for "still under review" is used) |
+   | `R` | rejected | `ace-rejected.json` (`ACE_RESPONSE`, `validationResponses`) | `aci-rejected.json` (`ACI_RESPONSE`, `type: "REJECT"`, `errorResponses`) |
+   | anything else | accepted | `ace-accepted.json` (`ACE_RESPONSE`, `processingResponse`) | `aci-accepted.json` (`ACI_RESPONSE`, `type: "ACCEPT"`) |
+
+   The control number is read straight off the built send-request body
+   (`shipmentControlNumber` for an `ACE_SHIPMENT`, `cargoControlNumber` for an
+   `ACI_SHIPMENT`), not off the `ManifestPayload` — the fixture transport only
+   ever sees the wire body, matching what a real send would see.
+
+Every enqueued message is stamped with the *sent* `companyKey`, `sendId` and
+`tripNumber`, so a test (or a future drain-job test) can correlate a queued
+reply back to the request that produced it. `receive()` drains the queue —
+same "poll and consume" shape a real `GET /api/receive` call has, just
+in-process and instant.
+
+## Open risks carried into this task (from Task 1's plan)
+
+These are unresolved by design — this task wraps the existing outbound/inbound
+mapping behind `CustomsClient`, it doesn't resolve BorderConnect protocol
+ambiguities. See `docs/superpowers/plans/2026-09-12-borderconnect-service-provider.md`
+("Open risks carried into implementation") for the full list; the ones most
+relevant here:
+
+1. **`GET /api/receive` envelope** is still unconfirmed against a live account
+   — `normaliseReceiveBody` (`transport.ts`) defensively handles four shapes
+   until a smoke script (a later task) settles it.
+2. **ACI amendments**: this client's `amend()` sends `operation: UPDATE,
+   autoSend: true` for both regimes — for ACE that's confirmed, but ACI may
+   require `ACI_SEND_REQUEST { type: "AMEND", tripAmendmentReasonCode }`
+   instead if a plain re-upload doesn't carry a reason code BorderConnect
+   wants. Treat ACI `amend()` as experimental until confirmed.
+3. **`companyKey` length** (30 documented vs. a 32-char sample in
+   BorderConnect's own docs) — this client never validates its length or
+   shape, only that it's non-null in live mode.
+4. Hazmat `emergencyContact` and in-bond `irsNumber`/`fda` are still not
+   captured anywhere in the outbound mapping (`validate.ts` 422s those
+   shipments) — unaffected by this task, carried forward as-is.

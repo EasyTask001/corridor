@@ -1,0 +1,6 @@
+{
+  "data": "ACE_RESPONSE",
+  "validationResponses": [
+    { "code": "E203", "description": "Shipment control number already on file" }
+  ]
+}

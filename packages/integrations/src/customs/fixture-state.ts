@@ -100,6 +100,18 @@ export const mockBonds = createFixtureStore<InBondStatusMessage["status"]>({
   ttlMs: BOND_TTL_MS,
 });
 
+/**
+ * The fixture BorderConnect transport's inbox: one queue of not-yet-drained
+ * inbound messages per tenant (`borderconnect/client.ts`'s
+ * `createFixtureBorderConnectTransport`). `send()` appends to it, `receive()`
+ * drains it — the same "poll the shared queue" shape a live `GET
+ * /api/receive` call has, just in-process.
+ */
+export const borderConnectQueue = createFixtureStore<Record<string, unknown>[]>({
+  maxEntries: 5_000,
+  ttlMs: FILING_TTL_MS,
+});
+
 /** Per tenant+regime reference counters: two instances of one tenant never hand out the same reference. */
 const sequences = new Map<string, number>();
 export function nextFixtureSequence(tenant: string, regime: Regime): number {
@@ -115,5 +127,6 @@ export function clearCustomsFixtureState(): void {
   gatewayBonds.clear();
   mockFiled.clear();
   mockBonds.clear();
+  borderConnectQueue.clear();
   sequences.clear();
 }

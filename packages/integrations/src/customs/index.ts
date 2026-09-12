@@ -1,4 +1,5 @@
 import type { Regime } from "@corridor/domain";
+import { createBorderConnectCustomsClient } from "./borderconnect/client";
 import { createGatewayCustomsClient } from "./gateway/client";
 import { createMockCustomsClient } from "./mock";
 import type {
@@ -22,6 +23,20 @@ export {
   isSafeGatewayBaseUrl,
   type GatewayTransport,
 } from "./gateway/transport";
+export {
+  createBorderConnectCustomsClient,
+  createFixtureBorderConnectTransport,
+  type BorderConnectClientOptions,
+} from "./borderconnect/client";
+export { toAceTrip } from "./borderconnect/ace";
+export { toAciTrip } from "./borderconnect/aci";
+export { toCancelSendRequest } from "./borderconnect/send-request";
+export {
+  createBorderConnectHttpTransport,
+  normaliseReceiveBody,
+  type BorderConnectTransport,
+} from "./borderconnect/transport";
+export { parseInbound, inboundKeys, type BorderConnectInbound } from "./borderconnect/inbound";
 
 export const providerForRegime = (regime: Regime): "cbp_ace" | "cbsa_aci" =>
   regime === "ACE" ? "cbp_ace" : "cbsa_aci";
@@ -41,6 +56,10 @@ export function createCustomsClient(input: {
   baseUrl?: string | null;
   apiKey?: string | null;
   webhookSecret?: string | null;
+  /** BorderConnect's per-company API URL suffix (`mode: "border_connect"` only). */
+  apiUrlSuffix?: string | null;
+  /** BorderConnect's Service Provider company key (`mode: "border_connect"` only). */
+  companyKey?: string | null;
   /** Owner of the fixture state (the organization id in production); never sent to a live gateway. */
   tenantKey: string;
 }): CustomsClient {
@@ -53,6 +72,16 @@ export function createCustomsClient(input: {
       apiKey: input.apiKey ?? null,
       credentials: input.credentials,
       webhookSecret: input.webhookSecret ?? null,
+      tenantKey: input.tenantKey,
+    });
+  }
+  if (input.mode === "border_connect") {
+    return createBorderConnectCustomsClient({
+      provider,
+      environment: input.environment ?? "sandbox",
+      apiUrlSuffix: input.apiUrlSuffix ?? null,
+      apiKey: input.apiKey ?? null,
+      companyKey: input.companyKey ?? null,
       tenantKey: input.tenantKey,
     });
   }
