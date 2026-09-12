@@ -8,7 +8,11 @@
  */
 import { createHash } from "node:crypto";
 import { sql, withServiceRole, type DatabaseClient } from "@corridor/db";
-import { TRACKING_RATE_LIMITS, type TrackingLookupInput, type TrackingResult } from "@corridor/domain";
+import {
+  TRACKING_RATE_LIMITS,
+  type TrackingLookupInput,
+  type TrackingResult,
+} from "@corridor/domain";
 import { checkPublicRateLimit, type RateLimitResult } from "../infra/ratelimit";
 
 /** The client address, hashed: enough to count, useless to identify. */

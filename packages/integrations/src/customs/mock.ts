@@ -210,9 +210,18 @@ export function createMockCustomsClient(opts: MockCustomsOptions): CustomsClient
       };
       if (!f) return pending;
       if (f.cancelled)
-        return { ...pending, status: "cancelled", message: "Cancelled at carrier request (simulated)." };
+        return {
+          ...pending,
+          status: "cancelled",
+          message: "Cancelled at carrier request (simulated).",
+        };
       if (f.stage === "done")
-        return { ...pending, status: "released", decision: "released", message: "Released (simulated)." };
+        return {
+          ...pending,
+          status: "released",
+          decision: "released",
+          message: "Released (simulated).",
+        };
       const d = await client.fetchDecision(referenceNumber, f.manifest, { currentStatus: f.stage });
       const status: CustomsStatusMessage["status"] =
         d.decision === "held"

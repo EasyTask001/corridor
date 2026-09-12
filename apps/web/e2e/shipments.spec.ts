@@ -102,7 +102,9 @@ test.describe("shipments", () => {
     await expect(page.getByRole("button", { name: "Add commodity line" })).toHaveCount(0);
   });
 
-  test("CSV import: validate the template, commit the ok rows, then delete the batch", async ({ page }) => {
+  test("CSV import: validate the template, commit the ok rows, then delete the batch", async ({
+    page,
+  }) => {
     await login(page, "dispatch@pathfinder.demo");
     // Unique references so the file can be imported on every run.
     const suffix = Date.now().toString(36).toUpperCase();
@@ -129,7 +131,10 @@ test.describe("shipments", () => {
     await expect(page.getByRole("link", { name: `PFTRPAPS${suffix}A` })).toBeVisible();
 
     await page.goto("/shipments/import");
-    const batch = page.getByLabel("Import batches").getByRole("row", { name: /ace-shipments\.csv/ }).first();
+    const batch = page
+      .getByLabel("Import batches")
+      .getByRole("row", { name: /ace-shipments\.csv/ })
+      .first();
     await batch.getByRole("button", { name: "Delete rows" }).click();
     await expect(page.getByRole("status")).toHaveText(/Deleted 2 rows/);
     await expect(batch.getByText("deleted")).toBeVisible();

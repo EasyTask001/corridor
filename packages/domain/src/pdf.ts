@@ -28,8 +28,14 @@ export const blankDriverSheetsInput = z
     driverName: z.string().trim().max(120).nullable().optional(),
     coDriverName: z.string().trim().max(120).nullable().optional(),
   })
-  .refine((v) => v.toTrip >= v.fromTrip, { message: "toTrip must be at least fromTrip", path: ["toTrip"] })
-  .refine((v) => v.toTrip - v.fromTrip < 50, { message: "At most 50 sheets per batch", path: ["toTrip"] });
+  .refine((v) => v.toTrip >= v.fromTrip, {
+    message: "toTrip must be at least fromTrip",
+    path: ["toTrip"],
+  })
+  .refine((v) => v.toTrip - v.fromTrip < 50, {
+    message: "At most 50 sheets per batch",
+    path: ["toTrip"],
+  });
 export type BlankDriverSheetsInput = z.infer<typeof blankDriverSheetsInput>;
 
 export const pdfDownloadInput = z.object({ id: uuid });

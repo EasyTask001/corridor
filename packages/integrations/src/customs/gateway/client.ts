@@ -9,7 +9,12 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CUSTOMS_EVENT_LABELS, type CustomsEventCode, type Regime } from "@corridor/domain";
-import { gatewayBonds, gatewayFilings, nextFixtureSequence, type GatewayFiling } from "../fixture-state";
+import {
+  gatewayBonds,
+  gatewayFilings,
+  nextFixtureSequence,
+  type GatewayFiling,
+} from "../fixture-state";
 import { simulatedEntryNumber } from "../simulate";
 import type {
   CarrierNotice,
@@ -169,7 +174,11 @@ export function createFixtureGatewayTransport(
       const inBond = /^\/in-bond\/([^/]+)\/(arrival|export|cancel)$/.exec(path);
       if (inBond) {
         const bond = decodeURIComponent(inBond[1]!);
-        bonds.set(tenantKey, bond, inBond[2] === "arrival" ? "arrived" : inBond[2] === "export" ? "exported" : "cancelled");
+        bonds.set(
+          tenantKey,
+          bond,
+          inBond[2] === "arrival" ? "arrived" : inBond[2] === "export" ? "exported" : "cancelled",
+        );
         return Promise.resolve({ ...ack(), bondNumber: bond, fixture: true });
       }
       return routes.post(path, body);
@@ -179,7 +188,11 @@ export function createFixtureGatewayTransport(
       const bond = /^\/in-bond\/([^/?]+)$/.exec(path);
       if (bond) {
         const number = decodeURIComponent(bond[1]!);
-        return Promise.resolve({ bondNumber: number, status: bonds.get(tenantKey, number) ?? "open", fixture: true });
+        return Promise.resolve({
+          bondNumber: number,
+          status: bonds.get(tenantKey, number) ?? "open",
+          fixture: true,
+        });
       }
       if (path.startsWith("/notices")) return Promise.resolve(loadFixture<unknown>("notices"));
       const m = /^\/manifests\/([^/?]+)$/.exec(path);

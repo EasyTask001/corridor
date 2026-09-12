@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useInfiniteQuery, useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueryClient,
+  type InfiniteData,
+} from "@tanstack/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
 import type { AppRouter } from "@corridor/api";
 import { useTRPC } from "@/lib/trpc/client";
@@ -93,9 +98,7 @@ export function NotificationsList({ initial }: { initial: List }) {
         </button>
       </div>
       <div className="panel divide-y divide-border-default">
-        {rows.length === 0 && (
-          <p className="px-4 py-6 text-sm text-fg-secondary">Nothing here.</p>
-        )}
+        {rows.length === 0 && <p className="px-4 py-6 text-sm text-fg-secondary">Nothing here.</p>}
         {rows.map((n) => (
           <div
             key={n.id}

@@ -3,7 +3,11 @@ import { notFound } from "next/navigation";
 import { HelpShell } from "../help-shell";
 import { listManualPages, renderManualPage } from "../manual";
 
-export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
   const page = await renderManualPage((await params).slug);
   return { title: page ? `${page.title} · Help` : "Help" };
 }

@@ -105,7 +105,12 @@ const released: CustomsStatusMessage = {
     { code: "released", label: "Released", occurredAt: "2026-09-06T12:00:01.000Z" },
   ],
   shipments: [
-    { controlNumber: "PFTRPAPS0001", status: "released", entryNumber: "30012345678", entryPortCode: "3801" },
+    {
+      controlNumber: "PFTRPAPS0001",
+      status: "released",
+      entryNumber: "30012345678",
+      entryPortCode: "3801",
+    },
   ],
   raw: {},
 };
@@ -122,8 +127,13 @@ describe("applyStatusMessage", () => {
       .map((e) => `${e.fromStatus}→${e.toStatus}`);
     expect(transitions).toEqual(["sent→accepted", "accepted→released"]);
     // Events and entries ride the final step only.
-    expect(db.table("movementEvents").filter((e) => e.eventType === "customs_event")).toHaveLength(2);
-    expect(db.table("shipments")[0]).toMatchObject({ status: "released", entryNumber: "30012345678" });
+    expect(db.table("movementEvents").filter((e) => e.eventType === "customs_event")).toHaveLength(
+      2,
+    );
+    expect(db.table("shipments")[0]).toMatchObject({
+      status: "released",
+      entryNumber: "30012345678",
+    });
     expect(db.table("customsSubmissions")[0]?.status).toBe("released");
   });
 
@@ -183,10 +193,17 @@ describe("pollCustomsStatus (gateway mode, fixture replay)", () => {
     expect(prepared.skip).toBe(false);
     if (prepared.skip) throw new Error("unreachable");
     const status = await prepared.client.fetchStatus(prepared.ref);
-    const r = await applyPoll(tx, TEST_ORG_ID, prepared, status, { durationMs: 0, correlationId: null, startedAt: new Date().toISOString() });
+    const r = await applyPoll(tx, TEST_ORG_ID, prepared, status, {
+      durationMs: 0,
+      correlationId: null,
+      startedAt: new Date().toISOString(),
+    });
     // First fixture poll of an ACE filing: accepted — not terminal, keep polling.
     expect(r).toMatchObject({ status: "accepted", changed: true, again: true });
-    expect(db.table("integrationEvents")[0]).toMatchObject({ operation: "poll", direction: "inbound" });
+    expect(db.table("integrationEvents")[0]).toMatchObject({
+      operation: "poll",
+      direction: "inbound",
+    });
     expect(db.table("integrationConfigs")[0]?.lastPolledAt).toBeInstanceOf(Date);
     expect(db.table("customsSubmissions")[0]?.status).toBe("accepted");
   });
@@ -195,7 +212,17 @@ describe("pollCustomsStatus (gateway mode, fixture replay)", () => {
     const { preparePoll, applyPoll } = await import("./customs");
     const rows = gatewayRows("sent");
     rows.integrationConfigs = [
-      { id: "cfg-1", organizationId: TEST_ORG_ID, provider: "cbp_ace", mode: "gateway", status: "active", environment: "sandbox", settings: {}, credentialsRef: null, baseUrl: null },
+      {
+        id: "cfg-1",
+        organizationId: TEST_ORG_ID,
+        provider: "cbp_ace",
+        mode: "gateway",
+        status: "active",
+        environment: "sandbox",
+        settings: {},
+        credentialsRef: null,
+        baseUrl: null,
+      },
     ];
     rows.integrationEvents = [];
     const db = createFakeDb({ rows });

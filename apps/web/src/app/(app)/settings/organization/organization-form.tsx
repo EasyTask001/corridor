@@ -225,7 +225,11 @@ export function OrganizationForm({
         </dl>
       )}
 
-      {update.error && <p className="text-sm text-status-danger">{update.error.message}</p>}
+      {update.error && (
+        <p role="alert" className="text-sm text-status-danger">
+          {update.error.message}
+        </p>
+      )}
       {saved && <p className="text-sm text-status-ok">Saved.</p>}
       {!readOnly && (
         <button type="submit" disabled={update.isPending} className="btn-primary">

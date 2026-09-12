@@ -42,7 +42,12 @@ const sheet: DriverSheetData = {
       documents: [{ type: "fast", number: "FAST-77014", expiresOn: "2029-01-01" }],
     },
   ],
-  truck: { unitNumber: "T-101", plates: ["AB12345 ON", "AB12345M MI"], seals: ["SL-100236"], vin: "1FUJGLDR5CSBP8834" },
+  truck: {
+    unitNumber: "T-101",
+    plates: ["AB12345 ON", "AB12345M MI"],
+    seals: ["SL-100236"],
+    vin: "1FUJGLDR5CSBP8834",
+  },
   trailers: [
     { unitNumber: "TR-501", plates: ["TRL5011 ON"], seals: ["SL-100231", "SL-100234"], type: "TF" },
     { unitNumber: "TR-502", plates: ["TRL5022 ON"], seals: ["SL-100235"], type: "RT" },
@@ -73,7 +78,11 @@ const sheet: DriverSheetData = {
   ],
   customsEvents: [
     { label: "Accepted", occurredAt: "2026-09-08T12:00:00.000Z", detail: null },
-    { label: "Entry on file", occurredAt: "2026-09-08T12:05:00.000Z", detail: "PFTRPAPS00001 · 30012345678 @ 3801" },
+    {
+      label: "Entry on file",
+      occurredAt: "2026-09-08T12:05:00.000Z",
+      detail: "PFTRPAPS00001 · 30012345678 @ 3801",
+    },
   ],
   generatedAt: "2026-09-08T12:10:00.000Z",
   simple: false,

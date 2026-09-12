@@ -82,9 +82,21 @@ export const styles = StyleSheet.create({
   },
   signatureRow: { flexDirection: "row", marginTop: 26 },
   signature: { flex: 1, marginRight: 24 },
-  signatureLine: { borderTopWidth: 0.75, borderTopColor: ink.text, paddingTop: 3, fontSize: 7, color: ink.muted },
+  signatureLine: {
+    borderTopWidth: 0.75,
+    borderTopColor: ink.text,
+    paddingTop: 3,
+    fontSize: 7,
+    color: ink.muted,
+  },
   empty: { fontSize: 8.5, color: ink.muted, fontStyle: "italic" },
 });
 
 export const fmtDate = (iso: string | null | undefined) =>
-  iso ? new Date(iso).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Toronto" }) : "—";
+  iso
+    ? new Date(iso).toLocaleString("en-CA", {
+        dateStyle: "medium",
+        timeStyle: "short",
+        timeZone: "America/Toronto",
+      })
+    : "—";

@@ -6,7 +6,9 @@ import { expect, test } from "@playwright/test";
  * Requires local Supabase + `pnpm db:seed`.
  */
 test.describe("public tracking", () => {
-  test("a seeded control number shows its status; a wrong carrier code is not found", async ({ page }) => {
+  test("a seeded control number shows its status; a wrong carrier code is not found", async ({
+    page,
+  }) => {
     await page.goto("/track");
     await expect(page.getByRole("heading", { name: "Check a PAPS / PARS" })).toBeVisible();
     await page.getByLabel("Carrier code").fill("pftr");

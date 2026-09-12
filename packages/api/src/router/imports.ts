@@ -85,10 +85,18 @@ export const importsRouter = router({
       ctx.rls(async (tx) => {
         const actor = { orgId: ctx.orgId, userId: ctx.session.user.id };
         const r = await deleteImportBatch(tx, actor, input.batchId);
-        await writeAudit(tx, ctx.orgId, "import.delete_batch", "import_batch", input.batchId, null, {
-          deleted: r.deleted,
-          kept: r.kept.length,
-        });
+        await writeAudit(
+          tx,
+          ctx.orgId,
+          "import.delete_batch",
+          "import_batch",
+          input.batchId,
+          null,
+          {
+            deleted: r.deleted,
+            kept: r.kept.length,
+          },
+        );
         return { deleted: r.deleted, kept: r.kept };
       }),
     ),

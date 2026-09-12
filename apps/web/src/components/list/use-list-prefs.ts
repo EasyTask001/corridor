@@ -18,7 +18,11 @@ export const PAGE_SIZES = [10, 25, 50, 100, 200] as const;
 export const REFRESH_INTERVALS = [0, 30, 60, 300] as const;
 
 /** Parse a stored value, keeping only what is valid and falling back per field. */
-export function parseListPrefs(raw: string | null, defaults: ListPrefs, validColumns: readonly string[]): ListPrefs {
+export function parseListPrefs(
+  raw: string | null,
+  defaults: ListPrefs,
+  validColumns: readonly string[],
+): ListPrefs {
   if (!raw) return defaults;
   let parsed: unknown;
   try {
@@ -32,8 +36,12 @@ export function parseListPrefs(raw: string | null, defaults: ListPrefs, validCol
   const columns = Array.isArray(p.columns)
     ? validColumns.filter((c) => (p.columns as unknown[]).includes(c))
     : defaults.columns;
-  const pageSize = (PAGE_SIZES as readonly number[]).includes(p.pageSize as number) ? (p.pageSize as number) : defaults.pageSize;
-  const autoRefreshSec = (REFRESH_INTERVALS as readonly number[]).includes(p.autoRefreshSec as number)
+  const pageSize = (PAGE_SIZES as readonly number[]).includes(p.pageSize as number)
+    ? (p.pageSize as number)
+    : defaults.pageSize;
+  const autoRefreshSec = (REFRESH_INTERVALS as readonly number[]).includes(
+    p.autoRefreshSec as number,
+  )
     ? (p.autoRefreshSec as number)
     : defaults.autoRefreshSec;
   return { columns: columns.length > 0 ? columns : defaults.columns, pageSize, autoRefreshSec };
@@ -88,6 +96,9 @@ export function useListPrefs(name: string, defaults: ListPrefs, validColumns: re
     () => read(name, defaults, validColumns),
     () => defaults,
   );
-  const update = useCallback((patch: Partial<ListPrefs>) => write(name, { ...read(name, defaults, validColumns), ...patch }), [name, defaults, validColumns]);
+  const update = useCallback(
+    (patch: Partial<ListPrefs>) => write(name, { ...read(name, defaults, validColumns), ...patch }),
+    [name, defaults, validColumns],
+  );
   return [prefs, update] as const;
 }

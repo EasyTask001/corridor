@@ -31,11 +31,11 @@ In `gateway` mode with no base URL / API key the client replays the fixtures in
 demos). The family is chosen by the **last character of the first shipment's
 control number**:
 
-| Suffix       | Fixture                  | Sequence                              |
-| ------------ | ------------------------ | ------------------------------------- |
-| `H`          | `{ace,aci}-held.json`    | accepted → held → released            |
-| `R`          | `{ace,aci}-rejected.json`| rejected                              |
-| anything else| `{ace,aci}-accepted.json`| accepted → released (entry per shipment) |
+| Suffix        | Fixture                   | Sequence                                 |
+| ------------- | ------------------------- | ---------------------------------------- |
+| `H`           | `{ace,aci}-held.json`     | accepted → held → released               |
+| `R`           | `{ace,aci}-rejected.json` | rejected                                 |
+| anything else | `{ace,aci}-accepted.json` | accepted → released (entry per shipment) |
 
 Each fixture is a list of `stages`; the n-th poll of a reference returns the
 n-th stage (the last one repeats). Events and shipment outcomes are templated

@@ -175,7 +175,11 @@ describe("billing.report_usage", () => {
           and query ilike '%usage_records%'
       `;
       openTxDuringReport = row!.n;
-      return records.map((r) => ({ id: r.id, eventId: `mock_tx_probe_${r.id}`, mode: "mock" as const }));
+      return records.map((r) => ({
+        id: r.id,
+        eventId: `mock_tx_probe_${r.id}`,
+        mode: "mock" as const,
+      }));
     });
 
     expect(order).toEqual(["report"]);
@@ -301,18 +305,27 @@ describe("processDueJobs scoped to one organization (integrations.jobs.runNow)",
     const worker = `org-scope-${Date.now()}`;
     const runAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
     const [a, b] = await withServiceRole(db, (tx) =>
-      tx.insert(schema.backgroundJobs).values([
-        { organizationId: billedOrg, jobType: "noop.test", runAt },
-        { organizationId: unbilledOrg, jobType: "noop.test", runAt },
-      ]).returning({ id: schema.backgroundJobs.id }),
+      tx
+        .insert(schema.backgroundJobs)
+        .values([
+          { organizationId: billedOrg, jobType: "noop.test", runAt },
+          { organizationId: unbilledOrg, jobType: "noop.test", runAt },
+        ])
+        .returning({ id: schema.backgroundJobs.id }),
     );
     try {
       const result = await processDueJobs(db, { worker, organizationId: billedOrg, limit: 10 });
       expect(result.claimed).toBe(1);
       expect(result.results.map((r) => r.id)).toEqual([a!.id]);
       const rows = await withServiceRole(db, (tx) =>
-        tx.select({ id: schema.backgroundJobs.id, lockedBy: schema.backgroundJobs.lockedBy, lastError: schema.backgroundJobs.lastError })
-          .from(schema.backgroundJobs).where(inArray(schema.backgroundJobs.id, [a!.id, b!.id])),
+        tx
+          .select({
+            id: schema.backgroundJobs.id,
+            lockedBy: schema.backgroundJobs.lockedBy,
+            lastError: schema.backgroundJobs.lastError,
+          })
+          .from(schema.backgroundJobs)
+          .where(inArray(schema.backgroundJobs.id, [a!.id, b!.id])),
       );
       expect(rows.find((r) => r.id === a!.id)?.lastError).toBe("no handler for job type noop.test");
       expect(rows.find((r) => r.id === b!.id)?.lockedBy).not.toBe(worker);
@@ -340,13 +353,19 @@ describe("applyTransition concurrency guard (ISSUE-028)", () => {
           .returning({ id: movements.id }),
       );
       const seededDraftMovementId = seeded!.id;
-      const m = await withServiceRole(db, (tx) => requireMovement(tx, ORG_A, seededDraftMovementId));
+      const m = await withServiceRole(db, (tx) =>
+        requireMovement(tx, ORG_A, seededDraftMovementId),
+      );
       // Someone else moves it first. (draft → sent is the first legal
       // MOVEMENT_TRANSITIONS pair; "validated" is not a movement status.)
-      await withServiceRole(db, (tx) => applyTransition(tx, { orgId: ORG_A, userId: null }, m, "sent", "system"));
+      await withServiceRole(db, (tx) =>
+        applyTransition(tx, { orgId: ORG_A, userId: null }, m, "sent", "system"),
+      );
       // The stale snapshot (still "draft") must not be applied over it.
       await expect(
-        withServiceRole(db, (tx) => applyTransition(tx, { orgId: ORG_A, userId: null }, m, "sent", "system")),
+        withServiceRole(db, (tx) =>
+          applyTransition(tx, { orgId: ORG_A, userId: null }, m, "sent", "system"),
+        ),
       ).rejects.toMatchObject({ code: "CONFLICT" });
     } finally {
       await db.delete(organizations).where(eq(organizations.id, ORG_A));

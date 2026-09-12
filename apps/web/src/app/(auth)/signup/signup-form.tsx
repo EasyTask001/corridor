@@ -41,7 +41,11 @@ export function SignupForm({ next }: { next: string }) {
           className="input"
         />
       </div>
-      {state?.error && <p className="text-sm text-status-danger">{state.error}</p>}
+      {state?.error && (
+        <p role="alert" className="text-sm text-status-danger">
+          {state.error}
+        </p>
+      )}
       {state?.message && <p className="text-sm text-status-ok">{state.message}</p>}
       <button type="submit" disabled={pending} className="btn-primary w-full">
         {pending ? "Creating…" : "Create account"}

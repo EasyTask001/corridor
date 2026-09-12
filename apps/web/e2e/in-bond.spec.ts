@@ -16,7 +16,9 @@ async function login(page: Page, email: string) {
 }
 
 test.describe("in-bond", () => {
-  test("send arrival on the seeded record → event row appears; status check answers", async ({ page }) => {
+  test("send arrival on the seeded record → event row appears; status check answers", async ({
+    page,
+  }) => {
     await login(page, "dispatch@pathfinder.demo");
     await page.goto("/in-bond");
     await expect(page.getByRole("heading", { name: "In-bond" })).toBeVisible();
@@ -59,7 +61,12 @@ test.describe("in-bond", () => {
     await expect(page.getByRole("row", { name: new RegExp(control) })).toBeVisible();
 
     await page.goto("/in-bond?tab=external");
-    await page.getByRole("row", { name: new RegExp(control) }).getByRole("button", { name: "Close" }).click();
-    await expect(page.getByRole("row", { name: new RegExp(control) }).getByText("closed")).toBeVisible();
+    await page
+      .getByRole("row", { name: new RegExp(control) })
+      .getByRole("button", { name: "Close" })
+      .click();
+    await expect(
+      page.getByRole("row", { name: new RegExp(control) }).getByText("closed"),
+    ).toBeVisible();
   });
 });

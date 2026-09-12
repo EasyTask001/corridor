@@ -7,7 +7,15 @@ import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, desc, eq, schema, withServiceRole, type DatabaseClient, type RlsTransaction } from "@corridor/db";
+import {
+  and,
+  desc,
+  eq,
+  schema,
+  withServiceRole,
+  type DatabaseClient,
+  type RlsTransaction,
+} from "@corridor/db";
 import { canTransition, hasBlockingIssues, type MovementStatus } from "@corridor/domain";
 import {
   CustomsTransportError,
@@ -142,6 +150,16 @@ export async function customsClientFor(tx: RlsTransaction, orgId: string, regime
     (mode === "gateway" || environment === "production") && cfg?.credentialsRef
       ? await credentialsFor(orgId, provider)
       : undefined;
+  if (
+    mode === "gateway" &&
+    environment === "production" &&
+    (!cfg?.baseUrl || !credentials?.apiKey)
+  ) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `${provider === "cbp_ace" ? "CBP ACE" : "CBSA ACI"} production gateway credentials are not configured`,
+    });
+  }
   return {
     client: createCustomsClient({
       regime,
@@ -150,7 +168,8 @@ export async function customsClientFor(tx: RlsTransaction, orgId: string, regime
       settings,
       credentials,
       baseUrl: cfg?.baseUrl ?? process.env.CUSTOMS_GATEWAY_BASE_URL ?? null,
-      apiKey: credentials?.apiKey ?? process.env.CUSTOMS_GATEWAY_API_KEY ?? null,
+      // A tenant URL must never receive the deployment-wide fallback secret.
+      apiKey: cfg ? (credentials?.apiKey ?? null) : (process.env.CUSTOMS_GATEWAY_API_KEY ?? null),
       webhookSecret: process.env.CUSTOMS_GATEWAY_WEBHOOK_SECRET ?? null,
       tenantKey: orgId,
     }),
@@ -463,7 +482,10 @@ export async function transmitAmendment(
   const full = await loadFull(tx, actor.orgId, movementId);
   const ref = full.customsReferenceNumber;
   if (!ref) {
-    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Manifest has no customs reference" });
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Manifest has no customs reference",
+    });
   }
   const org = await loadOrganization(tx, actor.orgId);
   const { client } = await customsClientFor(tx, actor.orgId, full.regime);
@@ -594,10 +616,18 @@ export async function applyStatusMessage(
 
   if (status.status === "cancelled") {
     if (current.status !== "cancelled" && canTransition(current.status, "cancelled")) {
-      current = await applyTransition(tx, actor, current, "cancelled", "customs_api", {}, {
-        referenceNumber: status.referenceNumber,
-        message: status.message,
-      });
+      current = await applyTransition(
+        tx,
+        actor,
+        current,
+        "cancelled",
+        "customs_api",
+        {},
+        {
+          referenceNumber: status.referenceNumber,
+          message: status.message,
+        },
+      );
       changed = true;
     }
   } else if (status.decision) {
@@ -659,10 +689,17 @@ export async function preparePoll(
 ): Promise<PollPrepared> {
   const m = await requireMovement(tx, orgId, payload.movementId);
   if (m.status !== "sent" && m.status !== "accepted" && m.status !== "held") {
-    return { skip: true, result: { status: m.status, changed: false, again: false, reason: `movement is ${m.status}` } };
+    return {
+      skip: true,
+      result: { status: m.status, changed: false, again: false, reason: `movement is ${m.status}` },
+    };
   }
   const ref = payload.referenceNumber ?? m.customsReferenceNumber;
-  if (!ref) return { skip: true, result: { status: m.status, changed: false, again: false, reason: "no reference number" } };
+  if (!ref)
+    return {
+      skip: true,
+      result: { status: m.status, changed: false, again: false, reason: "no reference number" },
+    };
   const { client, config } = await customsClientFor(tx, orgId, m.regime);
   return { skip: false, m, ref, client, config };
 }
@@ -690,12 +727,20 @@ export async function applyPoll(
     correlationId: meta.correlationId,
   });
   if (config) {
-    await tx.update(integrationConfigs).set({ lastPolledAt: new Date() }).where(eq(integrationConfigs.id, config.id));
+    await tx
+      .update(integrationConfigs)
+      .set({ lastPolledAt: new Date() })
+      .where(eq(integrationConfigs.id, config.id));
   }
   // Re-read under lock: the snapshot in `prepared.m` predates the network call (Task 3).
   const current = await lockMovement(tx, orgId, m.id);
   if (current.status !== m.status) {
-    return { status: current.status, changed: false, again: false, reason: "movement changed during poll" };
+    return {
+      status: current.status,
+      changed: false,
+      again: false,
+      reason: "movement changed during poll",
+    };
   }
   const result = await applyStatusMessage(tx, { orgId, userId: null }, current, status);
   const startedAt = meta.startedAt ? new Date(meta.startedAt).getTime() : Date.now();
@@ -746,7 +791,11 @@ export async function applyInboundCustomsMessage(
 > {
   return withServiceRole(db, async (tx) => {
     const [sub] = await tx
-      .select({ orgId: customsSubmissions.organizationId, movementId: customsSubmissions.movementId, provider: customsSubmissions.provider })
+      .select({
+        orgId: customsSubmissions.organizationId,
+        movementId: customsSubmissions.movementId,
+        provider: customsSubmissions.provider,
+      })
       .from(customsSubmissions)
       .where(eq(customsSubmissions.referenceNumber, message.referenceNumber))
       .orderBy(desc(customsSubmissions.createdAt))

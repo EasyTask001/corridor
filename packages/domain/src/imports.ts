@@ -1,7 +1,14 @@
 import { z } from "zod";
 import { uuid } from "./common";
 import { countryCode, currency, hsCode, regime } from "./movement";
-import { controlReference, aceShipmentType, aciCargoType, inBondEntryType, quantityUnit, weightUnit } from "./shipment";
+import {
+  controlReference,
+  aceShipmentType,
+  aciCargoType,
+  inBondEntryType,
+  quantityUnit,
+  weightUnit,
+} from "./shipment";
 
 // ---------------------------------------------------------------------------
 // CSV bulk import (0028) — templates, row schemas, report
@@ -27,30 +34,87 @@ export interface ImportColumn {
 export const IMPORT_TEMPLATES: Record<ImportKind, ImportColumn[]> = {
   shipments: [
     { key: "regime", label: "Regime", required: true, example: "ACE", note: "ACE or ACI" },
-    { key: "carrier_code", label: "Carrier code", example: "PFTR", note: "blank = the regime's default code" },
-    { key: "control_reference", label: "Control reference", required: true, example: "PAPS90101", note: "PAPS / PARS / bill part; the carrier code is prefixed" },
-    { key: "shipment_type", label: "Shipment type (ACE)", example: "regular_bill", note: "regular_bill, section_321, goods_astray, free_of_duty_7523, free_return_us_goods_3311, unaccounted_articles_3299, in_bond" },
-    { key: "cargo_type", label: "Cargo type (ACI)", example: "regular", note: "regular, consolidated, csa, a49, e29b" },
-    { key: "shipper_name", label: "Shipper", example: "Maple Ridge Steel Ltd", note: "must match a partner name" },
-    { key: "consignee_name", label: "Consignee", example: "Great Lakes Fabrication Inc", note: "must match a partner name" },
+    {
+      key: "carrier_code",
+      label: "Carrier code",
+      example: "PFTR",
+      note: "blank = the regime's default code",
+    },
+    {
+      key: "control_reference",
+      label: "Control reference",
+      required: true,
+      example: "PAPS90101",
+      note: "PAPS / PARS / bill part; the carrier code is prefixed",
+    },
+    {
+      key: "shipment_type",
+      label: "Shipment type (ACE)",
+      example: "regular_bill",
+      note: "regular_bill, section_321, goods_astray, free_of_duty_7523, free_return_us_goods_3311, unaccounted_articles_3299, in_bond",
+    },
+    {
+      key: "cargo_type",
+      label: "Cargo type (ACI)",
+      example: "regular",
+      note: "regular, consolidated, csa, a49, e29b",
+    },
+    {
+      key: "shipper_name",
+      label: "Shipper",
+      example: "Maple Ridge Steel Ltd",
+      note: "must match a partner name",
+    },
+    {
+      key: "consignee_name",
+      label: "Consignee",
+      example: "Great Lakes Fabrication Inc",
+      note: "must match a partner name",
+    },
     { key: "entry_port", label: "Entry port", example: "3801", note: "CBP port code" },
     { key: "in_bond_entry_type", label: "In-bond entry type", example: "", note: "IT, TE or IE" },
-    { key: "in_bond_destination", label: "In-bond destination", example: "", note: "CBP in-bond destination code" },
+    {
+      key: "in_bond_destination",
+      label: "In-bond destination",
+      example: "",
+      note: "CBP in-bond destination code",
+    },
     { key: "is_pars", label: "PARS", example: "false", note: "true/false" },
-    { key: "destination_port", label: "Destination office (ACI)", example: "", note: "CBSA office code" },
-    { key: "sublocation", label: "Sub-location (ACI)", example: "", note: "CBSA sub-location code" },
+    {
+      key: "destination_port",
+      label: "Destination office (ACI)",
+      example: "",
+      note: "CBSA office code",
+    },
+    {
+      key: "sublocation",
+      label: "Sub-location (ACI)",
+      example: "",
+      note: "CBSA sub-location code",
+    },
     { key: "loading_country", label: "Loading country (ACI)", example: "", note: "2-letter" },
     { key: "loading_province", label: "Loading province (ACI)", example: "" },
     { key: "loading_city", label: "Loading city (ACI)", example: "" },
     { key: "consignee_business_number", label: "Consignee business # (ACI)", example: "" },
   ],
   commodities: [
-    { key: "control_number", label: "Control number", required: true, example: "PFTRPAPS90101", note: "an existing shipment's full control number" },
+    {
+      key: "control_number",
+      label: "Control number",
+      required: true,
+      example: "PFTRPAPS90101",
+      note: "an existing shipment's full control number",
+    },
     { key: "line_number", label: "Line #", example: "1", note: "blank = next line" },
     { key: "description", label: "Description", required: true, example: "Hot-rolled steel coils" },
     { key: "hs_code", label: "HS code", example: "7208.39" },
     { key: "quantity", label: "Quantity", example: "6" },
-    { key: "quantity_unit", label: "Quantity unit", example: "Coil", note: "Bag, Bale, Barrel, Box, Bundle, Carton, Case, Coil, Crate, Drum, Pallet, Piece, Roll, …" },
+    {
+      key: "quantity_unit",
+      label: "Quantity unit",
+      example: "Coil",
+      note: "Bag, Bale, Barrel, Box, Bundle, Carton, Case, Coil, Crate, Drum, Pallet, Piece, Roll, …",
+    },
     { key: "weight", label: "Weight", example: "18000" },
     { key: "weight_unit", label: "Weight unit", example: "KG", note: "KG or LB" },
     { key: "country_of_origin", label: "Country of origin", example: "CA" },
@@ -77,7 +141,11 @@ export const IMPORT_TEMPLATES: Record<ImportKind, ImportColumn[]> = {
 export const importTemplateHeader = (kind: ImportKind) =>
   IMPORT_TEMPLATES[kind].map((c) => c.key).join(",");
 
-const blank = z.string().trim().optional().transform((v) => (v === "" ? undefined : v));
+const blank = z
+  .string()
+  .trim()
+  .optional()
+  .transform((v) => (v === "" ? undefined : v));
 const bool = z
   .string()
   .trim()
@@ -92,10 +160,16 @@ const num = (label: string) =>
     .transform((v, ctx) => {
       if (v === undefined || v === "") return undefined;
       const n = Number(v.replace(/,/g, ""));
-      if (!Number.isFinite(n)) ctx.addIssue({ code: "custom", message: `${label} must be a number` });
+      if (!Number.isFinite(n))
+        ctx.addIssue({ code: "custom", message: `${label} must be a number` });
       return n;
     });
-const upper = z.string().trim().toUpperCase().optional().transform((v) => (v === "" ? undefined : v));
+const upper = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .optional()
+  .transform((v) => (v === "" ? undefined : v));
 
 /** One CSV row of the shipments template, as typed (names, codes) — not yet resolved. */
 export const shipmentImportRow = z
@@ -103,8 +177,18 @@ export const shipmentImportRow = z
     regime: z.string().trim().toUpperCase().pipe(regime),
     carrier_code: upper,
     control_reference: z.string().trim().toUpperCase().pipe(controlReference),
-    shipment_type: z.string().trim().toLowerCase().optional().transform((v) => (v === "" ? undefined : v)),
-    cargo_type: z.string().trim().toLowerCase().optional().transform((v) => (v === "" ? undefined : v)),
+    shipment_type: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .optional()
+      .transform((v) => (v === "" ? undefined : v)),
+    cargo_type: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .optional()
+      .transform((v) => (v === "" ? undefined : v)),
     shipper_name: blank,
     consignee_name: blank,
     entry_port: upper,
@@ -121,19 +205,42 @@ export const shipmentImportRow = z
   .superRefine((r, ctx) => {
     if (r.regime === "ACE") {
       if (!r.shipment_type || !aceShipmentType.safeParse(r.shipment_type).success)
-        ctx.addIssue({ code: "custom", path: ["shipment_type"], message: "ACE needs a valid shipment_type" });
-      if (r.cargo_type) ctx.addIssue({ code: "custom", path: ["cargo_type"], message: "cargo_type is ACI only" });
+        ctx.addIssue({
+          code: "custom",
+          path: ["shipment_type"],
+          message: "ACE needs a valid shipment_type",
+        });
+      if (r.cargo_type)
+        ctx.addIssue({ code: "custom", path: ["cargo_type"], message: "cargo_type is ACI only" });
     } else {
       if (!r.cargo_type || !aciCargoType.safeParse(r.cargo_type).success)
-        ctx.addIssue({ code: "custom", path: ["cargo_type"], message: "ACI needs a valid cargo_type" });
-      if (r.shipment_type) ctx.addIssue({ code: "custom", path: ["shipment_type"], message: "shipment_type is ACE only" });
+        ctx.addIssue({
+          code: "custom",
+          path: ["cargo_type"],
+          message: "ACI needs a valid cargo_type",
+        });
+      if (r.shipment_type)
+        ctx.addIssue({
+          code: "custom",
+          path: ["shipment_type"],
+          message: "shipment_type is ACE only",
+        });
     }
     if (r.shipment_type === "in_bond" && !r.in_bond_entry_type)
-      ctx.addIssue({ code: "custom", path: ["in_bond_entry_type"], message: "an in-bond shipment needs IT, TE or IE" });
+      ctx.addIssue({
+        code: "custom",
+        path: ["in_bond_entry_type"],
+        message: "an in-bond shipment needs IT, TE or IE",
+      });
   });
 export type ShipmentImportRow = z.infer<typeof shipmentImportRow>;
 
-const hazmatCode = upper.pipe(z.string().regex(/^UN\d{4}$/, "UN code must look like UN1203").optional());
+const hazmatCode = upper.pipe(
+  z
+    .string()
+    .regex(/^UN\d{4}$/, "UN code must look like UN1203")
+    .optional(),
+);
 
 /** One CSV row of the commodities template. */
 export const commodityImportRow = z.object({

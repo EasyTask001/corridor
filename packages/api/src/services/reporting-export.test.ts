@@ -38,7 +38,11 @@ describe("csv escaping", () => {
 
 describe("column selection", () => {
   it("keeps the picked columns in the picked order and drops unknown keys", () => {
-    const picked = pickColumns(CROSSING_REPORT_COLUMNS, ["truckUnit", "movementNumber", "nope" as never]);
+    const picked = pickColumns(CROSSING_REPORT_COLUMNS, [
+      "truckUnit",
+      "movementNumber",
+      "nope" as never,
+    ]);
     expect(picked.map((c) => c.key)).toEqual(["truckUnit", "movementNumber"]);
     expect(picked[1]?.label).toBe("Movement");
   });

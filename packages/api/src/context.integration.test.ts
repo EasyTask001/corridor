@@ -119,7 +119,9 @@ describe("createContext", () => {
       expect(reloaded.session?.permissions).toContain("organization.manage");
     } finally {
       if (organizationId) {
-        await conn.db.delete(schema.organizations).where(eq(schema.organizations.id, organizationId));
+        await conn.db
+          .delete(schema.organizations)
+          .where(eq(schema.organizations.id, organizationId));
       }
       await admin.auth.admin.deleteUser(created.user.id);
     }

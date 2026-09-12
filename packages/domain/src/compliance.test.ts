@@ -95,7 +95,11 @@ describe("document sets", () => {
       ]),
       TODAY,
     );
-    expect(finding).toMatchObject({ field: "fast", dedupeKey: "driver:d1:fast", label: "FAST card" });
+    expect(finding).toMatchObject({
+      field: "fast",
+      dedupeKey: "driver:d1:fast",
+      label: "FAST card",
+    });
   });
 
   it("driver: a passenger has no license to expire", () => {

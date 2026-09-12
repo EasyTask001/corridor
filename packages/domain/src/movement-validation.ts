@@ -6,7 +6,12 @@
 import { daysBetween, todayIso } from "./compliance";
 import type { Regime } from "./movement";
 import type { CrewRole } from "./movement-inputs";
-import { expectedPartnerCountry, type Address, type DriverDocumentType, type PersonType } from "./registry";
+import {
+  expectedPartnerCountry,
+  type Address,
+  type DriverDocumentType,
+  type PersonType,
+} from "./registry";
 import type { AceShipmentType, AciCargoType, InBondEntryType } from "./shipment";
 
 export type IssueSeverity = "blocking" | "warning";
@@ -283,13 +288,18 @@ export function validateForTransmit(
   }
 
   // --- trailers ---
-  if (m.trailers.length === 0) warn("trailer_missing", "No trailer assigned (bobtail?).", "trailer");
+  if (m.trailers.length === 0)
+    warn("trailer_missing", "No trailer assigned (bobtail?).", "trailer");
   m.trailers.forEach((t, i) => {
     const at = (suffix: string) => `trailer_${i}_${suffix}`;
     if (t.status !== "active")
       block(at("inactive"), `Trailer ${t.unitNumber} is not active.`, "trailer");
     if (expired(t.registrationExpiry, today))
-      block(at("registration_expired"), `Trailer ${t.unitNumber}: registration has expired.`, "trailer");
+      block(
+        at("registration_expired"),
+        `Trailer ${t.unitNumber}: registration has expired.`,
+        "trailer",
+      );
     // --- seals ---
     if (t.sealCount === 0)
       warn(at("seals_missing"), `No seal recorded for trailer ${t.unitNumber}.`, "seals");

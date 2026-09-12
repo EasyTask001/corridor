@@ -190,7 +190,12 @@ export const reportingRouter = router({
           source: input.source.kind,
           byteSize: doc.byteSize,
         });
-        return { id: doc.id, signedUrl: doc.signedUrl, byteSize: doc.byteSize, format: input.format };
+        return {
+          id: doc.id,
+          signedUrl: doc.signedUrl,
+          byteSize: doc.byteSize,
+          format: input.format,
+        };
       }),
     ),
 

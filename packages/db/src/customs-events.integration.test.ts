@@ -101,7 +101,9 @@ async function createShipment(actor: Actor, regime: "ACE" | "ACI", movementId: s
         regime,
         movementId,
         carrierCode: regime === "ACE" ? "PFTR" : "7ELU",
-        ...(regime === "ACE" ? { shipmentType: "regular_bill" as const } : { cargoType: "regular" as const }),
+        ...(regime === "ACE"
+          ? { shipmentType: "regular_bill" as const }
+          : { cargoType: "regular" as const }),
         controlReference: `T${Date.now().toString(36).toUpperCase()}${Math.floor(Math.random() * 1000)}`,
       })
       .returning();
@@ -127,7 +129,11 @@ describe("manifest flags (0022)", () => {
           .where(eq(movements.id, aci.id))
           .returning(),
       );
-      expect(ok).toMatchObject({ aciLvs: true, aciInTransit: true, iitIndicator: "iit_carrier_bond" });
+      expect(ok).toMatchObject({
+        aciLvs: true,
+        aciInTransit: true,
+        iitIndicator: "iit_carrier_bond",
+      });
     } finally {
       await db.delete(movements).where(eq(movements.id, ace.id));
       await db.delete(movements).where(eq(movements.id, aci.id));

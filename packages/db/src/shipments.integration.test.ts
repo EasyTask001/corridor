@@ -177,7 +177,10 @@ describe("shipments_guard()", () => {
         withRls(db, as(dispatcherA), (tx) =>
           // notes is content; the entry number is customs-assigned and stays
           // writable after transmit (0022).
-          tx.update(shipments).set({ notes: "edited after transmit" }).where(eq(shipments.id, s.id)),
+          tx
+            .update(shipments)
+            .set({ notes: "edited after transmit" })
+            .where(eq(shipments.id, s.id)),
         ),
       ),
     ).toMatch(/not editable in status sent/);

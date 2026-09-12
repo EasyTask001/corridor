@@ -10,7 +10,12 @@ function Lines({ n }: { n: number }) {
       {Array.from({ length: n }, (_, i) => (
         <View
           key={i}
-          style={{ borderBottomWidth: 0.5, borderBottomColor: "#c9ccd3", height: 16, marginBottom: 2 }}
+          style={{
+            borderBottomWidth: 0.5,
+            borderBottomColor: "#c9ccd3",
+            height: 16,
+            marginBottom: 2,
+          }}
         />
       ))}
     </View>
@@ -28,7 +33,11 @@ export function BlankDriverSheet({ data }: { data: BlankSheetData }) {
     <Document title="Blank driver sheets" author={data.carrier.name}>
       {data.tripNumbers.map((trip) => (
         <Page key={trip} size="LETTER" style={styles.page}>
-          <Masthead carrier={data.carrier} title={`${data.regime} driver sheet`} meta={[`Trip ${trip}`]} />
+          <Masthead
+            carrier={data.carrier}
+            title={`${data.regime} driver sheet`}
+            meta={[`Trip ${trip}`]}
+          />
           <Section title="Crossing">
             <View style={styles.grid}>
               <Field label={`${agency} port of entry`} value=" " wide />
@@ -51,7 +60,13 @@ export function BlankDriverSheet({ data }: { data: BlankSheetData }) {
             </View>
             <Lines n={2} />
           </Section>
-          <Section title={data.regime === "ACE" ? "Shipments (PAPS / SCN, shipper, consignee, entry #)" : "Shipments (PARS / CCN, shipper, consignee)"}>
+          <Section
+            title={
+              data.regime === "ACE"
+                ? "Shipments (PAPS / SCN, shipper, consignee, entry #)"
+                : "Shipments (PARS / CCN, shipper, consignee)"
+            }
+          >
             <Lines n={8} />
           </Section>
           <Section title="Notes">

@@ -24,18 +24,32 @@ describe("audit.forEntity", () => {
       permissions: ["shipment.read"],
       rows: {
         auditLog: [
-          { id: 1, organizationId: TEST_ORG_ID, actorId: null, action: "shipment.update", entityType: "shipment", entityId: "s1", before: null, after: {}, createdAt: new Date() },
+          {
+            id: 1,
+            organizationId: TEST_ORG_ID,
+            actorId: null,
+            action: "shipment.update",
+            entityType: "shipment",
+            entityId: "s1",
+            before: null,
+            after: {},
+            createdAt: new Date(),
+          },
         ],
       },
     });
     const rows = await caller.forEntity({ entityType: "shipment", entityId: "s1" });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ action: "shipment.update" });
-    await expect(caller.forEntity({ entityType: "driver", entityId: "d1" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.forEntity({ entityType: "driver", entityId: "d1" })).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
   });
 
   it("refuses someone with none of the read permissions", async () => {
     const { caller } = createMockCaller(createCaller, { permissions: ["billing.read"] });
-    await expect(caller.forEntity({ entityType: "shipment", entityId: "s1" })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(
+      caller.forEntity({ entityType: "shipment", entityId: "s1" }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
   });
 });

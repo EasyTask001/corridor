@@ -50,7 +50,15 @@ export async function POST(req: Request) {
     );
   }
 
-  const { messages }: { messages: UIMessage[] } = await req.json();
+  const body = (await req.json()) as { messages?: unknown };
+  if (!Array.isArray(body.messages) || body.messages.length > 50) {
+    return new Response("Invalid message history", { status: 400 });
+  }
+  const messages = body.messages as UIMessage[];
+  const messageBytes = JSON.stringify(messages).length;
+  if (messageBytes > 200_000) {
+    return new Response("Message history is too large", { status: 413 });
+  }
   const lastUserText =
     [...messages]
       .reverse()

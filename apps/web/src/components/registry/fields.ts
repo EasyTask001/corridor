@@ -65,7 +65,13 @@ const EXTRA_PLATES: FieldDef = {
   addLabel: "Add plate",
   fields: [
     { name: "plateNumber", label: "Plate", required: true, mono: true, uppercase: true },
-    { name: "jurisdiction", label: "Province/state", required: true, placeholder: "MI", uppercase: true },
+    {
+      name: "jurisdiction",
+      label: "Province/state",
+      required: true,
+      placeholder: "MI",
+      uppercase: true,
+    },
   ],
 };
 
@@ -162,7 +168,12 @@ export const REGISTRIES: Record<RegistryKind, RegistryConfig> = {
       { name: "usAddress.city", label: "US city" },
       { name: "usAddress.region", label: "US state", uppercase: true },
       { name: "usAddress.postalCode", label: "US ZIP", uppercase: true },
-      { name: "usAddress.country", label: "US address country", placeholder: "US", uppercase: true },
+      {
+        name: "usAddress.country",
+        label: "US address country",
+        placeholder: "US",
+        uppercase: true,
+      },
       STATUS,
       NOTES,
     ],
@@ -240,7 +251,12 @@ export const REGISTRIES: Record<RegistryKind, RegistryConfig> = {
     fields: [
       { name: "unitNumber", label: "Unit number", required: true, mono: true },
       // CBP equipment description codes, read from public.equipment_types.
-      { name: "trailerType", label: "Equipment type", type: "select", optionsFrom: "equipmentTypes" },
+      {
+        name: "trailerType",
+        label: "Equipment type",
+        type: "select",
+        optionsFrom: "equipmentTypes",
+      },
       { name: "vin", label: "VIN", mono: true, uppercase: true },
       { name: "lengthFt", label: "Length (ft)", type: "number" },
       { name: "plateNumber", label: "Plate", required: true, mono: true, uppercase: true },
@@ -296,7 +312,13 @@ export const REGISTRIES: Record<RegistryKind, RegistryConfig> = {
       { name: "address.city", label: "City" },
       { name: "address.region", label: "Province/state", uppercase: true },
       { name: "address.postalCode", label: "Postal / ZIP", uppercase: true },
-      { name: "address.country", label: "Country", placeholder: "CA", uppercase: true, required: true },
+      {
+        name: "address.country",
+        label: "Country",
+        placeholder: "CA",
+        uppercase: true,
+        required: true,
+      },
       { name: "contactName", label: "Contact name" },
       { name: "contactEmail", label: "Contact email", type: "email" },
       { name: "contactPhone", label: "Contact phone", type: "tel" },

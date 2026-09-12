@@ -216,7 +216,11 @@ export function RoleManager({ initialRoles, catalog }: { initialRoles: Role[]; c
           ))}
         </div>
 
-        {error && <p className="mt-4 text-sm text-status-danger">{error.message}</p>}
+        {error && (
+          <p role="alert" className="mt-4 text-sm text-status-danger">
+            {error.message}
+          </p>
+        )}
         {notice && <p className="mt-4 text-sm text-status-ok">{notice}</p>}
         <div className="mt-6 flex items-center gap-3 border-t border-border-default pt-4">
           <button

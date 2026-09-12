@@ -25,7 +25,8 @@ const FORMULA_TRIGGER = /^[=+\-@\t\r]/;
  */
 export function csvField(value: string | number | null | undefined): string {
   if (value === null || value === undefined) return "";
-  const s = typeof value === "number" ? String(value) : FORMULA_TRIGGER.test(value) ? `'${value}` : value;
+  const s =
+    typeof value === "number" ? String(value) : FORMULA_TRIGGER.test(value) ? `'${value}` : value;
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
@@ -37,7 +38,10 @@ export function toCsv(columns: ExportColumn[], rows: ExportRow[]): string {
 }
 
 /** Keep only the picked columns, in the picked order. */
-export function pickColumns<K extends string>(all: ReadonlyArray<{ key: K; label: string }>, keys: readonly K[]) {
+export function pickColumns<K extends string>(
+  all: ReadonlyArray<{ key: K; label: string }>,
+  keys: readonly K[],
+) {
   const byKey = new Map(all.map((c) => [c.key, c]));
   return keys.flatMap((k) => (byKey.has(k) ? [byKey.get(k)!] : []));
 }
@@ -53,12 +57,24 @@ export async function exportTable(
     metadata?: Record<string, unknown>;
   },
 ) {
-  const metadata = { ...(args.metadata ?? {}), format: args.format, rowCount: args.data.rows.length };
+  const metadata = {
+    ...(args.metadata ?? {}),
+    format: args.format,
+    rowCount: args.data.rows.length,
+  };
   if (args.format === "pdf") {
-    return generateTableReport(tx, actor, { kind: args.kind, scope: args.scope, data: args.data, metadata });
+    return generateTableReport(tx, actor, {
+      kind: args.kind,
+      scope: args.scope,
+      data: args.data,
+      metadata,
+    });
   }
   const bytes = Buffer.from(toCsv(args.data.columns, args.data.rows), "utf8");
-  const storagePath = generatedPathFor(actor.orgId, args.scope, args.kind).replace(/\.pdf$/, ".csv");
+  const storagePath = generatedPathFor(actor.orgId, args.scope, args.kind).replace(
+    /\.pdf$/,
+    ".csv",
+  );
   await uploadGeneratedFile(storagePath, bytes, "text/csv");
   const [row] = await tx
     .insert(generatedDocuments)
@@ -73,5 +89,10 @@ export async function exportTable(
       createdBy: actor.userId,
     })
     .returning();
-  return { id: row!.id, storagePath, byteSize: bytes.length, signedUrl: await signedUrlFor(storagePath) };
+  return {
+    id: row!.id,
+    storagePath,
+    byteSize: bytes.length,
+    signedUrl: await signedUrlFor(storagePath),
+  };
 }

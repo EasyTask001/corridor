@@ -67,7 +67,9 @@ describe("row activation", () => {
   it("activates a row with Enter and Space from the keyboard", async () => {
     const user = userEvent.setup();
     const onRowClick = vi.fn();
-    render(<DataTable data={rows} columns={columns} getRowId={(r) => r.id} onRowClick={onRowClick} />);
+    render(
+      <DataTable data={rows} columns={columns} getRowId={(r) => r.id} onRowClick={onRowClick} />,
+    );
     await user.tab(); // first body row is the first tabbable element
     expect(screen.getAllByRole("row")[1]).toHaveFocus();
     await user.keyboard("{Enter}");
@@ -80,9 +82,14 @@ describe("row activation", () => {
     const user = userEvent.setup();
     const onRowClick = vi.fn();
     const withButton = helper.columns([
-      helper.accessor("name", { header: "Driver", cell: (c) => <button type="button">{c.getValue()}</button> }),
+      helper.accessor("name", {
+        header: "Driver",
+        cell: (c) => <button type="button">{c.getValue()}</button>,
+      }),
     ]);
-    render(<DataTable data={rows} columns={withButton} getRowId={(r) => r.id} onRowClick={onRowClick} />);
+    render(
+      <DataTable data={rows} columns={withButton} getRowId={(r) => r.id} onRowClick={onRowClick} />,
+    );
     await user.click(screen.getByRole("button", { name: "Bianca Ross" }));
     await user.keyboard("{Enter}");
     expect(onRowClick).not.toHaveBeenCalled();

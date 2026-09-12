@@ -4,6 +4,23 @@
  */
 import { CustomsTransportError } from "../types";
 
+/** Reject endpoints that could target local or private server infrastructure. */
+export function isSafeGatewayBaseUrl(raw: string): boolean {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:") return false;
+    const host = url.hostname.toLowerCase();
+    if (host === "localhost" || host.endsWith(".localhost") || host === "[::1]") return false;
+    if (/^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)) return false;
+    const private172 = /^172\.(\d{1,3})\./.exec(host)?.[1];
+    if (private172 && Number(private172) >= 16 && Number(private172) <= 31) return false;
+    if (host === "169.254.169.254" || host === "0.0.0.0") return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export interface GatewayTransport {
   post(path: string, body: unknown): Promise<unknown>;
   get(path: string): Promise<unknown>;
@@ -57,7 +74,11 @@ export function createHttpTransport(opts: HttpTransportOptions): GatewayTranspor
         json && typeof json === "object" && "message" in json
           ? String(json.message)
           : `HTTP ${res.status}`;
-      throw new CustomsTransportError(`Customs gateway: ${detail}`, res.status, retryable(res.status));
+      throw new CustomsTransportError(
+        `Customs gateway: ${detail}`,
+        res.status,
+        retryable(res.status),
+      );
     }
     return json;
   }
@@ -101,6 +122,8 @@ export function createFixtureTransport(
 }
 
 function patternMatches(pattern: string, key: string): boolean {
-  const re = new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]+")}$`);
+  const re = new RegExp(
+    `^${pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]+")}$`,
+  );
   return re.test(key);
 }

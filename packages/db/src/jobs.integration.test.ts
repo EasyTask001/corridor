@@ -359,11 +359,14 @@ describe("background_jobs queue", () => {
       .returning({ id: organizations.id });
     const runAt = new Date(Date.now() - 2 * 3600_000);
     const [a, b, system] = await withServiceRole(db, (tx) =>
-      tx.insert(backgroundJobs).values([
-        { organizationId: orgA!.id, jobType: "noop.test", runAt },
-        { organizationId: orgB!.id, jobType: "noop.test", runAt },
-        { organizationId: null, jobType: "noop.test", runAt },
-      ]).returning({ id: backgroundJobs.id }),
+      tx
+        .insert(backgroundJobs)
+        .values([
+          { organizationId: orgA!.id, jobType: "noop.test", runAt },
+          { organizationId: orgB!.id, jobType: "noop.test", runAt },
+          { organizationId: null, jobType: "noop.test", runAt },
+        ])
+        .returning({ id: backgroundJobs.id }),
     );
     try {
       const claimed = await withServiceRole(db, (tx) =>
@@ -373,8 +376,14 @@ describe("background_jobs queue", () => {
       );
       expect(claimed.map((r) => Number(r.id))).toEqual([a!.id]);
       const rows = await withServiceRole(db, (tx) =>
-        tx.select({ id: backgroundJobs.id, status: backgroundJobs.status, lockedBy: backgroundJobs.lockedBy })
-          .from(backgroundJobs).where(inArray(backgroundJobs.id, [b!.id, system!.id])),
+        tx
+          .select({
+            id: backgroundJobs.id,
+            status: backgroundJobs.status,
+            lockedBy: backgroundJobs.lockedBy,
+          })
+          .from(backgroundJobs)
+          .where(inArray(backgroundJobs.id, [b!.id, system!.id])),
       );
       expect(rows).toHaveLength(2);
       expect(rows.every((r) => r.status === "pending" && r.lockedBy === null)).toBe(true);
@@ -382,7 +391,9 @@ describe("background_jobs queue", () => {
       const unscoped = await withServiceRole(db, (tx) =>
         tx.execute<{ id: number }>(sql`select id from public.claim_jobs(10, 'unscoped', 5, 600)`),
       );
-      expect(unscoped.map((r) => Number(r.id))).toEqual(expect.arrayContaining([b!.id, system!.id]));
+      expect(unscoped.map((r) => Number(r.id))).toEqual(
+        expect.arrayContaining([b!.id, system!.id]),
+      );
       // Exactly one claim_jobs remains (the 4-arg overload is gone).
       const [row] = await withServiceRole(db, (tx) =>
         tx.execute<{ count: string }>(sql`select count(*)::text as count from pg_proc p

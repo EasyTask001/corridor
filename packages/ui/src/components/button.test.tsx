@@ -10,7 +10,9 @@ describe("Button", () => {
 
   it("applies bordered neutral classes for the secondary variant", () => {
     render(<Button variant="secondary">Cancel</Button>);
-    expect(screen.getByRole("button", { name: "Cancel" }).className).toContain("border-border-default");
+    expect(screen.getByRole("button", { name: "Cancel" }).className).toContain(
+      "border-border-default",
+    );
   });
 
   it("keeps the signal variant's own styling", () => {

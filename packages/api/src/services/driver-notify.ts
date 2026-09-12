@@ -7,7 +7,12 @@
  * timeline. Runs under the worker's service role.
  */
 import { eq, schema, type RlsTransaction } from "@corridor/db";
-import { sendEmail, sendSms, type SendEmailResult, type SendSmsResult } from "@corridor/integrations";
+import {
+  sendEmail,
+  sendSms,
+  type SendEmailResult,
+  type SendSmsResult,
+} from "@corridor/integrations";
 import { logIntegrationEvent } from "./customs";
 import { addEvent, loadFull, loadOrganization } from "./movements";
 import { generateForMovement } from "./pdf";
@@ -57,7 +62,10 @@ export async function runDriverNotify(
       : `${label}: entry numbers on file — driver sheet attached`;
   const entryLines = full.shipments
     .filter((s) => s.entryNumber)
-    .map((s) => `${s.controlNumber}: entry ${s.entryNumber}${s.entryPortCode ? ` @ ${s.entryPortCode}` : ""}`);
+    .map(
+      (s) =>
+        `${s.controlNumber}: entry ${s.entryNumber}${s.entryPortCode ? ` @ ${s.entryPortCode}` : ""}`,
+    );
   const text = [
     `${full.movementNumber}${full.tripNumber ? ` (trip ${full.tripNumber})` : ""} — ${full.port?.code ?? ""} ${full.port?.name ?? ""}`.trim(),
     ...(entryLines.length ? ["", "Entries:", ...entryLines] : []),
@@ -119,7 +127,11 @@ export async function runDriverNotify(
         `Driver sheet ${input.trigger === "accepted" ? "sent on acceptance" : "sent with entry numbers"}`,
         delivered.length ? `e-mailed to ${delivered.join(", ")}` : "no e-mail recipients",
         failed.length ? `e-mail failed for ${failed.join(", ")}` : null,
-        sms ? (sms.result.error ? `SMS to ${sms.to} failed (${sms.result.error})` : `SMS to ${sms.to} (${sms.result.mode})`) : null,
+        sms
+          ? sms.result.error
+            ? `SMS to ${sms.to} failed (${sms.result.error})`
+            : `SMS to ${sms.to} (${sms.result.mode})`
+          : null,
       ]
         .filter(Boolean)
         .join(" · "),

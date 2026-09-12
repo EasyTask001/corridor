@@ -25,6 +25,7 @@ export function ResourcesPanel() {
     <div className="grid gap-4 lg:grid-cols-2">
       <section className="panel space-y-3 p-5" aria-label="Border wait">
         <h2 className="font-medium">Border wait at a port</h2>
+        <p className="text-xs text-status-warning">Simulated feed — not live border data.</p>
         <div>
           <Label htmlFor="waitPort">Port or office</Label>
           <PortPicker id="waitPort" onSelect={(p) => setPortId(p?.id ?? null)} />
@@ -54,6 +55,9 @@ export function ResourcesPanel() {
       </section>
       <section className="panel space-y-3 p-5" aria-label="Tariff search">
         <h2 className="font-medium">HTS / tariff search</h2>
+        <p className="text-xs text-status-warning">
+          Embedded sample table — verify rates with CBP/CBSA.
+        </p>
         <div>
           <Label htmlFor="tariffQ">Description or code</Label>
           <Input

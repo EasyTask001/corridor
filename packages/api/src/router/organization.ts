@@ -27,6 +27,7 @@ import {
   ssoMode,
   SsoProviderError,
   updateSsoProvider,
+  sendEmail,
   type SsoMode,
   type SsoProviderInput,
 } from "@corridor/integrations";
@@ -140,7 +141,28 @@ async function assignableRole(tx: RlsTransaction, ctx: OrgContext, roleId: strin
   });
   if (!role) throw new TRPCError({ code: "BAD_REQUEST", message: "Unknown role" });
   assertCanGrant(ctx, await permissionKeysForRole(tx, role.id));
-  return role;
+  if (!role.isSystem) return role;
+
+  // System roles are templates and cannot satisfy the tenant-scoped membership
+  // foreign key. Materialize the selected template for this organization.
+  const [existing] = await tx
+    .select()
+    .from(roles)
+    .where(and(eq(roles.organizationId, ctx.orgId), eq(roles.name, role.name)))
+    .limit(1);
+  if (existing) return existing;
+  const [created] = await tx
+    .insert(roles)
+    .values({ organizationId: ctx.orgId, name: role.name, isSystem: false })
+    .returning();
+  await tx.execute(sql`
+    insert into public.role_permissions (role_id, permission_id)
+    select ${created!.id}, permission_id
+    from public.role_permissions
+    where role_id = ${role.id}
+    on conflict do nothing
+  `);
+  return created!;
 }
 
 /**
@@ -152,6 +174,9 @@ async function assignableRole(tx: RlsTransaction, ctx: OrgContext, roleId: strin
  * count, `suspended` does not.
  */
 async function assertSeatAvailable(tx: RlsTransaction, ctx: OrgContext): Promise<void> {
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtext('organization_seats:' || ${ctx.orgId}))`,
+  );
   const [subscription] = await tx
     .select({ seats: subscriptions.seats })
     .from(subscriptions)
@@ -283,7 +308,11 @@ export const organizationRouter = router({
         .from(userProfiles)
         .where(eq(userProfiles.userId, ctx.session.user.id))
         .limit(1);
-      return { email: ctx.session.user.email, displayName: row?.displayName ?? null, phone: row?.phone ?? null };
+      return {
+        email: ctx.session.user.email,
+        displayName: row?.displayName ?? null,
+        phone: row?.phone ?? null,
+      };
     }),
   ),
   updateMe: orgProcedure.input(profileUpdateInput).mutation(({ ctx, input }) =>
@@ -298,7 +327,15 @@ export const organizationRouter = router({
         .set({ displayName: input.displayName, phone: input.phone ?? null })
         .where(eq(userProfiles.userId, ctx.session.user.id))
         .returning({ displayName: userProfiles.displayName, phone: userProfiles.phone });
-      await writeAudit(tx, ctx.orgId, "user.profile_update", "user_profile", ctx.session.user.id, before ?? null, row ?? null);
+      await writeAudit(
+        tx,
+        ctx.orgId,
+        "user.profile_update",
+        "user_profile",
+        ctx.session.user.id,
+        before ?? null,
+        row ?? null,
+      );
       return row ?? null;
     }),
   ),
@@ -352,7 +389,8 @@ export const organizationRouter = router({
               simpleDriverSheet: input.simpleDriverSheet,
             }),
             ...(input.timezone !== undefined && { timezone: input.timezone }),
-            ...(input.billingAddress !== undefined && addressToColumns("billing", input.billingAddress)),
+            ...(input.billingAddress !== undefined &&
+              addressToColumns("billing", input.billingAddress)),
             ...(input.includeParsInCargoNumbers !== undefined && {
               includeParsInCargoNumbers: input.includeParsInCargoNumbers,
             }),
@@ -846,9 +884,9 @@ export const organizationRouter = router({
 
     invite: permissionProcedure("organization.members.manage")
       .input(inviteMemberInput)
-      .mutation(({ ctx, input }) =>
-        ctx.rls(async (tx) => {
-          await assignableRole(tx, ctx, input.roleId);
+      .mutation(async ({ ctx, input }) => {
+        const invitation = await ctx.rls(async (tx) => {
+          const role = await assignableRole(tx, ctx, input.roleId);
           await assertSeatAvailable(tx, ctx);
 
           const token = randomBytes(24).toString("base64url");
@@ -857,7 +895,7 @@ export const organizationRouter = router({
             .insert(organizationMembers)
             .values({
               organizationId: ctx.orgId,
-              roleId: input.roleId,
+              roleId: role.id,
               status: "invited",
               invitedEmail: input.email,
               inviteToken: token,
@@ -874,11 +912,15 @@ export const organizationRouter = router({
             roleId: input.roleId,
             status: "invited",
           });
-          // Email delivery is wired in Phase 5 (notifications). Until then the
-          // inviter copies the link from the UI.
           return { memberId: row.id, invitePath: `/invite/${token}`, expiresAt: expires };
-        }),
-      ),
+        });
+        const result = await sendEmail({
+          to: input.email,
+          subject: "You have been invited to Corridor",
+          text: `Accept your invitation: ${process.env.NEXT_PUBLIC_APP_URL ?? ""}${invitation.invitePath}`,
+        });
+        return { ...invitation, emailSent: !result.error };
+      }),
 
     updateRole: permissionProcedure("organization.members.manage")
       .input(z.object({ memberId: uuid, roleId: uuid }))

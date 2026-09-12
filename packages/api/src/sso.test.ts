@@ -131,7 +131,7 @@ function caller(
     db: {} as never,
     headers: new Headers(),
     rls: state
-      ? (<T>(fn: (tx: RlsTransaction) => Promise<T>) => fn(fakeTx(state)))
+      ? <T>(fn: (tx: RlsTransaction) => Promise<T>) => fn(fakeTx(state))
       : () => {
           throw new Error(PAST_THE_GATE);
         },

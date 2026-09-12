@@ -71,7 +71,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await withServiceRole(db, (tx) =>
-    tx.delete(organizationCarrierCodes).where(eq(organizationCarrierCodes.label, "integration-test")),
+    tx
+      .delete(organizationCarrierCodes)
+      .where(eq(organizationCarrierCodes.label, "integration-test")),
   );
   await conn.sql.end();
 });
@@ -119,7 +121,13 @@ describe("ports (global reference table)", () => {
       withRls(db, as(ownerA), (tx) =>
         tx
           .insert(ports)
-          .values({ regime: "ACE", kind: "port_of_entry", code: "9999", name: "Forged", country: "US" })
+          .values({
+            regime: "ACE",
+            kind: "port_of_entry",
+            code: "9999",
+            name: "Forged",
+            country: "US",
+          })
           .returning(),
       ),
     );
@@ -144,16 +152,17 @@ describe("organization_carrier_codes (tenant table)", () => {
   });
 
   it("is readable by a member whose role holds no organization.read (e.g. driver_portal) — membership alone gates select", async () => {
-    const rows = await withRls(db, as(driverA), (tx) =>
-      tx.select().from(organizationCarrierCodes),
-    );
+    const rows = await withRls(db, as(driverA), (tx) => tx.select().from(organizationCarrierCodes));
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((r) => r.organizationId === ownerA.orgId)).toBe(true);
   });
 
   it("the seeded demo org carries PFTR (default ACE), PFTS and 7ELU (default ACI)", async () => {
     const rows = await withRls(db, as(ownerA), (tx) =>
-      tx.select().from(organizationCarrierCodes).where(eq(organizationCarrierCodes.organizationId, ownerA.orgId)),
+      tx
+        .select()
+        .from(organizationCarrierCodes)
+        .where(eq(organizationCarrierCodes.organizationId, ownerA.orgId)),
     );
     const byCode = Object.fromEntries(rows.map((r) => [r.code, r]));
     expect(byCode.PFTR).toMatchObject({ regime: "ACE", isDefault: true });

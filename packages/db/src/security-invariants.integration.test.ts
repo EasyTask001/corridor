@@ -1,7 +1,8 @@
 import postgres from "postgres";
 import { describe, expect, it } from "vitest";
 
-const url = process.env.DIRECT_DATABASE_URL ?? "postgresql://postgres:postgres@127.0.0.1:55322/postgres";
+const url =
+  process.env.DIRECT_DATABASE_URL ?? "postgresql://postgres:postgres@127.0.0.1:55322/postgres";
 
 describe("database API security invariants", () => {
   it("exposes only the allowlisted anonymous API functions", async () => {
@@ -77,9 +78,17 @@ describe("database API security invariants", () => {
     // at all — a missing EXECUTE grant (issue #3's 0032/0037 gap) silently
     // breaks the function for every caller regardless of the internal check.
     const documented = [
-      "accept_invitation", "create_organization_with_owner", "current_user_permissions",
-      "delete_integration_secret", "is_assigned_movement", "log_audit", "match_org_knowledge",
-      "match_regulations", "next_movement_number", "notify_organization", "record_usage",
+      "accept_invitation",
+      "create_organization_with_owner",
+      "current_user_permissions",
+      "delete_integration_secret",
+      "is_assigned_movement",
+      "log_audit",
+      "match_org_knowledge",
+      "match_regulations",
+      "next_movement_number",
+      "notify_organization",
+      "record_usage",
       "store_integration_secret",
     ];
     const sql = postgres(url, { max: 1 });
@@ -125,10 +134,16 @@ describe("database API security invariants", () => {
     try {
       const rows = await sql<{ indexname: string }[]>`
         select indexname from pg_indexes where schemaname = 'public' and indexname = any(${[
-          "shipments_entry_port_idx", "shipments_in_bond_destination_port_idx", "shipments_destination_port_idx",
-          "shipments_sublocation_port_idx", "in_bond_records_arrival_port_idx", "in_bond_records_export_port_idx",
-          "movements_trip_number_trgm_idx", "movements_customs_reference_trgm_idx",
-          "drivers_full_name_trgm_idx", "trucks_unit_number_trgm_idx",
+          "shipments_entry_port_idx",
+          "shipments_in_bond_destination_port_idx",
+          "shipments_destination_port_idx",
+          "shipments_sublocation_port_idx",
+          "in_bond_records_arrival_port_idx",
+          "in_bond_records_export_port_idx",
+          "movements_trip_number_trgm_idx",
+          "movements_customs_reference_trgm_idx",
+          "drivers_full_name_trgm_idx",
+          "trucks_unit_number_trgm_idx",
         ]}::text[])`;
       expect(rows.map((r) => r.indexname).sort()).toHaveLength(10);
     } finally {

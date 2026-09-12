@@ -5,7 +5,11 @@
  * table, a CSV or a PDF.
  */
 import { sql, type RlsTransaction } from "@corridor/db";
-import { CROSSING_REPORT_COLUMNS, type CrossingColumn, type CrossingReportInput } from "@corridor/domain";
+import {
+  CROSSING_REPORT_COLUMNS,
+  type CrossingColumn,
+  type CrossingReportInput,
+} from "@corridor/domain";
 import { pickColumns } from "./reporting-export";
 
 interface RawRow {

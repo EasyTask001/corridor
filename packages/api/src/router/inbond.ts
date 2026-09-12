@@ -49,7 +49,12 @@ export const inbondRouter = router({
             })
             .from(inBondEvents)
             .leftJoin(userProfiles, eq(userProfiles.userId, inBondEvents.actorId))
-            .where(and(eq(inBondEvents.inBondRecordId, input.id), eq(inBondEvents.organizationId, ctx.orgId)))
+            .where(
+              and(
+                eq(inBondEvents.inBondRecordId, input.id),
+                eq(inBondEvents.organizationId, ctx.orgId),
+              ),
+            )
             .orderBy(desc(inBondEvents.occurredAt)),
         ),
       ),
@@ -62,7 +67,9 @@ export const inbondRouter = router({
             const [s] = await tx
               .select({ id: shipments.id })
               .from(shipments)
-              .where(and(eq(shipments.id, input.shipmentId), eq(shipments.organizationId, ctx.orgId)))
+              .where(
+                and(eq(shipments.id, input.shipmentId), eq(shipments.organizationId, ctx.orgId)),
+              )
               .limit(1);
             if (!s) throw new TRPCError({ code: "NOT_FOUND", message: "Shipment not found" });
           }
@@ -70,9 +77,15 @@ export const inbondRouter = router({
             const [x] = await tx
               .select({ id: externalShipments.id })
               .from(externalShipments)
-              .where(and(eq(externalShipments.id, input.externalShipmentId), eq(externalShipments.organizationId, ctx.orgId)))
+              .where(
+                and(
+                  eq(externalShipments.id, input.externalShipmentId),
+                  eq(externalShipments.organizationId, ctx.orgId),
+                ),
+              )
               .limit(1);
-            if (!x) throw new TRPCError({ code: "NOT_FOUND", message: "External shipment not found" });
+            if (!x)
+              throw new TRPCError({ code: "NOT_FOUND", message: "External shipment not found" });
           }
           const [row] = await tx
             .insert(inBondRecords)
@@ -90,10 +103,21 @@ export const inbondRouter = router({
             .returning()
             .catch((e: unknown) => {
               if ((e as { cause?: { code?: string } })?.cause?.code === "23505")
-                throw new TRPCError({ code: "CONFLICT", message: "That shipment already has an in-bond record" });
+                throw new TRPCError({
+                  code: "CONFLICT",
+                  message: "That shipment already has an in-bond record",
+                });
               throw e;
             });
-          await writeAudit(tx, ctx.orgId, "inbond.record_create", "in_bond_record", row!.id, null, row!);
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "inbond.record_create",
+            "in_bond_record",
+            row!.id,
+            null,
+            row!,
+          );
           return row!;
         }),
       ),
@@ -105,14 +129,23 @@ export const inbondRouter = router({
           const { id, ...patch } = input;
           const before = await requireInBondRecord(tx, ctx.orgId, id);
           const set: Partial<typeof inBondRecords.$inferInsert> = {};
-          for (const [k, v] of Object.entries(patch)) if (v !== undefined) (set as Record<string, unknown>)[k] = v;
+          for (const [k, v] of Object.entries(patch))
+            if (v !== undefined) (set as Record<string, unknown>)[k] = v;
           const [row] = await tx
             .update(inBondRecords)
             .set(set)
             .where(eq(inBondRecords.id, id))
             .returning()
             .catch(mapDbError);
-          await writeAudit(tx, ctx.orgId, "inbond.record_update", "in_bond_record", id, before, row!);
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "inbond.record_update",
+            "in_bond_record",
+            id,
+            before,
+            row!,
+          );
           return row!;
         }),
       ),
@@ -122,7 +155,9 @@ export const inbondRouter = router({
       .mutation(({ ctx, input }) =>
         ctx.rls(async (tx) => {
           const r = await sendInBond(tx, actorOf(ctx), input.id, "arrival");
-          await writeAudit(tx, ctx.orgId, "inbond.send_arrival", "in_bond_record", input.id, null, { referenceNumber: r.referenceNumber });
+          await writeAudit(tx, ctx.orgId, "inbond.send_arrival", "in_bond_record", input.id, null, {
+            referenceNumber: r.referenceNumber,
+          });
           return r;
         }),
       ),
@@ -131,7 +166,9 @@ export const inbondRouter = router({
       .mutation(({ ctx, input }) =>
         ctx.rls(async (tx) => {
           const r = await sendInBond(tx, actorOf(ctx), input.id, "export");
-          await writeAudit(tx, ctx.orgId, "inbond.send_export", "in_bond_record", input.id, null, { referenceNumber: r.referenceNumber });
+          await writeAudit(tx, ctx.orgId, "inbond.send_export", "in_bond_record", input.id, null, {
+            referenceNumber: r.referenceNumber,
+          });
           return r;
         }),
       ),
@@ -140,7 +177,10 @@ export const inbondRouter = router({
       .mutation(({ ctx, input }) =>
         ctx.rls(async (tx) => {
           const r = await sendInBond(tx, actorOf(ctx), input.id, "cancel", input.reason ?? null);
-          await writeAudit(tx, ctx.orgId, "inbond.cancel", "in_bond_record", input.id, null, { referenceNumber: r.referenceNumber, reason: input.reason ?? null });
+          await writeAudit(tx, ctx.orgId, "inbond.cancel", "in_bond_record", input.id, null, {
+            referenceNumber: r.referenceNumber,
+            reason: input.reason ?? null,
+          });
           return r;
         }),
       ),
@@ -149,7 +189,15 @@ export const inbondRouter = router({
       .mutation(({ ctx, input }) =>
         ctx.rls(async (tx) => {
           const r = await requestInBondStatus(tx, actorOf(ctx), input.id);
-          await writeAudit(tx, ctx.orgId, "inbond.request_status", "in_bond_record", input.id, null, { status: r.status.status, changed: r.changed });
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "inbond.request_status",
+            "in_bond_record",
+            input.id,
+            null,
+            { status: r.status.status, changed: r.changed },
+          );
           return r;
         }),
       ),
@@ -158,8 +206,14 @@ export const inbondRouter = router({
       .mutation(({ ctx, input }) =>
         ctx.rls(async (tx) => {
           await requireInBondRecord(tx, ctx.orgId, input.id);
-          await addInBondEvent(tx, actorOf(ctx), input.id, { kind: "note", actorType: "user", payload: { body: input.body } });
-          await writeAudit(tx, ctx.orgId, "inbond.note_add", "in_bond_record", input.id, null, { body: input.body });
+          await addInBondEvent(tx, actorOf(ctx), input.id, {
+            kind: "note",
+            actorType: "user",
+            payload: { body: input.body },
+          });
+          await writeAudit(tx, ctx.orgId, "inbond.note_add", "in_bond_record", input.id, null, {
+            body: input.body,
+          });
           return { ok: true };
         }),
       ),
@@ -196,10 +250,17 @@ export const inbondRouter = router({
               .orderBy(desc(externalShipments.updatedAt))
               .limit(input.limit)
               .offset(input.offset),
-            tx.select({ count: sql<number>`count(*)::int` }).from(externalShipments).where(where),
+            tx
+              .select({ count: sql<number>`count(*)::int` })
+              .from(externalShipments)
+              .where(where),
           ]);
           return {
-            rows: rows.map(({ external, recordId, recordStatus }) => ({ ...external, recordId, recordStatus })),
+            rows: rows.map(({ external, recordId, recordStatus }) => ({
+              ...external,
+              recordId,
+              recordStatus,
+            })),
             total: counts[0]?.count ?? 0,
           };
         }),
@@ -221,7 +282,15 @@ export const inbondRouter = router({
               createdBy: ctx.session.user.id,
             })
             .returning();
-          await writeAudit(tx, ctx.orgId, "inbond.external_create", "external_shipment", row!.id, null, row!);
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "inbond.external_create",
+            "external_shipment",
+            row!.id,
+            null,
+            row!,
+          );
           return row!;
         }),
       ),
@@ -234,11 +303,14 @@ export const inbondRouter = router({
           const [before] = await tx
             .select()
             .from(externalShipments)
-            .where(and(eq(externalShipments.id, id), eq(externalShipments.organizationId, ctx.orgId)))
+            .where(
+              and(eq(externalShipments.id, id), eq(externalShipments.organizationId, ctx.orgId)),
+            )
             .limit(1);
           if (!before) throw new TRPCError({ code: "NOT_FOUND" });
           const set: Partial<typeof externalShipments.$inferInsert> = {};
-          for (const [k, v] of Object.entries(patch)) if (v !== undefined) (set as Record<string, unknown>)[k] = v;
+          for (const [k, v] of Object.entries(patch))
+            if (v !== undefined) (set as Record<string, unknown>)[k] = v;
           const [row] = await tx
             .update(externalShipments)
             .set(set)
@@ -246,10 +318,21 @@ export const inbondRouter = router({
             .returning()
             .catch((e: unknown) => {
               if ((e as { cause?: { code?: string } })?.cause?.code === "23514")
-                throw new TRPCError({ code: "BAD_REQUEST", message: "A control number or an in-bond number is required" });
+                throw new TRPCError({
+                  code: "BAD_REQUEST",
+                  message: "A control number or an in-bond number is required",
+                });
               throw e;
             });
-          await writeAudit(tx, ctx.orgId, "inbond.external_update", "external_shipment", id, before, row!);
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "inbond.external_update",
+            "external_shipment",
+            id,
+            before,
+            row!,
+          );
           return row!;
         }),
       ),
@@ -261,10 +344,23 @@ export const inbondRouter = router({
           const [row] = await tx
             .update(externalShipments)
             .set({ status: input.reopen ? "open" : "closed" })
-            .where(and(eq(externalShipments.id, input.id), eq(externalShipments.organizationId, ctx.orgId)))
+            .where(
+              and(
+                eq(externalShipments.id, input.id),
+                eq(externalShipments.organizationId, ctx.orgId),
+              ),
+            )
             .returning();
           if (!row) throw new TRPCError({ code: "NOT_FOUND" });
-          await writeAudit(tx, ctx.orgId, "inbond.external_close", "external_shipment", input.id, null, { status: row.status });
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            "inbond.external_close",
+            "external_shipment",
+            input.id,
+            null,
+            { status: row.status },
+          );
           return row;
         }),
       ),

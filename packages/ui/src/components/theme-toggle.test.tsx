@@ -9,7 +9,9 @@ beforeEach(() => {
   document.documentElement.removeAttribute("data-theme");
   vi.stubGlobal(
     "matchMedia",
-    vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }),
+    vi
+      .fn()
+      .mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }),
   );
 });
 
@@ -29,7 +31,9 @@ describe("ThemeToggle", () => {
     localStorage.setItem(THEME_STORAGE_KEY, "dark");
     render(<ThemeToggle />);
 
-    expect(await screen.findByRole("button", { name: /switch to light theme/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: /switch to light theme/i }),
+    ).toBeInTheDocument();
   });
 
   it("uses the same storage key as the web app's pre-paint init script", () => {

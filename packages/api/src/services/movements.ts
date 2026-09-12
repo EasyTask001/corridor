@@ -75,12 +75,7 @@ export async function addEvent(
   movementId: string,
   e: {
     eventType:
-      | "status_change"
-      | "amendment"
-      | "note"
-      | "customs_response"
-      | "ai_flag"
-      | "customs_event";
+      "status_change" | "amendment" | "note" | "customs_response" | "ai_flag" | "customs_event";
     fromStatus?: MovementStatus | null;
     /** Defaults to now; a gateway message carries its own time. */
     occurredAt?: Date;
@@ -106,7 +101,9 @@ export async function addEvent(
 }
 
 /** The lifecycle timestamp a shipment status carries, if any. */
-const SHIPMENT_STAMP: Partial<Record<ShipmentStatus, "entryOnFileAt" | "releasedAt" | "arrivedAt" | "cancelledAt">> = {
+const SHIPMENT_STAMP: Partial<
+  Record<ShipmentStatus, "entryOnFileAt" | "releasedAt" | "arrivedAt" | "cancelledAt">
+> = {
   entry_on_file: "entryOnFileAt",
   released: "releasedAt",
   arrived: "arrivedAt",
@@ -159,7 +156,8 @@ async function applyShipmentOutcomes(
         shipmentId: target?.id ?? null,
         parsNumber: e.shipmentControlNumber,
         releaseCode: typeof rns.releaseCode === "string" ? rns.releaseCode : null,
-        releasedAt: typeof rns.releasedAt === "string" ? new Date(rns.releasedAt) : new Date(e.occurredAt),
+        releasedAt:
+          typeof rns.releasedAt === "string" ? new Date(rns.releasedAt) : new Date(e.occurredAt),
         officeCode: typeof rns.officeCode === "string" ? rns.officeCode : (e.entryPortCode ?? null),
         sublocationCode: typeof rns.sublocationCode === "string" ? rns.sublocationCode : null,
         transactionNumber: typeof rns.transactionNumber === "string" ? rns.transactionNumber : null,
@@ -240,7 +238,9 @@ export async function markShipmentsSent(tx: Tx, movementId: string) {
   await tx
     .update(shipments)
     .set({ status: "sent" })
-    .where(and(eq(shipments.movementId, movementId), inArray(shipments.status, ["draft", "rejected"])));
+    .where(
+      and(eq(shipments.movementId, movementId), inArray(shipments.status, ["draft", "rejected"])),
+    );
 }
 
 /** Mirrors the movement's own `released → arrived` (`movement.markArrived`). */

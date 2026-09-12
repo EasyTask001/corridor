@@ -153,11 +153,11 @@ Run against a local build (`pnpm --filter web build && pnpm --filter web
 start`, `CORRIDOR_RATELIMIT_MULTIPLIER=200`, no Upstash), local Supabase,
 default `pnpm db:seed` data:
 
-| Script | Bar | Result |
-| --- | --- | --- |
-| `movements-list.js` | p95 < 500ms (both metrics) | ✅ `movement_list_duration` p95 = **144ms**, `movement_board_duration` p95 = **95ms**, 0% rate-limited |
-| `realtime-fanout.js` | p95 < 500ms; every channel subscribed | ✅ `realtime_token_duration` p95 = **93ms**, 100% sockets opened, 100% channels subscribed |
-| `bulk-upload.js` | 100 uploads drain within 5 minutes | ⚠️ **91/100** drained in 300s, 0% extraction failures, 0% rate-limited |
+| Script               | Bar                                   | Result                                                                                                 |
+| -------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `movements-list.js`  | p95 < 500ms (both metrics)            | ✅ `movement_list_duration` p95 = **144ms**, `movement_board_duration` p95 = **95ms**, 0% rate-limited |
+| `realtime-fanout.js` | p95 < 500ms; every channel subscribed | ✅ `realtime_token_duration` p95 = **93ms**, 100% sockets opened, 100% channels subscribed             |
+| `bulk-upload.js`     | 100 uploads drain within 5 minutes    | ⚠️ **91/100** drained in 300s, 0% extraction failures, 0% rate-limited                                 |
 
 The first two scripts pass comfortably with headroom to spare. `bulk-upload.js`
 narrowly misses its own bar. This needed two attempts to measure honestly:

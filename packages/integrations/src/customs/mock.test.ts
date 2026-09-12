@@ -179,9 +179,9 @@ describe("buildManifest", () => {
       buildManifest({ ...src, movement: { ...src.movement, carrierCode: null } }),
     ).toThrow(/carrier code/);
     expect(() => buildManifest({ ...src, shipments: [] })).toThrow(/shipment/);
-    expect(() =>
-      buildManifest({ ...src, movement: { ...src.movement, isEmpty: true } }),
-    ).toThrow(/empty trip/);
+    expect(() => buildManifest({ ...src, movement: { ...src.movement, isEmpty: true } })).toThrow(
+      /empty trip/,
+    );
   });
   it("files an empty trip with no shipments and no equipment", () => {
     const m = buildManifest({
@@ -212,7 +212,11 @@ describe("mock customs client", () => {
   });
 
   it("ACI prefix for CBSA", async () => {
-    const c = createMockCustomsClient({ provider: "cbsa_aci", random: () => 0.99, tenantKey: "t1" });
+    const c = createMockCustomsClient({
+      provider: "cbsa_aci",
+      random: () => 0.99,
+      tenantKey: "t1",
+    });
     expect((await c.transmit(withTrip(null))).referenceNumber).toMatch(/^ACI-/);
   });
 
@@ -284,7 +288,11 @@ describe("mock customs client", () => {
     expect(rejected.events.map((e) => e.code)).toEqual(["sending", "rejected"]);
 
     const aci = createMockCustomsClient({ provider: "cbsa_aci", now: fixedNow, tenantKey: "t1" });
-    const rns = await aci.fetchDecision("R", { ...ok, regime: "ACI" }, { currentStatus: "accepted" });
+    const rns = await aci.fetchDecision(
+      "R",
+      { ...ok, regime: "ACI" },
+      { currentStatus: "accepted" },
+    );
     expect(rns.events.map((e) => e.code)).toEqual(["entered_and_released", "released"]);
   });
 
@@ -304,12 +312,22 @@ describe("mock customs client", () => {
   });
 
   it("a filing transmitted through one instance is visible to fetchStatus on a second instance of the same tenant", async () => {
-    const mk = () => createMockCustomsClient({ provider: "cbp_ace", now: fixedNow, random: () => 0.99, tenantKey: "org-a" });
+    const mk = () =>
+      createMockCustomsClient({
+        provider: "cbp_ace",
+        now: fixedNow,
+        random: () => 0.99,
+        tenantKey: "org-a",
+      });
     const ack = await mk().transmit(withTrip("TRIP-HOLD"));
     const stages: string[] = [];
     for (let i = 0; i < 4; i++) stages.push((await mk().fetchStatus(ack.referenceNumber)).status);
     expect(stages).toEqual(["accepted", "held", "released", "released"]);
-    const other = createMockCustomsClient({ provider: "cbp_ace", now: fixedNow, tenantKey: "org-b" });
+    const other = createMockCustomsClient({
+      provider: "cbp_ace",
+      now: fixedNow,
+      tenantKey: "org-b",
+    });
     expect((await other.fetchStatus(ack.referenceNumber)).status).toBe("pending");
   });
 });
@@ -373,7 +391,11 @@ describe("vault-backed credentials", () => {
   });
 
   it("works unchanged when the org has stored no credentials", async () => {
-    const bare = createMockCustomsClient({ provider: "cbp_ace", random: () => 0.99, tenantKey: "t1" });
+    const bare = createMockCustomsClient({
+      provider: "cbp_ace",
+      random: () => 0.99,
+      tenantKey: "t1",
+    });
     const ack = await bare.transmit(withTrip("TRIP-1"));
     expect(ack.raw.credentialsPresent).toBe(false);
     expect(ack.referenceNumber).toMatch(/^ACE-/);

@@ -73,7 +73,10 @@ export const organizations = pgTable("organizations", {
   billingPostalCode: text("billing_postal_code"),
   billingCountry: text("billing_country"),
   includeParsInCargoNumbers: boolean("include_pars_in_cargo_numbers").notNull().default(false),
-  dispatchEmails: text("dispatch_emails").array().notNull().default(sql`'{}'::text[]`),
+  dispatchEmails: text("dispatch_emails")
+    .array()
+    .notNull()
+    .default(sql`'{}'::text[]`),
   ...timestamps,
 });
 

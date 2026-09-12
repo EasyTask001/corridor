@@ -16,7 +16,11 @@ import {
   type InBondListInput,
   type InBondStatus,
 } from "@corridor/domain";
-import { CustomsTransportError, type InBondMessage, type InBondStatusMessage } from "@corridor/integrations";
+import {
+  CustomsTransportError,
+  type InBondMessage,
+  type InBondStatusMessage,
+} from "@corridor/integrations";
 import { customsClientFor, logIntegrationEvent, recordSubmission } from "./customs";
 import type { Actor } from "./movements";
 
@@ -38,7 +42,11 @@ export async function addInBondEvent(
   tx: RlsTransaction,
   actor: Actor,
   recordId: string,
-  e: { kind: InBondEventKind; actorType: "user" | "system" | "customs_api"; payload?: Record<string, unknown> },
+  e: {
+    kind: InBondEventKind;
+    actorType: "user" | "system" | "customs_api";
+    payload?: Record<string, unknown>;
+  },
 ) {
   await tx.insert(inBondEvents).values({
     organizationId: actor.orgId,
@@ -52,8 +60,12 @@ export async function addInBondEvent(
 
 /** The monitor row: record + what it is about + the port codes. */
 export async function listInBondRecords(tx: RlsTransaction, orgId: string, input: InBondListInput) {
-  const arrival = sql<string | null>`(select code from public.ports p where p.id = ${inBondRecords.arrivalPortId})`;
-  const exportCode = sql<string | null>`(select code from public.ports p where p.id = ${inBondRecords.exportPortId})`;
+  const arrival = sql<
+    string | null
+  >`(select code from public.ports p where p.id = ${inBondRecords.arrivalPortId})`;
+  const exportCode = sql<
+    string | null
+  >`(select code from public.ports p where p.id = ${inBondRecords.exportPortId})`;
   const conds = [eq(inBondRecords.organizationId, orgId)];
   if (input.status?.length) conds.push(inArray(inBondRecords.status, input.status));
   if (input.q) {
@@ -100,7 +112,8 @@ export async function listInBondRecords(tx: RlsTransaction, orgId: string, input
     rows: rows.map(({ record, ...rest }) => ({
       ...record,
       regime: rest.shipmentRegime ?? rest.externalRegime ?? "ACE",
-      controlNumber: rest.shipmentControlNumber ?? rest.externalControlNumber ?? rest.externalInBondNumber,
+      controlNumber:
+        rest.shipmentControlNumber ?? rest.externalControlNumber ?? rest.externalInBondNumber,
       movementId: rest.shipmentMovementId,
       external: !!record.externalShipmentId,
       originatingCarrierCode: rest.externalCarrier,
@@ -112,7 +125,11 @@ export async function listInBondRecords(tx: RlsTransaction, orgId: string, input
 }
 
 /** What the gateway is told about a move: fails with the missing fields spelled out. */
-async function messageFor(tx: RlsTransaction, orgId: string, r: InBondRecord): Promise<{ regime: "ACE" | "ACI"; message: InBondMessage }> {
+async function messageFor(
+  tx: RlsTransaction,
+  orgId: string,
+  r: InBondRecord,
+): Promise<{ regime: "ACE" | "ACI"; message: InBondMessage }> {
   const parsed = inBondSendable.safeParse({
     bondNumber: r.bondNumber,
     arrivalPortId: r.arrivalPortId,
@@ -126,27 +143,51 @@ async function messageFor(tx: RlsTransaction, orgId: string, r: InBondRecord): P
     });
   }
   const [arrival, exportPort] = await Promise.all([
-    tx.select({ code: ports.code }).from(ports).where(eq(ports.id, parsed.data.arrivalPortId)).then((x) => x[0]),
-    tx.select({ code: ports.code }).from(ports).where(eq(ports.id, parsed.data.exportPortId)).then((x) => x[0]),
+    tx
+      .select({ code: ports.code })
+      .from(ports)
+      .where(eq(ports.id, parsed.data.arrivalPortId))
+      .then((x) => x[0]),
+    tx
+      .select({ code: ports.code })
+      .from(ports)
+      .where(eq(ports.id, parsed.data.exportPortId))
+      .then((x) => x[0]),
   ]);
   if (!arrival || !exportPort)
-    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Arrival or export port is unknown" });
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "Arrival or export port is unknown",
+    });
 
   let regime: "ACE" | "ACI" = "ACE";
   let carrierCode: string | null = null;
   let controlNumber: string | null = null;
   if (r.shipmentId) {
     const [s] = await tx
-      .select({ regime: shipments.regime, carrierCode: shipments.carrierCode, controlNumber: shipments.controlNumber })
+      .select({
+        regime: shipments.regime,
+        carrierCode: shipments.carrierCode,
+        controlNumber: shipments.controlNumber,
+      })
       .from(shipments)
       .where(and(eq(shipments.id, r.shipmentId), eq(shipments.organizationId, orgId)))
       .limit(1);
     if (s) ({ regime, carrierCode, controlNumber } = s);
   } else if (r.externalShipmentId) {
     const [x] = await tx
-      .select({ regime: externalShipments.regime, carrierCode: externalShipments.originatingCarrierCode, controlNumber: externalShipments.controlNumber })
+      .select({
+        regime: externalShipments.regime,
+        carrierCode: externalShipments.originatingCarrierCode,
+        controlNumber: externalShipments.controlNumber,
+      })
       .from(externalShipments)
-      .where(and(eq(externalShipments.id, r.externalShipmentId), eq(externalShipments.organizationId, orgId)))
+      .where(
+        and(
+          eq(externalShipments.id, r.externalShipmentId),
+          eq(externalShipments.organizationId, orgId),
+        ),
+      )
       .limit(1);
     if (x) ({ regime, carrierCode, controlNumber } = x);
   }
@@ -164,7 +205,42 @@ async function messageFor(tx: RlsTransaction, orgId: string, r: InBondRecord): P
   };
 }
 
-const ACTION: Record<"arrival" | "export" | "cancel", { next: InBondStatus; kind: InBondEventKind; op: string }> = {
+async function regimeFor(
+  tx: RlsTransaction,
+  orgId: string,
+  r: InBondRecord,
+): Promise<"ACE" | "ACI"> {
+  if (r.shipmentId) {
+    const [s] = await tx
+      .select({ regime: shipments.regime })
+      .from(shipments)
+      .where(and(eq(shipments.id, r.shipmentId), eq(shipments.organizationId, orgId)))
+      .limit(1);
+    if (s) return s.regime;
+  }
+  if (r.externalShipmentId) {
+    const [x] = await tx
+      .select({ regime: externalShipments.regime })
+      .from(externalShipments)
+      .where(
+        and(
+          eq(externalShipments.id, r.externalShipmentId),
+          eq(externalShipments.organizationId, orgId),
+        ),
+      )
+      .limit(1);
+    if (x) return x.regime;
+  }
+  throw new TRPCError({
+    code: "PRECONDITION_FAILED",
+    message: "In-bond parent shipment is missing",
+  });
+}
+
+const ACTION: Record<
+  "arrival" | "export" | "cancel",
+  { next: InBondStatus; kind: InBondEventKind; op: string }
+> = {
   arrival: { next: "arrival_sent", kind: "arrival_sent", op: "in_bond_arrival" },
   export: { next: "export_sent", kind: "export_sent", op: "in_bond_export" },
   cancel: { next: "cancelled", kind: "cancel_sent", op: "in_bond_cancel" },
@@ -252,8 +328,11 @@ const STATUS_FROM_GATEWAY: Partial<Record<InBondStatusMessage["status"], InBondS
 export async function requestInBondStatus(tx: RlsTransaction, actor: Actor, recordId: string) {
   const r = await requireInBondRecord(tx, actor.orgId, recordId);
   if (!r.bondNumber)
-    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "No bond number on this record yet" });
-  const { regime } = await messageFor(tx, actor.orgId, r).catch(() => ({ regime: "ACE" as const }));
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: "No bond number on this record yet",
+    });
+  const regime = await regimeFor(tx, actor.orgId, r);
   const { client } = await customsClientFor(tx, actor.orgId, regime);
   const started = Date.now();
   const status = await client.inBondStatus(r.bondNumber);
@@ -268,7 +347,11 @@ export async function requestInBondStatus(tx: RlsTransaction, actor: Actor, reco
     success: true,
     durationMs: Date.now() - started,
   });
-  await addInBondEvent(tx, actor, r.id, { kind: "status_requested", actorType: "user", payload: { bondNumber: r.bondNumber } });
+  await addInBondEvent(tx, actor, r.id, {
+    kind: "status_requested",
+    actorType: "user",
+    payload: { bondNumber: r.bondNumber },
+  });
   await addInBondEvent(tx, actor, r.id, {
     kind: "customs_response",
     actorType: "customs_api",
@@ -281,7 +364,11 @@ export async function requestInBondStatus(tx: RlsTransaction, actor: Actor, reco
     set.status = target;
     changed = true;
   }
-  const [updated] = await tx.update(inBondRecords).set(set).where(eq(inBondRecords.id, r.id)).returning();
+  const [updated] = await tx
+    .update(inBondRecords)
+    .set(set)
+    .where(eq(inBondRecords.id, r.id))
+    .returning();
   if (changed) {
     // Dynamic import: notifications.ts -> customs.ts would otherwise cycle.
     const { notifyOrganization } = await import("./notifications");
@@ -300,7 +387,13 @@ export async function requestInBondStatus(tx: RlsTransaction, actor: Actor, reco
 export async function ensureInBondRecordForShipment(
   tx: RlsTransaction,
   actor: Actor,
-  s: { id: string; inBondEntryType: "IT" | "TE" | "IE" | null; inBondNumber: string | null; entryPortId: string | null; inBondDestinationPortId: string | null },
+  s: {
+    id: string;
+    inBondEntryType: "IT" | "TE" | "IE" | null;
+    inBondNumber: string | null;
+    entryPortId: string | null;
+    inBondDestinationPortId: string | null;
+  },
 ) {
   const [existing] = await tx
     .select({ id: inBondRecords.id })

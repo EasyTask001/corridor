@@ -192,7 +192,9 @@ test.describe("movement builder", () => {
     await expect(timeline(page).getByText("Preliminary check passed")).toBeVisible();
     await page.getByRole("button", { name: "released", exact: true }).click();
     await expect(heading(page).getByText("released")).toBeVisible();
-    await expect(timeline(page).getByText(/^Entry on file · .* · entry 300\d{8} @ 3801/)).toBeVisible();
+    await expect(
+      timeline(page).getByText(/^Entry on file · .* · entry 300\d{8} @ 3801/),
+    ).toBeVisible();
     // The driver sheet renders from the manifest as filed (0024).
     expect(await downloadDriverSheet(page)).toMatch(/driver_sheet-.*\.pdf/);
     // …and the entry number lands on the shipment row, whose own status

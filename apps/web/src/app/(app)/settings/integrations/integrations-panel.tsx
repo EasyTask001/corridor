@@ -353,9 +353,7 @@ export function IntegrationsPanel({
                         type="button"
                         className="btn-secondary"
                         disabled={testCustoms.isPending}
-                        onClick={() =>
-                          testCustoms.mutate({ provider: p.key })
-                        }
+                        onClick={() => testCustoms.mutate({ provider: p.key })}
                       >
                         Test connection
                       </button>

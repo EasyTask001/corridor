@@ -70,7 +70,9 @@ function splitCsvLine(line: string): string[] {
 }
 
 function parseCsv(text: string): PortRow[] {
-  const lines = text.split(/\r?\n/).filter((line) => line.trim().length > 0 && !line.startsWith("#"));
+  const lines = text
+    .split(/\r?\n/)
+    .filter((line) => line.trim().length > 0 && !line.startsWith("#"));
   const [header, ...rows] = lines;
   if (!header) return [];
   const columns = splitCsvLine(header);
@@ -118,7 +120,9 @@ export async function importPorts() {
 
     for (const row of usPorts) await upsert({ ...row, kind: "in_bond_destination" });
     total += usPorts.length;
-    console.log(`ports: imported ${usPorts.length} row(s) as in_bond_destination (from us_ports.csv)`);
+    console.log(
+      `ports: imported ${usPorts.length} row(s) as in_bond_destination (from us_ports.csv)`,
+    );
 
     console.log(`ports: ${total} row(s) total`);
   } finally {

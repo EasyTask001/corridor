@@ -47,7 +47,11 @@ export function OnboardingForm() {
           <input id="mcNumber" name="mcNumber" className="input" />
         </div>
       </div>
-      {state?.error && <p className="text-sm text-status-danger">{state.error}</p>}
+      {state?.error && (
+        <p role="alert" className="text-sm text-status-danger">
+          {state.error}
+        </p>
+      )}
       <button type="submit" disabled={pending} className="btn-primary w-full">
         {pending ? "Creating…" : "Create carrier"}
       </button>

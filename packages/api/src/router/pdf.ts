@@ -44,12 +44,20 @@ export const pdfRouter = router({
     .mutation(({ ctx, input }) =>
       ctx.rls(async (tx) => {
         const doc = await generateBlankSheets(tx, actorOf(ctx), input);
-        await writeAudit(tx, ctx.orgId, "pdf.blank_driver_sheets", "generated_document", doc.id, null, {
-          regime: input.regime,
-          fromTrip: input.fromTrip,
-          toTrip: input.toTrip,
-          byteSize: doc.byteSize,
-        });
+        await writeAudit(
+          tx,
+          ctx.orgId,
+          "pdf.blank_driver_sheets",
+          "generated_document",
+          doc.id,
+          null,
+          {
+            regime: input.regime,
+            fromTrip: input.fromTrip,
+            toTrip: input.toTrip,
+            byteSize: doc.byteSize,
+          },
+        );
         return doc;
       }),
     ),

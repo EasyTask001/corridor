@@ -313,13 +313,10 @@ describe("permission cache", () => {
       const order: string[] = [];
       const atCommit: { cached?: PermissionKey[] | null } = {};
 
-      const result = await withPermissionInvalidation(
-        fakeCtx([userA], order, atCommit),
-        () => {
-          order.push("mutation");
-          return Promise.resolve("saved" as const);
-        },
-      );
+      const result = await withPermissionInvalidation(fakeCtx([userA], order, atCommit), () => {
+        order.push("mutation");
+        return Promise.resolve("saved" as const);
+      });
 
       expect(result).toBe("saved");
       expect(order).toEqual(["tx:begin", "mutation", "tx:commit"]);

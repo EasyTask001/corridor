@@ -18,7 +18,11 @@ export interface FixtureStore<T> {
   readonly size: number;
 }
 
-export function createFixtureStore<T>(opts: { maxEntries: number; ttlMs: number; now?: () => number }): FixtureStore<T> {
+export function createFixtureStore<T>(opts: {
+  maxEntries: number;
+  ttlMs: number;
+  now?: () => number;
+}): FixtureStore<T> {
   const entries = new Map<string, { value: T; expiresAt: number }>();
   const now = opts.now ?? (() => Date.now());
   //  (unit separator) cannot appear in a uuid or a reference number, so
@@ -36,7 +40,10 @@ export function createFixtureStore<T>(opts: { maxEntries: number; ttlMs: number;
       const id = k(tenant, key);
       const hit = entries.get(id);
       if (!hit) return undefined;
-      if (hit.expiresAt <= now()) { entries.delete(id); return undefined; }
+      if (hit.expiresAt <= now()) {
+        entries.delete(id);
+        return undefined;
+      }
       entries.delete(id); // re-insert: Map order stays least-recently-used first
       entries.set(id, hit);
       return hit.value;
@@ -47,24 +54,51 @@ export function createFixtureStore<T>(opts: { maxEntries: number; ttlMs: number;
       entries.set(id, { value, expiresAt: now() + opts.ttlMs });
       evict();
     },
-    delete(tenant, key) { entries.delete(k(tenant, key)); },
-    clear() { entries.clear(); },
-    get size() { return entries.size; },
+    delete(tenant, key) {
+      entries.delete(k(tenant, key));
+    },
+    clear() {
+      entries.clear();
+    },
+    get size() {
+      return entries.size;
+    },
   };
 }
 
-export interface GatewayFiling { outcome: "accepted" | "held" | "rejected"; controlNumbers: string[]; portOfEntry: string | null; polls: number }
-export interface MockFiling { manifest: ManifestPayload; stage: "sent" | "accepted" | "held" | "done"; cancelled: boolean }
+export interface GatewayFiling {
+  outcome: "accepted" | "held" | "rejected";
+  controlNumbers: string[];
+  portOfEntry: string | null;
+  polls: number;
+}
+export interface MockFiling {
+  manifest: ManifestPayload;
+  stage: "sent" | "accepted" | "held" | "done";
+  cancelled: boolean;
+}
 export type GatewayBondStatus = "arrived" | "exported" | "cancelled";
 
 /** A filing is polled for at most 48h (services/customs.ts POLL_WINDOW_MS); keep it a little longer. */
 const FILING_TTL_MS = 72 * 60 * 60 * 1000;
 const BOND_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-export const gatewayFilings = createFixtureStore<GatewayFiling>({ maxEntries: 5_000, ttlMs: FILING_TTL_MS });
-export const gatewayBonds = createFixtureStore<GatewayBondStatus>({ maxEntries: 5_000, ttlMs: BOND_TTL_MS });
-export const mockFiled = createFixtureStore<MockFiling>({ maxEntries: 5_000, ttlMs: FILING_TTL_MS });
-export const mockBonds = createFixtureStore<InBondStatusMessage["status"]>({ maxEntries: 5_000, ttlMs: BOND_TTL_MS });
+export const gatewayFilings = createFixtureStore<GatewayFiling>({
+  maxEntries: 5_000,
+  ttlMs: FILING_TTL_MS,
+});
+export const gatewayBonds = createFixtureStore<GatewayBondStatus>({
+  maxEntries: 5_000,
+  ttlMs: BOND_TTL_MS,
+});
+export const mockFiled = createFixtureStore<MockFiling>({
+  maxEntries: 5_000,
+  ttlMs: FILING_TTL_MS,
+});
+export const mockBonds = createFixtureStore<InBondStatusMessage["status"]>({
+  maxEntries: 5_000,
+  ttlMs: BOND_TTL_MS,
+});
 
 /** Per tenant+regime reference counters: two instances of one tenant never hand out the same reference. */
 const sequences = new Map<string, number>();
@@ -77,5 +111,9 @@ export function nextFixtureSequence(tenant: string, regime: Regime): number {
 
 /** Drop every filing, bond and counter. Tests call this in `beforeEach`. */
 export function clearCustomsFixtureState(): void {
-  gatewayFilings.clear(); gatewayBonds.clear(); mockFiled.clear(); mockBonds.clear(); sequences.clear();
+  gatewayFilings.clear();
+  gatewayBonds.clear();
+  mockFiled.clear();
+  mockBonds.clear();
+  sequences.clear();
 }

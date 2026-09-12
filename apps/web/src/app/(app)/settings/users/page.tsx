@@ -28,7 +28,7 @@ export default async function UsersPage() {
         initialMembers={members}
         roles={roles
           .filter((role) => role.permissions.every((key) => session.permissions.has(key)))
-          .map((role) => ({ id: role.id, name: role.name }))}
+          .map((role) => ({ id: role.id, name: role.name, organizationId: role.organizationId }))}
         canManage={session.permissions.has("organization.members.manage")}
         currentUserId={session.user.id}
       />

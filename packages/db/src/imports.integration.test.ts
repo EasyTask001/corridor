@@ -95,7 +95,11 @@ describe("import_batches (0028)", () => {
       );
       expect(seen).toHaveLength(1);
       const write = await withRls(db, as(readOnlyA), (tx) =>
-        tx.update(importBatches).set({ status: "committed" }).where(eq(importBatches.id, batch!.id)).returning(),
+        tx
+          .update(importBatches)
+          .set({ status: "committed" })
+          .where(eq(importBatches.id, batch!.id))
+          .returning(),
       );
       expect(write).toHaveLength(0);
 

@@ -106,13 +106,21 @@ describe("in-bond tables (0026)", () => {
       );
       expect(seen).toHaveLength(1);
       const write = await withRls(db, as(readOnlyA), (tx) =>
-        tx.update(inBondRecords).set({ firmsCode: "Z999" }).where(eq(inBondRecords.id, r!.id)).returning(),
+        tx
+          .update(inBondRecords)
+          .set({ firmsCode: "Z999" })
+          .where(eq(inBondRecords.id, r!.id))
+          .returning(),
       );
       expect(write).toHaveLength(0);
 
       for (const probe of [
-        withRls(db, as(ownerB), (tx) => tx.select().from(inBondRecords).where(eq(inBondRecords.id, r!.id))),
-        withRls(db, as(ownerB), (tx) => tx.select().from(externalShipments).where(eq(externalShipments.id, x!.id))),
+        withRls(db, as(ownerB), (tx) =>
+          tx.select().from(inBondRecords).where(eq(inBondRecords.id, r!.id)),
+        ),
+        withRls(db, as(ownerB), (tx) =>
+          tx.select().from(externalShipments).where(eq(externalShipments.id, x!.id)),
+        ),
       ]) {
         expect(await probe).toHaveLength(0);
       }
@@ -123,19 +131,36 @@ describe("in-bond tables (0026)", () => {
       const [ev] = await withRls(db, as(dispatcherA), (tx) =>
         tx
           .insert(inBondEvents)
-          .values({ organizationId: dispatcherA.orgId, inBondRecordId: r!.id, kind: "note", actorType: "user", actorId: dispatcherA.userId, payload: { body: "hi" } })
+          .values({
+            organizationId: dispatcherA.orgId,
+            inBondRecordId: r!.id,
+            kind: "note",
+            actorType: "user",
+            actorId: dispatcherA.userId,
+            payload: { body: "hi" },
+          })
           .returning(),
       );
-      const evB = await withRls(db, as(ownerB), (tx) => tx.select().from(inBondEvents).where(eq(inBondEvents.id, ev!.id)));
+      const evB = await withRls(db, as(ownerB), (tx) =>
+        tx.select().from(inBondEvents).where(eq(inBondEvents.id, ev!.id)),
+      );
       expect(evB).toHaveLength(0);
       // A session has no update policy (zero rows), and even the owning
       // connection is stopped by the append-only trigger.
       const edited = await withRls(db, as(dispatcherA), (tx) =>
-        tx.update(inBondEvents).set({ payload: { body: "edited" } }).where(eq(inBondEvents.id, ev!.id)).returning(),
+        tx
+          .update(inBondEvents)
+          .set({ payload: { body: "edited" } })
+          .where(eq(inBondEvents.id, ev!.id))
+          .returning(),
       );
       expect(edited).toHaveLength(0);
       const owner = await rejection(
-        db.update(inBondEvents).set({ payload: { body: "edited" } }).where(eq(inBondEvents.id, ev!.id)).returning(),
+        db
+          .update(inBondEvents)
+          .set({ payload: { body: "edited" } })
+          .where(eq(inBondEvents.id, ev!.id))
+          .returning(),
       );
       expect(owner).toMatch(/append-only/);
       // No delete grant for a session: the row survives a direct delete attempt.
@@ -163,24 +188,38 @@ describe("in-bond tables (0026)", () => {
         withRls(db, as(dispatcherA), (tx) =>
           tx
             .insert(inBondRecords)
-            .values({ organizationId: dispatcherA.orgId, shipmentId: s!.id, externalShipmentId: x!.id, entryType: "IT" })
+            .values({
+              organizationId: dispatcherA.orgId,
+              shipmentId: s!.id,
+              externalShipmentId: x!.id,
+              entryType: "IT",
+            })
             .returning(),
         ),
       );
       expect(both).toMatch(/in_bond_records_parent_check/);
       const neither = await rejection(
         withRls(db, as(dispatcherA), (tx) =>
-          tx.insert(inBondRecords).values({ organizationId: dispatcherA.orgId, entryType: "IT" }).returning(),
+          tx
+            .insert(inBondRecords)
+            .values({ organizationId: dispatcherA.orgId, entryType: "IT" })
+            .returning(),
         ),
       );
       expect(neither).toMatch(/in_bond_records_parent_check/);
       const [first] = await withRls(db, as(dispatcherA), (tx) =>
-        tx.insert(inBondRecords).values({ organizationId: dispatcherA.orgId, shipmentId: s!.id, entryType: "IT" }).returning(),
+        tx
+          .insert(inBondRecords)
+          .values({ organizationId: dispatcherA.orgId, shipmentId: s!.id, entryType: "IT" })
+          .returning(),
       );
       try {
         const dup = await rejection(
           withRls(db, as(dispatcherA), (tx) =>
-            tx.insert(inBondRecords).values({ organizationId: dispatcherA.orgId, shipmentId: s!.id, entryType: "IE" }).returning(),
+            tx
+              .insert(inBondRecords)
+              .values({ organizationId: dispatcherA.orgId, shipmentId: s!.id, entryType: "IE" })
+              .returning(),
           ),
         );
         expect(dup).toMatch(/in_bond_records_shipment_unique/);
@@ -188,7 +227,10 @@ describe("in-bond tables (0026)", () => {
         await db.delete(inBondRecords).where(eq(inBondRecords.id, first!.id));
       }
       const nothing = await rejection(
-        db.insert(externalShipments).values({ organizationId: dispatcherA.orgId, regime: "ACE" }).returning(),
+        db
+          .insert(externalShipments)
+          .values({ organizationId: dispatcherA.orgId, regime: "ACE" })
+          .returning(),
       );
       expect(nothing).toMatch(/external_shipments_identity_check/);
     } finally {
@@ -207,19 +249,34 @@ describe("in-bond tables (0026)", () => {
       .returning();
     const [r] = await db
       .insert(inBondRecords)
-      .values({ organizationId: dispatcherA.orgId, externalShipmentId: x!.id, entryType: "IT", bondNumber: "300000002" })
+      .values({
+        organizationId: dispatcherA.orgId,
+        externalShipmentId: x!.id,
+        entryType: "IT",
+        bondNumber: "300000002",
+      })
       .returning();
     const update = (set: Partial<typeof inBondRecords.$inferInsert>) =>
-      withRls(db, as(dispatcherA), (tx) => tx.update(inBondRecords).set(set).where(eq(inBondRecords.id, r!.id)).returning());
+      withRls(db, as(dispatcherA), (tx) =>
+        tx.update(inBondRecords).set(set).where(eq(inBondRecords.id, r!.id)).returning(),
+      );
     try {
-      expect(await rejection(update({ externalShipmentId: x2!.id }))).toMatch(/parent is immutable/);
-      expect(await rejection(update({ bondNumber: "300000009" }))).toMatch(/immutable once assigned/);
-      expect(await rejection(update({ status: "export_sent" }))).toMatch(/invalid in-bond transition open -> export_sent/);
+      expect(await rejection(update({ externalShipmentId: x2!.id }))).toMatch(
+        /parent is immutable/,
+      );
+      expect(await rejection(update({ bondNumber: "300000009" }))).toMatch(
+        /immutable once assigned/,
+      );
+      expect(await rejection(update({ status: "export_sent" }))).toMatch(
+        /invalid in-bond transition open -> export_sent/,
+      );
       expect((await update({ status: "arrival_sent" }))[0]?.status).toBe("arrival_sent");
       expect((await update({ status: "arrived" }))[0]?.status).toBe("arrived");
       expect((await update({ status: "export_sent" }))[0]?.status).toBe("export_sent");
       expect((await update({ status: "exported" }))[0]?.status).toBe("exported");
-      expect(await rejection(update({ status: "cancelled" }))).toMatch(/invalid in-bond transition exported -> cancelled/);
+      expect(await rejection(update({ status: "cancelled" }))).toMatch(
+        /invalid in-bond transition exported -> cancelled/,
+      );
     } finally {
       await db.delete(externalShipments).where(eq(externalShipments.id, x!.id));
       await db.delete(externalShipments).where(eq(externalShipments.id, x2!.id));

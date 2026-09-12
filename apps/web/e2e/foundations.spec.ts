@@ -143,10 +143,15 @@ test.describe("seeded roles", () => {
     await expect(page.getByRole("heading", { name: "Help" })).toBeVisible();
     await page.getByRole("link", { name: "Importing from a file" }).first().click();
     await expect(page).toHaveURL(/\/help\/07-importing/);
-    await expect(page.getByRole("article", { name: "Importing from a file" })).toContainText("Validate, then commit");
+    await expect(page.getByRole("article", { name: "Importing from a file" })).toContainText(
+      "Validate, then commit",
+    );
 
     await page.goto("/resources");
-    await expect(page.getByRole("link", { name: "CBP border wait times" })).toHaveAttribute("rel", "noopener");
+    await expect(page.getByRole("link", { name: "CBP border wait times" })).toHaveAttribute(
+      "rel",
+      "noopener",
+    );
 
     await page.goto("/settings/profile");
     await expect(page.getByLabel("Display name")).toBeVisible();

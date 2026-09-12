@@ -107,7 +107,11 @@ describe("idempotency keys", () => {
   it("portal passes a stable idempotency key", async () => {
     const create = vi.fn().mockResolvedValue({ url: "https://portal" });
     const stripe = { billingPortal: { sessions: { create } } } as unknown as Stripe;
-    await createPortal({ customerId: "cus_1", returnUrl: "https://x", attemptId: "att-2" }, liveEnv, stripe);
+    await createPortal(
+      { customerId: "cus_1", returnUrl: "https://x", attemptId: "att-2" },
+      liveEnv,
+      stripe,
+    );
     expect(create).toHaveBeenCalledWith(
       { customer: "cus_1", return_url: "https://x" },
       { idempotencyKey: "corridor_portal_att-2" },

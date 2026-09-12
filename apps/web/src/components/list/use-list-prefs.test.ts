@@ -12,7 +12,13 @@ describe("parseListPrefs", () => {
   });
 
   it("keeps only known columns, in canonical order, and known sizes and intervals", () => {
-    expect(parseListPrefs(JSON.stringify({ columns: ["c", "zz", "a"], pageSize: 50, autoRefreshSec: 60 }), defaults, valid)).toEqual({
+    expect(
+      parseListPrefs(
+        JSON.stringify({ columns: ["c", "zz", "a"], pageSize: 50, autoRefreshSec: 60 }),
+        defaults,
+        valid,
+      ),
+    ).toEqual({
       columns: ["a", "c"],
       pageSize: 50,
       autoRefreshSec: 60,
@@ -20,6 +26,12 @@ describe("parseListPrefs", () => {
   });
 
   it("falls back per field", () => {
-    expect(parseListPrefs(JSON.stringify({ columns: ["zz"], pageSize: 7, autoRefreshSec: 12 }), defaults, valid)).toEqual(defaults);
+    expect(
+      parseListPrefs(
+        JSON.stringify({ columns: ["zz"], pageSize: 7, autoRefreshSec: 12 }),
+        defaults,
+        valid,
+      ),
+    ).toEqual(defaults);
   });
 });

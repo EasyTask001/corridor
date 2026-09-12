@@ -14,5 +14,7 @@ export function ColumnChooser<K extends string>({
   defaults: K[];
   onChange: (next: K[]) => void;
 }) {
-  return <ColumnPicker columns={columns} selected={selected} defaults={defaults} onChange={onChange} />;
+  return (
+    <ColumnPicker columns={columns} selected={selected} defaults={defaults} onChange={onChange} />
+  );
 }

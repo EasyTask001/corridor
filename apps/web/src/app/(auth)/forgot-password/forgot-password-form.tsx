@@ -12,7 +12,11 @@ export function ForgotPasswordForm() {
         <Label htmlFor="email">Email</Label>
         <Input id="email" name="email" type="email" autoComplete="email" required />
       </div>
-      {state?.error && <p className="text-sm text-status-danger">{state.error}</p>}
+      {state?.error && (
+        <p role="alert" className="text-sm text-status-danger">
+          {state.error}
+        </p>
+      )}
       {state?.message && (
         <p role="status" className="rounded-md bg-ok-500/10 px-3 py-2 text-sm text-status-ok">
           {state.message}

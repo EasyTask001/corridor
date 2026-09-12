@@ -59,7 +59,10 @@ export const PERMISSIONS = {
   },
 
   // in-bond (0026)
-  "inbond.read": { module: "shipment", description: "View the in-bond monitor and external shipments" },
+  "inbond.read": {
+    module: "shipment",
+    description: "View the in-bond monitor and external shipments",
+  },
   "inbond.write": {
     module: "shipment",
     description: "Record in-bond moves, send arrival / export / cancel messages",

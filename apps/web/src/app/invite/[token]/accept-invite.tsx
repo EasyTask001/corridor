@@ -8,7 +8,11 @@ export function AcceptInvite({ token }: { token: string }) {
   return (
     <form action={action} className="space-y-3">
       <input type="hidden" name="token" value={token} />
-      {state?.error && <p className="text-sm text-status-danger">{state.error}</p>}
+      {state?.error && (
+        <p role="alert" className="text-sm text-status-danger">
+          {state.error}
+        </p>
+      )}
       <button type="submit" disabled={pending} className="btn-primary w-full">
         {pending ? "Joining…" : "Accept invitation"}
       </button>

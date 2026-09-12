@@ -115,8 +115,7 @@ const upstashLimiters = new Map<string, Ratelimit>();
 
 type LimiterLike = Pick<Ratelimit, "limit">;
 let limiterFactoryOverride:
-  | ((tier: RateLimitTier, plan: SubscriptionPlan, limit: number) => LimiterLike)
-  | null = null;
+  ((tier: RateLimitTier, plan: SubscriptionPlan, limit: number) => LimiterLike) | null = null;
 
 /** Test seam: replace the Upstash limiter (e.g. with one that throws). */
 export function _setUpstashLimiterFactoryForTests(factory: typeof limiterFactoryOverride): void {
@@ -233,7 +232,8 @@ export async function checkPublicRateLimit(
 ): Promise<RateLimitResult> {
   const redis = getRedis();
   try {
-    if (!redis) return await checkWithKv(getKv(), `rl:public:${key}:${windowSeconds}`, limit, windowSeconds);
+    if (!redis)
+      return await checkWithKv(getKv(), `rl:public:${key}:${windowSeconds}`, limit, windowSeconds);
     const cacheKey = `public:${limit}:${windowSeconds}`;
     let limiter = upstashLimiters.get(cacheKey);
     if (!limiter) {
@@ -255,6 +255,11 @@ export async function checkPublicRateLimit(
     };
   } catch (error) {
     console.error("[ratelimit] public store unavailable; counting in-process", error);
-    return checkWithKv(getMemoryKv(), `rl:public:fallback:${key}:${windowSeconds}`, limit, windowSeconds);
+    return checkWithKv(
+      getMemoryKv(),
+      `rl:public:fallback:${key}:${windowSeconds}`,
+      limit,
+      windowSeconds,
+    );
   }
 }

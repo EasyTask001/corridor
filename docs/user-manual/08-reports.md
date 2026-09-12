@@ -6,7 +6,7 @@ One row per movement in a date range. Filter by regime, driver, port, truck or t
 
 ## Ask a question
 
-Type a question such as *How many movements by status in the last 30 days?* or *Show declared value in CAD by month this year*. The question is translated into a fixed set of measures and groupings, never into raw SQL, and the result can be exported the same way.
+Type a question such as _How many movements by status in the last 30 days?_ or _Show declared value in CAD by month this year_. The question is translated into a fixed set of measures and groupings, never into raw SQL, and the result can be exported the same way.
 
 ## Dashboard
 

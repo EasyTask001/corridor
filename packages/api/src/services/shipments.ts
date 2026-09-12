@@ -4,8 +4,23 @@
  * exists on its own and is attached to a movement when it goes on a truck.
  */
 import { TRPCError } from "@trpc/server";
-import { and, asc, eq, inArray, schema, sql, type PgColumn, type RlsTransaction } from "@corridor/db";
-import { addressToColumns, nestAddress, type Address, type CommodityInput, type ShipmentPatch } from "@corridor/domain";
+import {
+  and,
+  asc,
+  eq,
+  inArray,
+  schema,
+  sql,
+  type PgColumn,
+  type RlsTransaction,
+} from "@corridor/db";
+import {
+  addressToColumns,
+  nestAddress,
+  type Address,
+  type CommodityInput,
+  type ShipmentPatch,
+} from "@corridor/domain";
 
 const { shipments, commodities, commodityHazmat, organizationCarrierCodes, partners } = schema;
 
@@ -120,7 +135,8 @@ export function shipmentSetFrom(patch: ShipmentPatch) {
   for (const [key, value] of Object.entries(rest)) {
     if (value !== undefined) set[key] = value;
   }
-  if (deliveryAddress !== undefined) Object.assign(set, addressToColumns("delivery", deliveryAddress));
+  if (deliveryAddress !== undefined)
+    Object.assign(set, addressToColumns("delivery", deliveryAddress));
   return set as Partial<typeof shipments.$inferInsert>;
 }
 

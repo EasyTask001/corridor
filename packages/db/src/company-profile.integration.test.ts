@@ -91,7 +91,11 @@ describe("notification rules with sms (0025)", () => {
           channel: ["in_app", "sms"],
         })
         .onConflictDoUpdate({
-          target: [notificationRules.organizationId, notificationRules.userId, notificationRules.eventType],
+          target: [
+            notificationRules.organizationId,
+            notificationRules.userId,
+            notificationRules.eventType,
+          ],
           set: { channel: ["in_app", "sms"] },
         })
         .returning(),
@@ -163,7 +167,10 @@ describe("company profile (0025)", () => {
         .update(organizations)
         .set({ dispatchEmails: five, timezone: "America/Vancouver" })
         .where(eq(organizations.id, ownerA.orgId))
-        .returning({ dispatchEmails: organizations.dispatchEmails, timezone: organizations.timezone }),
+        .returning({
+          dispatchEmails: organizations.dispatchEmails,
+          timezone: organizations.timezone,
+        }),
     );
     expect(ok).toEqual({ dispatchEmails: five, timezone: "America/Vancouver" });
     const msg = await rejection(
@@ -178,7 +185,10 @@ describe("company profile (0025)", () => {
     expect(msg).toMatch(/organizations_dispatch_emails_check/);
     await db
       .update(organizations)
-      .set({ dispatchEmails: ["dispatch@pathfinder.demo", "ops@pathfinder.demo"], timezone: "America/Toronto" })
+      .set({
+        dispatchEmails: ["dispatch@pathfinder.demo", "ops@pathfinder.demo"],
+        timezone: "America/Toronto",
+      })
       .where(eq(organizations.id, ownerA.orgId));
   });
 

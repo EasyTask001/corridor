@@ -105,13 +105,13 @@ interface BorderConnectTransport {
   `ACE_SEND_REQUEST`/`ACI_SEND_REQUEST` with the confirmed `type` values:
   - ACE: `AMEND_TRIP_AND_SHIPMENTS` / `CANCEL_TRIP_AND_SHIPMENTS`
   - ACI: `AMEND` / `CANCEL`
-  `amend()` also re-uploads the trip body first via `toTripMessage` with
-  **`operation: "UPDATE"` — unconfirmed.** Only `"CREATE"` appears in any fetched BorderConnect
-  example or PDF reference. This is called out with an inline comment and must be confirmed
-  against BorderConnect (sandbox test or their support) before amendments are used in production;
-  until then `amend()` in `border_connect` mode is considered experimental.
+    `amend()` also re-uploads the trip body first via `toTripMessage` with
+    **`operation: "UPDATE"` — unconfirmed.** Only `"CREATE"` appears in any fetched BorderConnect
+    example or PDF reference. This is called out with an inline comment and must be confirmed
+    against BorderConnect (sandbox test or their support) before amendments are used in production;
+    until then `amend()` in `border_connect` mode is considered experimental.
 - `fromInboundMessage(msg: unknown): { referenceNumber: string | null; shipmentControlNumbers:
-  string[]; status: CustomsStatusMessage }` — branches on `msg.data`:
+string[]; status: CustomsStatusMessage }` — branches on `msg.data`:
   - `API_RESPONSE` (`status: OK|IMPORTED|DATA_ERROR`) → acknowledgement of the upload itself,
     maps to `"pending"`/`"rejected"` respectively (`DATA_ERROR` before customs ever sees it is a
     local rejection, not a CBP/CBSA decision).
@@ -155,7 +155,10 @@ interface BorderConnectSubmissionStore {
   /** Resolve a drained message's tripNumber, or an ACI_NOTICE's cargoControlNumber (via the
    *  shipments recorded in customs_submissions.request), to the customs_submissions row it
    *  belongs to. Null when no matching submission exists yet (message dropped, logged). */
-  resolveReference(key: { tripNumber?: string; cargoControlNumber?: string }): Promise<string | null>;
+  resolveReference(key: {
+    tripNumber?: string;
+    cargoControlNumber?: string;
+  }): Promise<string | null>;
   /** Cache one drained-but-not-yet-consumed message against its reference. */
   cachePendingMessage(referenceNumber: string, message: unknown): Promise<void>;
   /** Read and clear the cached message for a reference (the "serve" half of drain-then-serve).
@@ -193,7 +196,7 @@ job shape):**
    `customs_submissions` row it belongs to (or drops it with a log, mirroring
    `applyInboundCustomsMessage`'s existing "unknown reference" no-op); `store.cachePendingMessage`
    writes it to that row's `pending_inbound`.
-3. `store.takePendingMessage(ref)` reads and clears *this* reference's cache. Nothing new →
+3. `store.takePendingMessage(ref)` reads and clears _this_ reference's cache. Nothing new →
    `fetchStatus` returns the same status as last time (`"pending"` while the last cached message
    hasn't changed that).
 4. The returned `CustomsStatusMessage` flows into `applyStatusMessage` exactly as it does for

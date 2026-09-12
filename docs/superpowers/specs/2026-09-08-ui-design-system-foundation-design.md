@@ -124,6 +124,7 @@ These are added to `packages/ui` but existing call sites are not migrated to the
 items) as two flat lists — 17 links with no icons, no grouping.
 
 Redesign:
+
 - Collapse `Drivers/Trucks/Trailers/Partners` into one **Parties** group.
 - Collapse the 7 `/settings/*` routes into one **Settings** group.
 - Top-level nav becomes 8 items: Dashboard, Movements, Documents, Parties, Alerts, Reports,

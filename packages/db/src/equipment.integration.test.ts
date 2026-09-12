@@ -137,11 +137,7 @@ describe("equipment_types", () => {
     expect(tr501.trailerType).toBe("TF");
     const msg = await rejection(
       withRls(db, as(dispatcherA), (tx) =>
-        tx
-          .update(trailers)
-          .set({ trailerType: "XX" })
-          .where(eq(trailers.id, tr501.id))
-          .returning(),
+        tx.update(trailers).set({ trailerType: "XX" }).where(eq(trailers.id, tr501.id)).returning(),
       ),
     );
     expect(msg).toMatch(/trailers_trailer_type_fkey/);

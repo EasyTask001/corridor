@@ -33,7 +33,9 @@ export async function listManualPages(): Promise<ManualPage[]> {
   );
 }
 
-export async function renderManualPage(slug: string): Promise<{ title: string; html: string } | null> {
+export async function renderManualPage(
+  slug: string,
+): Promise<{ title: string; html: string } | null> {
   if (!/^[a-z0-9-]+$/.test(slug)) return null;
   try {
     const md = await readFile(path.join(MANUAL_DIR, `${slug}.md`), "utf8");

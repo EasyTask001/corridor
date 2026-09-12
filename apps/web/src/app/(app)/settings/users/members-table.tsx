@@ -15,7 +15,7 @@ export function MembersTable({
   currentUserId,
 }: {
   initialMembers: Member[];
-  roles: { id: string; name: string }[];
+  roles: { id: string; name: string; organizationId: string | null }[];
   canManage: boolean;
   currentUserId: string;
 }) {
@@ -26,6 +26,13 @@ export function MembersTable({
   const invalidate = () => qc.invalidateQueries({ queryKey: listOpts.queryKey });
 
   const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const assignableRoles = Array.from(
+    roles.reduce((byName, role) => {
+      const current = byName.get(role.name);
+      if (!current || role.organizationId !== null) byName.set(role.name, role);
+      return byName;
+    }, new Map<string, (typeof roles)[number]>()),
+  ).map(([, role]) => role);
   const invite = useMutation(
     trpc.organization.members.invite.mutationOptions({
       onSuccess: (r) => {
@@ -70,7 +77,7 @@ export function MembersTable({
               Role
             </label>
             <select id="invite-role" name="roleId" className="input" defaultValue={roles[0]?.id}>
-              {roles.map((r) => (
+              {assignableRoles.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.name}
                 </option>
@@ -81,11 +88,13 @@ export function MembersTable({
             {invite.isPending ? "Inviting…" : "Send invite"}
           </button>
           {invite.error && (
-            <p className="w-full text-sm text-status-danger">{invite.error.message}</p>
+            <p role="alert" className="w-full text-sm text-status-danger">
+              {invite.error.message}
+            </p>
           )}
           {inviteLink && (
             <p className="w-full text-sm text-fg-secondary">
-              Invite link (email delivery arrives in Phase 5):{" "}
+              Invite link (also sent by email):{" "}
               <code className="rounded bg-surface-sunken px-1.5 py-0.5 text-xs">{inviteLink}</code>
             </p>
           )}
@@ -122,7 +131,7 @@ export function MembersTable({
                           updateRole.mutate({ memberId: m.id, roleId: e.target.value })
                         }
                       >
-                        {roles.map((r) => (
+                        {assignableRoles.map((r) => (
                           <option key={r.id} value={r.id}>
                             {r.name}
                           </option>

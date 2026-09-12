@@ -80,8 +80,12 @@ describe("0042 address columns", () => {
       // Match the exact six column names rather than a `prefix_%` LIKE: the
       // `billing` prefix would otherwise also sweep in the unrelated,
       // pre-existing `billing_email` column on organizations.
-      const expected = ["city", "country", "line1", "line2", "postal_code", "region"].map((p) => `${prefix}_${p}`);
-      const cols = await conn.sql<{ column_name: string; data_type: string; is_nullable: string }[]>`
+      const expected = ["city", "country", "line1", "line2", "postal_code", "region"].map(
+        (p) => `${prefix}_${p}`,
+      );
+      const cols = await conn.sql<
+        { column_name: string; data_type: string; is_nullable: string }[]
+      >`
         select column_name, data_type, is_nullable from information_schema.columns
         where table_schema = 'public' and table_name = ${table} and column_name = any(${expected})
         order by column_name`;
@@ -99,26 +103,44 @@ describe("0042 address columns", () => {
         ('partners_address_country_check','shipments_delivery_country_check',
          'organizations_billing_country_check','drivers_us_address_country_check')`;
     expect(checks.map((c) => c.conname).sort()).toEqual([
-      "drivers_us_address_country_check", "organizations_billing_country_check",
-      "partners_address_country_check", "shipments_delivery_country_check",
+      "drivers_us_address_country_check",
+      "organizations_billing_country_check",
+      "partners_address_country_check",
+      "shipments_delivery_country_check",
     ]);
     const msg = await rejection(
-      withServiceRole(db, (tx) => tx.insert(partners).values({
-        organizationId: ownerA.orgId, name: "Bad Country Co", type: "shipper", addressCountry: "usa",
-      }).returning()),
+      withServiceRole(db, (tx) =>
+        tx
+          .insert(partners)
+          .values({
+            organizationId: ownerA.orgId,
+            name: "Bad Country Co",
+            type: "shipper",
+            addressCountry: "usa",
+          })
+          .returning(),
+      ),
     );
     expect(msg).toMatch(/partners_address_country_check/);
   });
 
   it("seed rows carry their address in the new columns", async () => {
-    const [partner] = await db.select({ city: partners.addressCity, country: partners.addressCountry })
-      .from(partners).where(and(eq(partners.organizationId, ownerA.orgId), eq(partners.name, "Maple Ridge Steel Ltd")));
+    const [partner] = await db
+      .select({ city: partners.addressCity, country: partners.addressCountry })
+      .from(partners)
+      .where(
+        and(eq(partners.organizationId, ownerA.orgId), eq(partners.name, "Maple Ridge Steel Ltd")),
+      );
     expect(partner).toEqual({ city: "Hamilton", country: "CA" });
-    const [passenger] = await db.select({ city: drivers.usAddressCity, region: drivers.usAddressRegion })
-      .from(drivers).where(and(eq(drivers.organizationId, ownerA.orgId), eq(drivers.lastName, "Delgado")));
+    const [passenger] = await db
+      .select({ city: drivers.usAddressCity, region: drivers.usAddressRegion })
+      .from(drivers)
+      .where(and(eq(drivers.organizationId, ownerA.orgId), eq(drivers.lastName, "Delgado")));
     expect(passenger).toEqual({ city: "Detroit", region: "MI" });
-    const [org] = await db.select({ city: organizations.billingCity, postal: organizations.billingPostalCode })
-      .from(organizations).where(eq(organizations.id, ownerA.orgId));
+    const [org] = await db
+      .select({ city: organizations.billingCity, postal: organizations.billingPostalCode })
+      .from(organizations)
+      .where(eq(organizations.id, ownerA.orgId));
     expect(org).toEqual({ city: "Mississauga", postal: "L5T 2M8" });
   });
 });

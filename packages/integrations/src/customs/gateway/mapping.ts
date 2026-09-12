@@ -111,7 +111,10 @@ export function fromGatewayStatus(json: unknown): CustomsStatusMessage {
   };
 }
 
-export function fromGatewayNotices(json: unknown, provider: "cbp_ace" | "cbsa_aci"): CarrierNotice[] {
+export function fromGatewayNotices(
+  json: unknown,
+  provider: "cbp_ace" | "cbsa_aci",
+): CarrierNotice[] {
   return arr(obj(json).notices ?? json)
     .map(obj)
     .flatMap((n) => {

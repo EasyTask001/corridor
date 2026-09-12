@@ -68,7 +68,9 @@ test.describe("natural-language reporting", () => {
     await expect(page.getByRole("link", { name: "Reports" })).toHaveCount(0);
   });
 
-  test("crossing report: picks columns, lists seeded crossings and exports a CSV link", async ({ page }) => {
+  test("crossing report: picks columns, lists seeded crossings and exports a CSV link", async ({
+    page,
+  }) => {
     await login(page, "dispatch@pathfinder.demo");
     await page.goto("/reports");
     await page.getByLabel("From", { exact: true }).fill("2020-01-01");

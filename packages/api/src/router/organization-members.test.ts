@@ -184,7 +184,8 @@ describe("organization.members.invite", () => {
       const atCap = caller({ plan: "professional", subscriptionSeats: 15, seatCount: 15 });
       await expect(atCap.caller.members.invite(INVITE)).rejects.toMatchObject({
         code: "PRECONDITION_FAILED",
-        message: "This plan is limited to 15 seat(s). Remove a member or upgrade to invite another.",
+        message:
+          "This plan is limited to 15 seat(s). Remove a member or upgrade to invite another.",
       });
     });
 

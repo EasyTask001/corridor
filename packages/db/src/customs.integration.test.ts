@@ -224,7 +224,11 @@ describe("background_jobs_insert after 0023", () => {
       withRls(db, as(dispatcherA), (tx) =>
         tx
           .insert(backgroundJobs)
-          .values({ organizationId: dispatcherA.orgId, jobType: "customs.notices_sync", payload: {} })
+          .values({
+            organizationId: dispatcherA.orgId,
+            jobType: "customs.notices_sync",
+            payload: {},
+          })
           .returning(),
       ),
     );

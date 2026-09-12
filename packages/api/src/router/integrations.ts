@@ -4,6 +4,7 @@ import { and, desc, eq, schema, sql } from "@corridor/db";
 import { uuid } from "@corridor/domain";
 import { getBorderWait, lookupHsCode, searchTariff } from "@corridor/integrations";
 import { permissionProcedure, router } from "../trpc";
+import { isSafeGatewayBaseUrl } from "@corridor/integrations";
 import { writeAudit } from "../services/audit";
 import { customsClientFor } from "../services/customs";
 import { processDueJobs } from "../services/jobs";
@@ -67,7 +68,14 @@ export const integrationsRouter = router({
           status: z.enum(["active", "disabled"]).default("active"),
           /** 0023 — mock gateway, or the certified EDI gateway's REST API. */
           mode: z.enum(["mock", "gateway"]).default("mock"),
-          baseUrl: z.string().trim().url().max(300).nullable().optional(),
+          baseUrl: z
+            .string()
+            .trim()
+            .url()
+            .max(300)
+            .refine(isSafeGatewayBaseUrl, "Gateway URL must be an HTTPS public endpoint")
+            .nullable()
+            .optional(),
           settings: z
             .object({
               mockDelayMs: z.number().int().min(0).max(120_000).optional(),
@@ -310,7 +318,11 @@ export const integrationsRouter = router({
         worker: `manual-${ctx.session.user.id.slice(0, 8)}`,
         organizationId: ctx.orgId,
       });
-      const summary = { claimed: result.claimed, succeeded: result.succeeded, failed: result.failed };
+      const summary = {
+        claimed: result.claimed,
+        succeeded: result.succeeded,
+        failed: result.failed,
+      };
       await ctx.rls((tx) =>
         writeAudit(tx, ctx.orgId, "job.run_now", "background_jobs", ctx.orgId, null, summary),
       );

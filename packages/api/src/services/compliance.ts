@@ -184,10 +184,7 @@ export async function scanOrganization(
       .select()
       .from(drivers)
       .where(and(eq(drivers.organizationId, organizationId))),
-    tx
-      .select()
-      .from(driverDocuments)
-      .where(eq(driverDocuments.organizationId, organizationId)),
+    tx.select().from(driverDocuments).where(eq(driverDocuments.organizationId, organizationId)),
     tx
       .select()
       .from(trucks)

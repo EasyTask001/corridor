@@ -19,6 +19,7 @@ export { fromGatewayStatus, toGatewayManifest } from "./gateway/mapping";
 export {
   createFixtureTransport,
   createHttpTransport,
+  isSafeGatewayBaseUrl,
   type GatewayTransport,
 } from "./gateway/transport";
 

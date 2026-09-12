@@ -23,7 +23,9 @@ export function lintMigrationSource(fileName: string, source: string): string[] 
   for (const block of blocks) {
     const head = block.split(/\$\$;/)[0] ?? block;
     if (/set\s+search_path\s*=\s*public\b/i.test(head)) {
-      problems.push(`${fileName}: security definer function sets search_path = public; use set search_path = '' and schema-qualify every object`);
+      problems.push(
+        `${fileName}: security definer function sets search_path = public; use set search_path = '' and schema-qualify every object`,
+      );
     } else if (!/set\s+search_path\s*=\s*''/i.test(head)) {
       problems.push(`${fileName}: security definer function without set search_path = ''`);
     }

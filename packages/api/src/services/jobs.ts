@@ -20,7 +20,13 @@ import {
   manifestFor,
   pollCustomsStatus,
 } from "./customs";
-import { applyCustomsDecision, loadFull, loadOrganization, lockMovement, requireMovement } from "./movements";
+import {
+  applyCustomsDecision,
+  loadFull,
+  loadOrganization,
+  lockMovement,
+  requireMovement,
+} from "./movements";
 import { recordUsage, reportPendingUsage } from "./usage";
 
 const { backgroundJobs, movements } = schema;
@@ -167,7 +173,8 @@ export const detachedJobHandlers: Partial<Record<JobType, DetachedHandler>> = {
     if (!orgId) throw new Error("customs.decide requires organization_id");
     const prepared = await withServiceRole(db, async (tx) => {
       const m = await requireMovement(tx, orgId, movementId);
-      if (m.status !== "sent" && m.status !== "accepted" && m.status !== "held") return { m, skip: true as const };
+      if (m.status !== "sent" && m.status !== "accepted" && m.status !== "held")
+        return { m, skip: true as const };
       const full = await loadFull(tx, orgId, movementId);
       const org = await loadOrganization(tx, orgId);
       const gateway = await customsClientFor(tx, orgId, m.regime);
@@ -182,26 +189,47 @@ export const detachedJobHandlers: Partial<Record<JobType, DetachedHandler>> = {
     );
     return withServiceRole(db, async (tx) => {
       await logIntegrationEvent(tx, {
-        orgId, movementId, provider: prepared.client.provider, direction: "inbound", operation: "decision",
+        orgId,
+        movementId,
+        provider: prepared.client.provider,
+        direction: "inbound",
+        operation: "decision",
         request: { referenceNumber: ref, currentStatus: prepared.m.status },
         response: { decision: decision.decision, message: decision.message, ...decision.raw },
-        statusCode: 200, success: true, durationMs: 0,
-        correlationId: typeof job.payload.correlationId === "string" ? job.payload.correlationId : null,
+        statusCode: 200,
+        success: true,
+        durationMs: 0,
+        correlationId:
+          typeof job.payload.correlationId === "string" ? job.payload.correlationId : null,
       });
       const current = await lockMovement(tx, orgId, movementId);
       if (current.status !== prepared.m.status) {
-        return { skipped: true, reason: `movement moved to ${current.status} during the gateway call` };
+        return {
+          skipped: true,
+          reason: `movement moved to ${current.status} during the gateway call`,
+        };
       }
       const updated = await applyCustomsDecision(tx, { orgId, userId: null }, current, {
-        decision: decision.decision, referenceNumber: decision.referenceNumber, message: decision.message,
-        simulated: prepared.client.environment === "sandbox", raw: decision.raw,
-        events: decision.events, shipments: decision.shipments,
+        decision: decision.decision,
+        referenceNumber: decision.referenceNumber,
+        message: decision.message,
+        simulated: prepared.client.environment === "sandbox",
+        raw: decision.raw,
+        events: decision.events,
+        shipments: decision.shipments,
       });
       if (updated.status === "accepted" || updated.status === "held") {
         const delay = Math.max(1500, Number(prepared.config?.settings?.mockDelayMs ?? 4000));
-        await enqueueJob(tx, { orgId, jobType: "customs.decide", payload: {
-          movementId, referenceNumber: ref, correlationId: job.payload.correlationId ?? null,
-        }, runAt: new Date(Date.now() + (updated.status === "held" ? delay * 3 : delay)) });
+        await enqueueJob(tx, {
+          orgId,
+          jobType: "customs.decide",
+          payload: {
+            movementId,
+            referenceNumber: ref,
+            correlationId: job.payload.correlationId ?? null,
+          },
+          runAt: new Date(Date.now() + (updated.status === "held" ? delay * 3 : delay)),
+        });
       }
       return { decision: decision.decision, status: updated.status };
     });
@@ -217,9 +245,11 @@ export const detachedJobHandlers: Partial<Record<JobType, DetachedHandler>> = {
     if (!orgId) throw new Error("customs.poll_status requires organization_id");
     const payload = {
       movementId: String(job.payload.movementId),
-      referenceNumber: typeof job.payload.referenceNumber === "string" ? job.payload.referenceNumber : null,
+      referenceNumber:
+        typeof job.payload.referenceNumber === "string" ? job.payload.referenceNumber : null,
       startedAt: typeof job.payload.startedAt === "string" ? job.payload.startedAt : null,
-      correlationId: typeof job.payload.correlationId === "string" ? job.payload.correlationId : null,
+      correlationId:
+        typeof job.payload.correlationId === "string" ? job.payload.correlationId : null,
     };
     const result = await pollCustomsStatus(db, orgId, payload);
     if (result.again) {

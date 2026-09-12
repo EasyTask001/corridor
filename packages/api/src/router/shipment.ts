@@ -227,7 +227,11 @@ export const shipmentRouter = router({
         // An in-bond shipment is watched on the in-bond monitor from day one (0026).
         if (row!.shipmentType === "in_bond") {
           const { ensureInBondRecordForShipment } = await import("../services/inbond");
-          await ensureInBondRecordForShipment(tx, { orgId: ctx.orgId, userId: ctx.session.user.id }, row!);
+          await ensureInBondRecordForShipment(
+            tx,
+            { orgId: ctx.orgId, userId: ctx.session.user.id },
+            row!,
+          );
         }
         return nestAddress("delivery", "deliveryAddress", row!);
       }),
@@ -278,7 +282,13 @@ export const shipmentRouter = router({
     .mutation(({ ctx, input }) =>
       ctx.rls(async (tx) => {
         const rows = await tx
-          .select({ id: shipments.id, controlNumber: shipments.controlNumber, status: shipments.status, movementId: shipments.movementId, movementStatus: movements.status })
+          .select({
+            id: shipments.id,
+            controlNumber: shipments.controlNumber,
+            status: shipments.status,
+            movementId: shipments.movementId,
+            movementStatus: movements.status,
+          })
           .from(shipments)
           .leftJoin(movements, eq(movements.id, shipments.movementId))
           .where(and(eq(shipments.organizationId, ctx.orgId), inArray(shipments.id, input.ids)));
@@ -286,7 +296,8 @@ export const shipmentRouter = router({
         const touchedMovements = new Set<string>();
         let deleted = 0;
         for (const r of rows) {
-          const editable = r.status === "draft" && (!r.movementStatus || isEditable(r.movementStatus));
+          const editable =
+            r.status === "draft" && (!r.movementStatus || isEditable(r.movementStatus));
           if (!editable) {
             skipped.push(r.controlNumber);
             continue;
@@ -296,7 +307,8 @@ export const shipmentRouter = router({
           if (r.movementId) touchedMovements.add(r.movementId);
           deleted += 1;
         }
-        for (const movementId of touchedMovements) await syncMovementRiskAlerts(tx, ctx.orgId, movementId);
+        for (const movementId of touchedMovements)
+          await syncMovementRiskAlerts(tx, ctx.orgId, movementId);
         return { deleted, skipped };
       }),
     ),
@@ -531,7 +543,10 @@ export const shipmentRouter = router({
               .orderBy(desc(parsRnsEvents.receivedAt))
               .limit(input.limit)
               .offset(input.offset),
-            tx.select({ count: sql<number>`count(*)::int` }).from(parsRnsEvents).where(where),
+            tx
+              .select({ count: sql<number>`count(*)::int` })
+              .from(parsRnsEvents)
+              .where(where),
           ]);
           return { rows, total: counts[0]?.count ?? 0 };
         }),

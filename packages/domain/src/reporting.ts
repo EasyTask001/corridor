@@ -72,7 +72,10 @@ export const CROSSING_REPORT_COLUMNS = [
   { key: "declaredValue", label: "Declared value" },
 ] as const;
 export type CrossingColumn = (typeof CROSSING_REPORT_COLUMNS)[number]["key"];
-export const CROSSING_COLUMN_KEYS = CROSSING_REPORT_COLUMNS.map((c) => c.key) as [CrossingColumn, ...CrossingColumn[]];
+export const CROSSING_COLUMN_KEYS = CROSSING_REPORT_COLUMNS.map((c) => c.key) as [
+  CrossingColumn,
+  ...CrossingColumn[],
+];
 export const crossingColumn = z.enum(CROSSING_COLUMN_KEYS);
 export const DEFAULT_CROSSING_COLUMNS: CrossingColumn[] = [
   "movementNumber",
@@ -114,7 +117,11 @@ export const reportExportInput = z.object({
   format: exportFormat,
   source: z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("crossings"), query: crossingReportInput }),
-    z.object({ kind: z.literal("query"), query: reportQuery, title: z.string().trim().min(1).max(120) }),
+    z.object({
+      kind: z.literal("query"),
+      query: reportQuery,
+      title: z.string().trim().min(1).max(120),
+    }),
   ]),
 });
 export type ReportExportInput = z.infer<typeof reportExportInput>;

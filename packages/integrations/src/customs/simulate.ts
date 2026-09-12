@@ -110,7 +110,11 @@ export function simulateCustomsEvents(input: SimulationInput): {
     if (input.decision === "held") {
       events.push(event("held"));
       for (const s of input.shipments)
-        shipments.push({ controlNumber: s.controlNumber, status: "held", ...entryFor(s.controlNumber) });
+        shipments.push({
+          controlNumber: s.controlNumber,
+          status: "held",
+          ...entryFor(s.controlNumber),
+        });
     } else {
       if (input.regime === "ACE") events.push(event("arrival_recorded"));
       events.push(event("released"));

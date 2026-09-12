@@ -67,7 +67,10 @@ export async function uploadGeneratedFile(storagePath: string, bytes: Buffer, co
     .from(DOCUMENTS_BUCKET)
     .upload(storagePath, bytes, { contentType, upsert: false });
   if (error) {
-    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `Upload failed: ${error.message}` });
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: `Upload failed: ${error.message}`,
+    });
   }
 }
 
@@ -97,7 +100,10 @@ async function storePdf(
     .from(DOCUMENTS_BUCKET)
     .upload(storagePath, args.bytes, { contentType: "application/pdf", upsert: false });
   if (error) {
-    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: `PDF upload failed: ${error.message}` });
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: `PDF upload failed: ${error.message}`,
+    });
   }
   const [row] = await tx
     .insert(generatedDocuments)
@@ -112,10 +118,18 @@ async function storePdf(
       createdBy: actor.userId,
     })
     .returning();
-  return { id: row!.id, storagePath, byteSize: args.bytes.length, signedUrl: await signedUrlFor(storagePath) };
+  return {
+    id: row!.id,
+    storagePath,
+    byteSize: args.bytes.length,
+    signedUrl: await signedUrlFor(storagePath),
+  };
 }
 
-function carrierOf(org: Awaited<ReturnType<typeof loadOrganization>>, carrierCode: string | null): SheetCarrier {
+function carrierOf(
+  org: Awaited<ReturnType<typeof loadOrganization>>,
+  carrierCode: string | null,
+): SheetCarrier {
   return {
     name: org.name,
     legalName: org.legalName,
@@ -135,12 +149,15 @@ export async function driverSheetDataFor(
   const customsRows = await tx
     .select({ payload: movementEvents.payload, occurredAt: movementEvents.occurredAt })
     .from(movementEvents)
-    .where(and(eq(movementEvents.movementId, full.id), eq(movementEvents.eventType, "customs_event")))
+    .where(
+      and(eq(movementEvents.movementId, full.id), eq(movementEvents.eventType, "customs_event")),
+    )
     .orderBy(asc(movementEvents.occurredAt));
-  const plates = (primary: string, jurisdiction: string, extra: Array<{ plateNumber: string; jurisdiction: string }>) => [
-    `${primary} ${jurisdiction}`,
-    ...extra.map((p) => `${p.plateNumber} ${p.jurisdiction}`),
-  ];
+  const plates = (
+    primary: string,
+    jurisdiction: string,
+    extra: Array<{ plateNumber: string; jurisdiction: string }>,
+  ) => [`${primary} ${jurisdiction}`, ...extra.map((p) => `${p.plateNumber} ${p.jurisdiction}`)];
   return {
     carrier: carrierOf(org, full.carrierCode),
     trip: {
@@ -208,10 +225,18 @@ export async function driverSheetDataFor(
     })),
     customsEvents: customsRows.map((e) => {
       const p = e.payload ?? {};
-      const detail = [p.shipmentControlNumber, p.entryNumber && `entry ${p.entryNumber}`, p.entryPortCode && `@ ${p.entryPortCode}`]
+      const detail = [
+        p.shipmentControlNumber,
+        p.entryNumber && `entry ${p.entryNumber}`,
+        p.entryPortCode && `@ ${p.entryPortCode}`,
+      ]
         .filter(Boolean)
         .join(" · ");
-      return { label: String(p.label ?? p.code ?? ""), occurredAt: e.occurredAt.toISOString(), detail: detail || null };
+      return {
+        label: String(p.label ?? p.code ?? ""),
+        occurredAt: e.occurredAt.toISOString(),
+        detail: detail || null,
+      };
     }),
     generatedAt: new Date().toISOString(),
     simple,
@@ -228,7 +253,9 @@ export async function generateForMovement(
   const org = await loadOrganization(tx, actor.orgId);
   const data = await driverSheetDataFor(tx, org, full, org.simpleDriverSheet);
   const bytes =
-    input.kind === "driver_sheet" ? await renderDriverSheet(data) : await renderManifestSummary(data);
+    input.kind === "driver_sheet"
+      ? await renderDriverSheet(data)
+      : await renderManifestSummary(data);
   return storePdf(tx, actor, {
     movementId: full.id,
     kind: input.kind,
@@ -263,7 +290,13 @@ export async function generateBlankSheets(
     kind: "blank_driver_sheet",
     scope: "blank",
     bytes,
-    metadata: { regime: input.regime, prefix: input.prefix, fromTrip: input.fromTrip, toTrip: input.toTrip, pages: tripNumbers.length },
+    metadata: {
+      regime: input.regime,
+      prefix: input.prefix,
+      fromTrip: input.fromTrip,
+      toTrip: input.toTrip,
+      pages: tripNumbers.length,
+    },
   });
 }
 
@@ -271,7 +304,12 @@ export async function generateBlankSheets(
 export async function generateTableReport(
   tx: RlsTransaction,
   actor: Actor,
-  input: { kind: "report" | "registry_export"; scope: string; data: Omit<TableReportData, "carrier" | "generatedAt">; metadata?: Record<string, unknown> },
+  input: {
+    kind: "report" | "registry_export";
+    scope: string;
+    data: Omit<TableReportData, "carrier" | "generatedAt">;
+    metadata?: Record<string, unknown>;
+  },
 ) {
   const org = await loadOrganization(tx, actor.orgId);
   const bytes = await renderTableReport({

@@ -111,15 +111,31 @@ export const movementNoteInput = z.object({ movementId: uuid, body: nonEmpty.max
  */
 export const CBSA_AMENDMENT_REASON_CODES = [
   { code: "40", scope: "conveyance", label: "Clerical error when keying conveyance data" },
-  { code: "45", scope: "conveyance", label: "Duplicate CCD, need to cancel one (cargo to be de-linked)" },
+  {
+    code: "45",
+    scope: "conveyance",
+    label: "Duplicate CCD, need to cancel one (cargo to be de-linked)",
+  },
   { code: "50", scope: "conveyance", label: "Entire shipment not laden (cargo to be de-linked)" },
   { code: "20", scope: "cargo", label: "Amendment to description of goods" },
   { code: "25", scope: "cargo", label: "Amendment to consignee (name and/or address)" },
   { code: "30", scope: "cargo", label: "In bond port / sub-location code amendment" },
   { code: "35", scope: "cargo", label: "Clerical error when keying cargo data" },
-  { code: "65", scope: "cargo", label: "Overage: more pieces than reported at first port of arrival" },
-  { code: "70", scope: "cargo", label: "Shortage: fewer pieces than reported at first port of arrival" },
-  { code: "75", scope: "cargo", label: "Goods pilfered, stolen, lost or destroyed in the carrier's custody" },
+  {
+    code: "65",
+    scope: "cargo",
+    label: "Overage: more pieces than reported at first port of arrival",
+  },
+  {
+    code: "70",
+    scope: "cargo",
+    label: "Shortage: fewer pieces than reported at first port of arrival",
+  },
+  {
+    code: "75",
+    scope: "cargo",
+    label: "Goods pilfered, stolen, lost or destroyed in the carrier's custody",
+  },
   { code: "60", scope: "both", label: "Amendment not elsewhere specified" },
   { code: "80", scope: "both", label: "Change request delayed by client systems outage" },
   { code: "85", scope: "both", label: "Change request delayed by CBSA systems outage" },

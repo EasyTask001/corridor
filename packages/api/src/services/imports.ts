@@ -22,10 +22,23 @@ import {
 import type { Actor } from "./movements";
 import { writeHazmat } from "./shipments";
 
-const { importBatches, shipments, commodities, partners, ports, organizationCarrierCodes, movements } = schema;
+const {
+  importBatches,
+  shipments,
+  commodities,
+  partners,
+  ports,
+  organizationCarrierCodes,
+  movements,
+} = schema;
 
 /** Header cells folded to the template keys: "Control Reference" → control_reference. */
-const foldHeader = (h: string) => h.trim().toLowerCase().replace(/[\s-]+/g, "_").replace(/[^a-z0-9_]/g, "");
+const foldHeader = (h: string) =>
+  h
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_]/g, "");
 
 /** papaparse with the settings every template shares; delimiter auto-detects across .csv/.txt/.dat. */
 export function parseCsv(content: string): { rows: Record<string, string>[]; columns: string[] } {
@@ -71,7 +84,12 @@ export interface ResolvedCommodity {
   valueAmount: number | null;
   valueCurrency: "USD" | "CAD" | null;
   isConsolidated: boolean;
-  hazmat: Array<{ unCode: string; description: string | null; emergencyContact: string | null; emergencyPhone: string | null }>;
+  hazmat: Array<{
+    unCode: string;
+    description: string | null;
+    emergencyContact: string | null;
+    emergencyPhone: string | null;
+  }>;
 }
 
 const zodErrors = (issues: Array<{ path: PropertyKey[]; message: string }>): ImportRowError[] =>
@@ -87,20 +105,34 @@ async function lookups(tx: RlsTransaction, orgId: string) {
       .from(partners)
       .where(and(eq(partners.organizationId, orgId), eq(partners.status, "active"))),
     tx
-      .select({ regime: organizationCarrierCodes.regime, code: organizationCarrierCodes.code, isDefault: organizationCarrierCodes.isDefault })
+      .select({
+        regime: organizationCarrierCodes.regime,
+        code: organizationCarrierCodes.code,
+        isDefault: organizationCarrierCodes.isDefault,
+      })
       .from(organizationCarrierCodes)
-      .where(and(eq(organizationCarrierCodes.organizationId, orgId), eq(organizationCarrierCodes.status, "active"))),
-    tx.select({ id: ports.id, regime: ports.regime, kind: ports.kind, code: ports.code }).from(ports).where(eq(ports.active, true)),
+      .where(
+        and(
+          eq(organizationCarrierCodes.organizationId, orgId),
+          eq(organizationCarrierCodes.status, "active"),
+        ),
+      ),
+    tx
+      .select({ id: ports.id, regime: ports.regime, kind: ports.kind, code: ports.code })
+      .from(ports)
+      .where(eq(ports.active, true)),
   ]);
   const partnerByName = new Map(partnerRows.map((p) => [p.name.trim().toLowerCase(), p]));
   const codes = new Set(codeRows.map((c) => `${c.regime}:${c.code}`));
   const defaults = new Map(codeRows.filter((c) => c.isDefault).map((c) => [c.regime, c.code]));
   const portBy = new Map(portRows.map((p) => [`${p.regime}:${p.kind}:${p.code}`, p.id]));
   return {
-    partner: (name: string | undefined) => (name ? partnerByName.get(name.trim().toLowerCase()) : undefined),
+    partner: (name: string | undefined) =>
+      name ? partnerByName.get(name.trim().toLowerCase()) : undefined,
     hasCode: (regime: string, code: string) => codes.has(`${regime}:${code}`),
     defaultCode: (regime: "ACE" | "ACI") => defaults.get(regime),
-    port: (regime: string, kind: string, code: string | undefined) => (code ? portBy.get(`${regime}:${kind}:${code}`) : undefined),
+    port: (regime: string, kind: string, code: string | undefined) =>
+      code ? portBy.get(`${regime}:${kind}:${code}`) : undefined,
   };
 }
 
@@ -125,7 +157,12 @@ export async function validateShipmentRows(
           await tx
             .select({ controlNumber: shipments.controlNumber })
             .from(shipments)
-            .where(and(eq(shipments.organizationId, orgId), inArray(shipments.controlNumber, candidates)))
+            .where(
+              and(
+                eq(shipments.organizationId, orgId),
+                inArray(shipments.controlNumber, candidates),
+              ),
+            )
         ).map((s) => s.controlNumber)
       : [],
   );
@@ -134,36 +171,72 @@ export async function validateShipmentRows(
     const line = i + 2;
     const parsed = shipmentImportRow.safeParse(r);
     if (!parsed.success) {
-      rows.push({ line, status: "error", errors: zodErrors(parsed.error.issues), label: r.control_reference ?? "" });
+      rows.push({
+        line,
+        status: "error",
+        errors: zodErrors(parsed.error.issues),
+        label: r.control_reference ?? "",
+      });
       return;
     }
     const row: ShipmentImportRow = parsed.data;
     const errors: ImportRowError[] = [];
     const carrierCode = row.carrier_code ?? ref.defaultCode(row.regime);
-    if (!carrierCode) errors.push({ column: "carrier_code", message: `no ${row.regime} carrier code on file` });
+    if (!carrierCode)
+      errors.push({ column: "carrier_code", message: `no ${row.regime} carrier code on file` });
     else if (!ref.hasCode(row.regime, carrierCode))
-      errors.push({ column: "carrier_code", message: `${carrierCode} is not one of this organization's ${row.regime} codes` });
+      errors.push({
+        column: "carrier_code",
+        message: `${carrierCode} is not one of this organization's ${row.regime} codes`,
+      });
     const controlNumber = `${carrierCode ?? ""}${row.control_reference}`;
     const dupLine = seen.get(controlNumber);
-    if (dupLine) errors.push({ column: "control_reference", message: `duplicate of line ${dupLine}` });
+    if (dupLine)
+      errors.push({ column: "control_reference", message: `duplicate of line ${dupLine}` });
     else seen.set(controlNumber, line);
-    if (existing.has(controlNumber)) errors.push({ column: "control_reference", message: `${controlNumber} already exists` });
+    if (existing.has(controlNumber))
+      errors.push({ column: "control_reference", message: `${controlNumber} already exists` });
 
     const shipper = ref.partner(row.shipper_name);
-    if (row.shipper_name && !shipper) errors.push({ column: "shipper_name", message: `no partner named "${row.shipper_name}"` });
+    if (row.shipper_name && !shipper)
+      errors.push({ column: "shipper_name", message: `no partner named "${row.shipper_name}"` });
     const consignee = ref.partner(row.consignee_name);
-    if (row.consignee_name && !consignee) errors.push({ column: "consignee_name", message: `no partner named "${row.consignee_name}"` });
+    if (row.consignee_name && !consignee)
+      errors.push({
+        column: "consignee_name",
+        message: `no partner named "${row.consignee_name}"`,
+      });
 
     const portOr = (column: string, kind: string, code: string | undefined) => {
       if (!code) return null;
       const id = ref.port(row.regime, kind, code);
-      if (!id) errors.push({ column, message: `unknown ${row.regime} ${kind.replace(/_/g, " ")} code ${code}` });
+      if (!id)
+        errors.push({
+          column,
+          message: `unknown ${row.regime} ${kind.replace(/_/g, " ")} code ${code}`,
+        });
       return id ?? null;
     };
-    const entryPortId = portOr("entry_port", "port_of_entry", row.regime === "ACE" ? row.entry_port : undefined);
-    const inBondDestinationPortId = portOr("in_bond_destination", "in_bond_destination", row.regime === "ACE" ? row.in_bond_destination : undefined);
-    const destinationPortId = portOr("destination_port", "cbsa_office", row.regime === "ACI" ? row.destination_port : undefined);
-    const sublocationPortId = portOr("sublocation", "sublocation", row.regime === "ACI" ? row.sublocation : undefined);
+    const entryPortId = portOr(
+      "entry_port",
+      "port_of_entry",
+      row.regime === "ACE" ? row.entry_port : undefined,
+    );
+    const inBondDestinationPortId = portOr(
+      "in_bond_destination",
+      "in_bond_destination",
+      row.regime === "ACE" ? row.in_bond_destination : undefined,
+    );
+    const destinationPortId = portOr(
+      "destination_port",
+      "cbsa_office",
+      row.regime === "ACI" ? row.destination_port : undefined,
+    );
+    const sublocationPortId = portOr(
+      "sublocation",
+      "sublocation",
+      row.regime === "ACI" ? row.sublocation : undefined,
+    );
 
     if (errors.length) {
       rows.push({ line, status: "error", errors, label: controlNumber });
@@ -199,10 +272,16 @@ export async function validateCommodityRows(
   orgId: string,
   raw: Record<string, string>[],
 ): Promise<{ report: ImportReport; payload: ResolvedCommodity[] }> {
-  const controls = [...new Set(raw.map((r) => (r.control_number ?? "").trim().toUpperCase()).filter(Boolean))];
+  const controls = [
+    ...new Set(raw.map((r) => (r.control_number ?? "").trim().toUpperCase()).filter(Boolean)),
+  ];
   const targets = controls.length
     ? await tx
-        .select({ id: shipments.id, controlNumber: shipments.controlNumber, movementStatus: movements.status })
+        .select({
+          id: shipments.id,
+          controlNumber: shipments.controlNumber,
+          movementStatus: movements.status,
+        })
         .from(shipments)
         .leftJoin(movements, eq(movements.id, shipments.movementId))
         .where(and(eq(shipments.organizationId, orgId), inArray(shipments.controlNumber, controls)))
@@ -215,25 +294,43 @@ export async function validateCommodityRows(
     const line = i + 2;
     const parsed = commodityImportRow.safeParse(r);
     if (!parsed.success) {
-      rows.push({ line, status: "error", errors: zodErrors(parsed.error.issues), label: r.control_number ?? "" });
+      rows.push({
+        line,
+        status: "error",
+        errors: zodErrors(parsed.error.issues),
+        label: r.control_number ?? "",
+      });
       return;
     }
     const row: CommodityImportRow = parsed.data;
     const errors: ImportRowError[] = [];
     const target = byControl.get(row.control_number);
-    if (!target) errors.push({ column: "control_number", message: `no shipment ${row.control_number}` });
+    if (!target)
+      errors.push({ column: "control_number", message: `no shipment ${row.control_number}` });
     else if (target.movementStatus && !EDITABLE_MOVEMENT.has(target.movementStatus))
-      errors.push({ column: "control_number", message: `${row.control_number} is on a ${target.movementStatus} movement and cannot take new lines` });
+      errors.push({
+        column: "control_number",
+        message: `${row.control_number} is on a ${target.movementStatus} movement and cannot take new lines`,
+      });
     const hazmat: ResolvedCommodity["hazmat"] = [];
     for (const n of [1, 2, 3] as const) {
       const code = row[`hazmat_code_${n}`];
       const desc = row[`hazmat_description_${n}`];
       if (!code && (desc || row[`hazmat_contact_${n}`] || row[`hazmat_phone_${n}`]))
-        errors.push({ column: `hazmat_code_${n}`, message: `hazmat ${n} has details but no UN code` });
+        errors.push({
+          column: `hazmat_code_${n}`,
+          message: `hazmat ${n} has details but no UN code`,
+        });
       if (code)
-        hazmat.push({ unCode: code, description: desc ?? null, emergencyContact: row[`hazmat_contact_${n}`] ?? null, emergencyPhone: row[`hazmat_phone_${n}`] ?? null });
+        hazmat.push({
+          unCode: code,
+          description: desc ?? null,
+          emergencyContact: row[`hazmat_contact_${n}`] ?? null,
+          emergencyPhone: row[`hazmat_phone_${n}`] ?? null,
+        });
     }
-    if (row.value_amount != null && !row.value_currency) errors.push({ column: "value_currency", message: "a value needs a currency" });
+    if (row.value_amount != null && !row.value_currency)
+      errors.push({ column: "value_currency", message: "a value needs a currency" });
     const label = `${row.control_number} · ${row.description}`;
     if (errors.length) {
       rows.push({ line, status: "error", errors, label });
@@ -248,7 +345,12 @@ export async function validateCommodityRows(
       hsCode: row.hs_code ?? null,
       quantity: row.quantity ?? null,
       quantityUnit: row.quantity_unit ?? null,
-      weightKg: row.weight == null ? null : weightUnit === "LB" ? Math.round(row.weight * 0.45359237 * 100) / 100 : row.weight,
+      weightKg:
+        row.weight == null
+          ? null
+          : weightUnit === "LB"
+            ? Math.round(row.weight * 0.45359237 * 100) / 100
+            : row.weight,
       weightUnit,
       countryOfOrigin: row.country_of_origin ?? null,
       marksAndNumbers: row.marks_and_numbers ?? null,
@@ -263,19 +365,30 @@ export async function validateCommodityRows(
 }
 
 /** Parse + validate + persist a `validated` batch. Nothing is inserted yet. */
-export async function validateImport(tx: RlsTransaction, actor: Actor, input: { kind: ImportKind; filename: string; content: string }) {
+export async function validateImport(
+  tx: RlsTransaction,
+  actor: Actor,
+  input: { kind: ImportKind; filename: string; content: string },
+) {
   const { rows: raw, columns } = parseCsv(input.content);
   const spec = IMPORT_TEMPLATES[input.kind];
   const known = new Set(spec.map((c) => c.key));
   const unknownColumns = columns.filter((c) => !known.has(c));
   const missing = spec.filter((c) => c.required && !columns.includes(c.key)).map((c) => c.key);
   if (missing.length)
-    throw new TRPCError({ code: "BAD_REQUEST", message: `Missing required column${missing.length === 1 ? "" : "s"}: ${missing.join(", ")}` });
-  if (raw.length === 0) throw new TRPCError({ code: "BAD_REQUEST", message: "The file has no data rows" });
-  if (raw.length > 5000) throw new TRPCError({ code: "BAD_REQUEST", message: "At most 5,000 rows per file" });
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Missing required column${missing.length === 1 ? "" : "s"}: ${missing.join(", ")}`,
+    });
+  if (raw.length === 0)
+    throw new TRPCError({ code: "BAD_REQUEST", message: "The file has no data rows" });
+  if (raw.length > 5000)
+    throw new TRPCError({ code: "BAD_REQUEST", message: "At most 5,000 rows per file" });
 
   const { report, payload } =
-    input.kind === "shipments" ? await validateShipmentRows(tx, actor.orgId, raw) : await validateCommodityRows(tx, actor.orgId, raw);
+    input.kind === "shipments"
+      ? await validateShipmentRows(tx, actor.orgId, raw)
+      : await validateCommodityRows(tx, actor.orgId, raw);
 
   const [batch] = await tx
     .insert(importBatches)
@@ -305,12 +418,17 @@ export async function requireBatch(tx: RlsTransaction, orgId: string, batchId: s
 }
 
 const isUniqueViolation = (e: unknown) =>
-  (e as { cause?: { code?: string }; code?: string })?.cause?.code === "23505" || (e as { code?: string })?.code === "23505";
+  (e as { cause?: { code?: string }; code?: string })?.cause?.code === "23505" ||
+  (e as { code?: string })?.code === "23505";
 
 /** Insert every ok row of a validated batch in one transaction. */
 export async function commitImport(tx: RlsTransaction, actor: Actor, batchId: string) {
   const batch = await requireBatch(tx, actor.orgId, batchId);
-  if (batch.status !== "validated") throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Batch is already ${batch.status}` });
+  if (batch.status !== "validated")
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `Batch is already ${batch.status}`,
+    });
   const report = batch.report as { payload?: unknown[] };
   const payload = report.payload ?? [];
   let inserted = 0;
@@ -341,7 +459,10 @@ export async function commitImport(tx: RlsTransaction, actor: Actor, batchId: st
         });
       } catch (e) {
         if (isUniqueViolation(e))
-          throw new TRPCError({ code: "CONFLICT", message: `${p.carrierCode}${p.controlReference} was created since validation — validate the file again` });
+          throw new TRPCError({
+            code: "CONFLICT",
+            message: `${p.carrierCode}${p.controlReference} was created since validation — validate the file again`,
+          });
         throw e;
       }
       inserted += 1;
@@ -402,17 +523,26 @@ export async function commitImport(tx: RlsTransaction, actor: Actor, batchId: st
 export async function deleteImportBatch(tx: RlsTransaction, actor: Actor, batchId: string) {
   const batch = await requireBatch(tx, actor.orgId, batchId);
   if (batch.status !== "committed")
-    throw new TRPCError({ code: "PRECONDITION_FAILED", message: `Only a committed batch can be deleted (this one is ${batch.status})` });
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `Only a committed batch can be deleted (this one is ${batch.status})`,
+    });
   let deleted = 0;
   const kept: string[] = [];
   if (batch.kind === "shipments") {
     const rows = await tx
-      .select({ id: shipments.id, controlNumber: shipments.controlNumber, status: shipments.status, movementStatus: movements.status })
+      .select({
+        id: shipments.id,
+        controlNumber: shipments.controlNumber,
+        status: shipments.status,
+        movementStatus: movements.status,
+      })
       .from(shipments)
       .leftJoin(movements, eq(movements.id, shipments.movementId))
       .where(and(eq(shipments.importBatchId, batch.id), eq(shipments.organizationId, actor.orgId)));
     for (const r of rows) {
-      const draft = r.status === "draft" && (!r.movementStatus || EDITABLE_MOVEMENT.has(r.movementStatus));
+      const draft =
+        r.status === "draft" && (!r.movementStatus || EDITABLE_MOVEMENT.has(r.movementStatus));
       if (!draft) {
         kept.push(r.controlNumber);
         continue;
@@ -422,11 +552,17 @@ export async function deleteImportBatch(tx: RlsTransaction, actor: Actor, batchI
     }
   } else {
     const rows = await tx
-      .select({ id: commodities.id, description: commodities.commodityDescription, movementStatus: movements.status })
+      .select({
+        id: commodities.id,
+        description: commodities.commodityDescription,
+        movementStatus: movements.status,
+      })
       .from(commodities)
       .innerJoin(shipments, eq(shipments.id, commodities.shipmentId))
       .leftJoin(movements, eq(movements.id, shipments.movementId))
-      .where(and(eq(commodities.importBatchId, batch.id), eq(commodities.organizationId, actor.orgId)));
+      .where(
+        and(eq(commodities.importBatchId, batch.id), eq(commodities.organizationId, actor.orgId)),
+      );
     for (const r of rows) {
       if (r.movementStatus && !EDITABLE_MOVEMENT.has(r.movementStatus)) {
         kept.push(r.description);
@@ -438,7 +574,11 @@ export async function deleteImportBatch(tx: RlsTransaction, actor: Actor, batchI
   }
   const [updated] = await tx
     .update(importBatches)
-    .set({ status: "deleted", deletedAt: new Date(), report: { ...(batch.report as object), deleted, kept } })
+    .set({
+      status: "deleted",
+      deletedAt: new Date(),
+      report: { ...(batch.report as object), deleted, kept },
+    })
     .where(eq(importBatches.id, batch.id))
     .returning();
   return { batch: updated!, deleted, kept };

@@ -39,7 +39,11 @@ export async function signIn(_prev: AuthState, formData: FormData): Promise<Auth
   const persist = formData.get("remember") === "on";
   const cookieStore = await cookies();
   if (persist) {
-    cookieStore.set(PERSIST_SESSION_COOKIE, "1", appCookieOptions({ maxAge: PERSIST_SESSION_MAX_AGE }));
+    cookieStore.set(
+      PERSIST_SESSION_COOKIE,
+      "1",
+      appCookieOptions({ maxAge: PERSIST_SESSION_MAX_AGE }),
+    );
   } else {
     cookieStore.delete(PERSIST_SESSION_COOKIE);
   }
@@ -67,7 +71,10 @@ const newPassword = z
     password: z.string().min(8, "Password must be at least 8 characters"),
     confirm: z.string(),
   })
-  .refine((v) => v.password === v.confirm, { message: "The passwords do not match", path: ["confirm"] });
+  .refine((v) => v.password === v.confirm, {
+    message: "The passwords do not match",
+    path: ["confirm"],
+  });
 
 /** Set a new password on the session the recovery link created, or on the signed-in user. */
 export async function resetPassword(_prev: AuthState, formData: FormData): Promise<AuthState> {

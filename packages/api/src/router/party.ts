@@ -66,7 +66,11 @@ type Presented<Row, A extends AddressKey | undefined> = A extends AddressKey
   ? Omit<Row, keyof AddressColumns<A>> & { [k in A]: Address }
   : Row;
 
-interface RegistryConfig<T extends PgTable, I extends z.ZodObject, A extends AddressKey | undefined = undefined> {
+interface RegistryConfig<
+  T extends PgTable,
+  I extends z.ZodObject,
+  A extends AddressKey | undefined = undefined,
+> {
   table: T;
   input: I;
   read: PermissionKey;
@@ -117,9 +121,11 @@ function withPlates<R extends { id: string }>(
   }));
 }
 
-function registryRouter<T extends PgTable, I extends z.ZodObject, A extends AddressKey | undefined = undefined>(
-  cfg: RegistryConfig<T, I, A>,
-) {
+function registryRouter<
+  T extends PgTable,
+  I extends z.ZodObject,
+  A extends AddressKey | undefined = undefined,
+>(cfg: RegistryConfig<T, I, A>) {
   type Row = T["$inferSelect"];
   type Out = Presented<Row, A>;
   const present = (row: Row): Out =>
@@ -146,10 +152,15 @@ function registryRouter<T extends PgTable, I extends z.ZodObject, A extends Addr
             const like = containsPattern(input.search);
             if (input.searchColumn) {
               // Search-by-column (Task 14): only this registry's advertised columns.
-              const allowed = REGISTRY_SEARCH_COLUMNS[cfg.kind].some((c) => c.key === input.searchColumn);
+              const allowed = REGISTRY_SEARCH_COLUMNS[cfg.kind].some(
+                (c) => c.key === input.searchColumn,
+              );
               const column = (cfg.table as unknown as Record<string, PgColumn>)[input.searchColumn];
               if (!allowed || !column)
-                throw new TRPCError({ code: "BAD_REQUEST", message: `Cannot search ${cfg.kind} by ${input.searchColumn}` });
+                throw new TRPCError({
+                  code: "BAD_REQUEST",
+                  message: `Cannot search ${cfg.kind} by ${input.searchColumn}`,
+                });
               conds.push(ilike(column, like));
             } else {
               conds.push(or(...searchColumns.map((c) => ilike(c, like)))!);
@@ -199,7 +210,9 @@ function registryRouter<T extends PgTable, I extends z.ZodObject, A extends Addr
           const before = (await tx
             .select()
             .from(t)
-            .where(and(eq(t.organizationId, ctx.orgId), inArray(t.id, input.ids)))) as unknown as (Row & {
+            .where(
+              and(eq(t.organizationId, ctx.orgId), inArray(t.id, input.ids)),
+            )) as unknown as (Row & {
             id: string;
             status: string;
           })[];
@@ -211,7 +224,15 @@ function registryRouter<T extends PgTable, I extends z.ZodObject, A extends Addr
               .set({ status: input.status })
               .where(eq(t.id, row.id))
               .returning();
-            await writeAudit(tx, ctx.orgId, `${cfg.entityType}.update`, cfg.entityType, row.id, row, after ?? null);
+            await writeAudit(
+              tx,
+              ctx.orgId,
+              `${cfg.entityType}.update`,
+              cfg.entityType,
+              row.id,
+              row,
+              after ?? null,
+            );
             if (cfg.afterSave && after) await cfg.afterSave(tx, ctx.orgId, after);
             changed += 1;
           }
@@ -257,11 +278,24 @@ function registryRouter<T extends PgTable, I extends z.ZodObject, A extends Addr
               metadata: { registry: cfg.entityType, includeArchived: input.includeArchived },
             },
           );
-          await writeAudit(tx, ctx.orgId, `${cfg.entityType}.export`, "generated_document", doc.id, null, {
+          await writeAudit(
+            tx,
+            ctx.orgId,
+            `${cfg.entityType}.export`,
+            "generated_document",
+            doc.id,
+            null,
+            {
+              format: input.format,
+              rowCount: rows.length,
+            },
+          );
+          return {
+            id: doc.id,
+            signedUrl: doc.signedUrl,
+            byteSize: doc.byteSize,
             format: input.format,
-            rowCount: rows.length,
-          });
-          return { id: doc.id, signedUrl: doc.signedUrl, byteSize: doc.byteSize, format: input.format };
+          };
         }),
       ),
 
@@ -494,21 +528,21 @@ export const partyRouter = router({
       read: "driver.read",
       write: "driver.write",
       entityType: "driver",
-    kind: "drivers",
-    title: "Drivers",
-    exportColumns: [
-      { key: "firstName", label: "First name" },
-      { key: "lastName", label: "Last name" },
-      { key: "personType", label: "Type" },
-      { key: "licenseNumber", label: "License" },
-      { key: "licenseJurisdiction", label: "License jurisdiction" },
-      { key: "licenseExpiry", label: "License expiry" },
-      { key: "medicalCertExpiry", label: "Medical expiry" },
-      { key: "citizenship", label: "Citizenship" },
-      { key: "phone", label: "Phone" },
-      { key: "email", label: "Email" },
-      { key: "status", label: "Status" },
-    ],
+      kind: "drivers",
+      title: "Drivers",
+      exportColumns: [
+        { key: "firstName", label: "First name" },
+        { key: "lastName", label: "Last name" },
+        { key: "personType", label: "Type" },
+        { key: "licenseNumber", label: "License" },
+        { key: "licenseJurisdiction", label: "License jurisdiction" },
+        { key: "licenseExpiry", label: "License expiry" },
+        { key: "medicalCertExpiry", label: "Medical expiry" },
+        { key: "citizenship", label: "Citizenship" },
+        { key: "phone", label: "Phone" },
+        { key: "email", label: "Email" },
+        { key: "status", label: "Status" },
+      ],
       searchColumns: (t) => [t.firstName, t.lastName, t.licenseNumber],
       orderBy: (t) => [asc(t.lastName), asc(t.firstName)],
       afterSave: async (tx, orgId, row) =>

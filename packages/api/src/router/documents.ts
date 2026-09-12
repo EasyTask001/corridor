@@ -218,14 +218,25 @@ export const documentsRouter = router({
   remove: permissionProcedure("document.upload")
     .input(z.object({ id: uuid }))
     .mutation(async ({ ctx, input }) => {
-      const doc = await ctx.rls(async (tx) => {
-        const before = await tx.query.sourceDocuments.findFirst({
+      const before = await ctx.rls((tx) =>
+        tx.query.sourceDocuments.findFirst({
           where: and(
             eq(sourceDocuments.id, input.id),
             eq(sourceDocuments.organizationId, ctx.orgId),
           ),
+        }),
+      );
+      if (!before) throw new TRPCError({ code: "NOT_FOUND" });
+      const { error: storageError } = await ctx.supabase.storage
+        .from(DOCUMENTS_BUCKET)
+        .remove([before.storagePath]);
+      if (storageError) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Document storage cleanup failed",
         });
-        if (!before) throw new TRPCError({ code: "NOT_FOUND" });
+      }
+      await ctx.rls(async (tx) => {
         const [d] = await tx
           .delete(sourceDocuments)
           .where(
@@ -249,7 +260,6 @@ export const documentsRouter = router({
         );
         return d;
       });
-      await ctx.supabase.storage.from(DOCUMENTS_BUCKET).remove([doc.storagePath]);
       return { id: input.id };
     }),
 });

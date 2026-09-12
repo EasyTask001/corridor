@@ -192,10 +192,14 @@ export async function verifySchemaMirror(url = DB_URL) {
         const refCols = ref.foreignColumns.map((c) => c.name).join(",");
         const refTable = getTableConfig(ref.foreignTable).name;
         if (refTable !== actual.ref_table || refCols !== actual.ref_cols.join(","))
-          problems.push(`${label}: Drizzle -> ${refTable}(${refCols}) vs DB -> ${actual.ref_table}(${actual.ref_cols})`);
+          problems.push(
+            `${label}: Drizzle -> ${refTable}(${refCols}) vs DB -> ${actual.ref_table}(${actual.ref_cols})`,
+          );
         const expectedAction = fk.onDelete ?? "no action";
         if (expectedAction !== DELETE_ACTION[actual.ondelete])
-          problems.push(`${label}: on delete Drizzle=${expectedAction} DB=${DELETE_ACTION[actual.ondelete]}`);
+          problems.push(
+            `${label}: on delete Drizzle=${expectedAction} DB=${DELETE_ACTION[actual.ondelete]}`,
+          );
         dbFks.delete(key);
       }
       const declared = new Set(table.indexes.map((i) => i.config.name!));

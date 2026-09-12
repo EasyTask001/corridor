@@ -52,12 +52,18 @@ describe("sendSms", () => {
       expect(String(init.body)).toContain("From=%2B15550001111");
       return Promise.resolve(Response.json({ sid: "SM123" }));
     });
-    const r = await sendSms({ to: "905-555-0101", body: "PFTR-00012: entry 30039304566 @ 3401" }, live, fetchImpl as never);
+    const r = await sendSms(
+      { to: "905-555-0101", body: "PFTR-00012: entry 30039304566 @ 3401" },
+      live,
+      fetchImpl as never,
+    );
     expect(r).toEqual({ mode: "twilio", id: "SM123" });
   });
 
   it("surfaces a Twilio error instead of throwing", async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve(Response.json({ message: "unverified number" }, { status: 400 })));
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(Response.json({ message: "unverified number" }, { status: 400 })),
+    );
     const r = await sendSms({ to: "+19055550101", body: "x" }, live, fetchImpl);
     expect(r).toEqual({ mode: "twilio", id: null, error: "unverified number" });
   });

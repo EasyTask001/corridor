@@ -31,7 +31,10 @@ export const auditRouter = router({
       ctx.rls(async (tx) => {
         const needed = HISTORY_ENTITY_PERMISSIONS[input.entityType];
         if (!ctx.session.permissions.has(needed)) {
-          throw new TRPCError({ code: "FORBIDDEN", message: `Reading ${input.entityType} history needs ${needed}` });
+          throw new TRPCError({
+            code: "FORBIDDEN",
+            message: `Reading ${input.entityType} history needs ${needed}`,
+          });
         }
         return tx
           .select({

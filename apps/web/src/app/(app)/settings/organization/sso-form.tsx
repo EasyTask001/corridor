@@ -110,7 +110,11 @@ export function SsoForm({ plan, initial }: { plan: SubscriptionPlan; initial: Ss
                 ? " Password sign-in is refused for those domains until you remove it."
                 : ""}
             </Alert>
-            {remove.error && <p className="text-sm text-status-danger">{remove.error.message}</p>}
+            {remove.error && (
+              <p role="alert" className="text-sm text-status-danger">
+                {remove.error.message}
+              </p>
+            )}
             {saved && <p className="text-sm text-status-ok">{saved}</p>}
             {removeButton}
           </>
@@ -219,8 +223,16 @@ export function SsoForm({ plan, initial }: { plan: SubscriptionPlan; initial: Ss
           expires.
         </p>
 
-        {configure.error && <p className="text-sm text-status-danger">{configure.error.message}</p>}
-        {remove.error && <p className="text-sm text-status-danger">{remove.error.message}</p>}
+        {configure.error && (
+          <p role="alert" className="text-sm text-status-danger">
+            {configure.error.message}
+          </p>
+        )}
+        {remove.error && (
+          <p role="alert" className="text-sm text-status-danger">
+            {remove.error.message}
+          </p>
+        )}
         {saved && <p className="text-sm text-status-ok">{saved}</p>}
 
         <div className="flex gap-3">

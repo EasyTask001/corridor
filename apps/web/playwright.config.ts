@@ -5,6 +5,9 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
+  // E2E specs share the seeded demo organization; parallel workers race on
+  // seat limits and other mutable records. Keep the suite deterministic.
+  workers: 1,
   retries: process.env.CI ? 1 : 0,
   // On CI the annotations reporter alone leaves nothing to upload when a run
   // fails, so pair it with an HTML report — that plus the retained traces is

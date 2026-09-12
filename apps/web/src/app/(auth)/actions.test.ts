@@ -28,7 +28,12 @@ const cookieSet = vi.fn();
 const cookieDelete = vi.fn();
 vi.mock("next/headers", () => ({
   cookies: () =>
-    Promise.resolve({ set: cookieSet, delete: cookieDelete, get: () => undefined, getAll: () => [] }),
+    Promise.resolve({
+      set: cookieSet,
+      delete: cookieDelete,
+      get: () => undefined,
+      getAll: () => [],
+    }),
 }));
 
 process.env.NEXT_PUBLIC_SUPABASE_URL ??= "http://127.0.0.1:55321";
@@ -100,8 +105,14 @@ describe("signIn", () => {
 
   it("remembers the session only when 'Stay signed in' is ticked", async () => {
     passwordSignInBlockedFor.mockResolvedValue(null);
-    await expect(signIn(null, form({ ...CREDENTIALS, remember: "on" }))).rejects.toThrow("REDIRECT:/dashboard");
-    expect(cookieSet).toHaveBeenCalledWith("corridor-persist", "1", expect.objectContaining({ httpOnly: true, maxAge: 31536000 }));
+    await expect(signIn(null, form({ ...CREDENTIALS, remember: "on" }))).rejects.toThrow(
+      "REDIRECT:/dashboard",
+    );
+    expect(cookieSet).toHaveBeenCalledWith(
+      "corridor-persist",
+      "1",
+      expect.objectContaining({ httpOnly: true, maxAge: 31536000 }),
+    );
     cookieSet.mockClear();
     await expect(signIn(null, form(CREDENTIALS))).rejects.toThrow("REDIRECT:/dashboard");
     expect(cookieSet).not.toHaveBeenCalled();

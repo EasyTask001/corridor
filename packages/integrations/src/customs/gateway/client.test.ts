@@ -139,23 +139,31 @@ describe("gateway customs client (fixture transport)", () => {
   });
 
   it("a filing transmitted through one instance is visible to fetchStatus on a second instance of the same tenant", async () => {
-    const mk = () => createGatewayCustomsClient({ provider: "cbp_ace", now: fixedNow, tenantKey: "org-a" });
+    const mk = () =>
+      createGatewayCustomsClient({ provider: "cbp_ace", now: fixedNow, tenantKey: "org-a" });
     const ack = await mk().transmit(manifest);
     // Every poll below is from a fresh instance — what customsClientFor does per request.
     const stages: string[] = [];
     for (let i = 0; i < 3; i++) stages.push((await mk().fetchStatus(ack.referenceNumber)).status);
     expect(stages).toEqual(["accepted", "released", "released"]);
     const last = await mk().fetchStatus(ack.referenceNumber);
-    expect(last.shipments[0]).toMatchObject({ controlNumber: "PFTRPAPS0001", status: "released", entryPortCode: "3801" });
+    expect(last.shipments[0]).toMatchObject({
+      controlNumber: "PFTRPAPS0001",
+      status: "released",
+      entryPortCode: "3801",
+    });
   });
 
   it("a second instance of the same tenant continues the reference sequence", async () => {
-    const mk = () => createGatewayCustomsClient({ provider: "cbp_ace", now: fixedNow, tenantKey: "org-a" });
+    const mk = () =>
+      createGatewayCustomsClient({ provider: "cbp_ace", now: fixedNow, tenantKey: "org-a" });
     const first = await mk().transmit(manifest);
     const second = await mk().transmit(withControl("PFTRPAPS0002"));
     expect(first.referenceNumber).toBe("ACE-FX00001");
     expect(second.referenceNumber).toBe("ACE-FX00002");
-    expect((await mk().fetchStatus(first.referenceNumber)).shipments[0]?.controlNumber).toBe("PFTRPAPS0001");
+    expect((await mk().fetchStatus(first.referenceNumber)).shipments[0]?.controlNumber).toBe(
+      "PFTRPAPS0001",
+    );
   });
 });
 
@@ -198,12 +206,23 @@ describe("in-bond messages", () => {
     expect((await c.inBondArrival(rec)).referenceNumber).toBe("IB-1");
     expect(calls[0]).toMatchObject({ path: "/in-bond/123456789/arrival" });
     expect((calls[0]?.body as { firmsCode: string }).firmsCode).toBe("A123");
-    expect(await c.inBondStatus("123456789")).toMatchObject({ status: "arrived", message: "At port" });
+    expect(await c.inBondStatus("123456789")).toMatchObject({
+      status: "arrived",
+      message: "At port",
+    });
   });
 
   it("two tenants with the same bond number do not see each other's status", async () => {
-    const a = createGatewayCustomsClient({ provider: "cbp_ace", now: fixedNow, tenantKey: "org-a" });
-    const b = createGatewayCustomsClient({ provider: "cbp_ace", now: fixedNow, tenantKey: "org-b" });
+    const a = createGatewayCustomsClient({
+      provider: "cbp_ace",
+      now: fixedNow,
+      tenantKey: "org-a",
+    });
+    const b = createGatewayCustomsClient({
+      provider: "cbp_ace",
+      now: fixedNow,
+      tenantKey: "org-b",
+    });
     await a.inBondArrival(rec);
     expect((await a.inBondStatus(rec.bondNumber)).status).toBe("arrived");
     expect((await b.inBondStatus(rec.bondNumber)).status).toBe("open");
@@ -214,16 +233,15 @@ describe("in-bond messages", () => {
 });
 
 describe("http transport", () => {
-  const fetchStub =
-    (responses: Array<{ status: number; body: unknown }>) => () => {
-      const next = responses.shift()!;
-      return Promise.resolve(
-        new Response(JSON.stringify(next.body), {
-          status: next.status,
-          headers: { "Content-Type": "application/json" },
-        }),
-      );
-    };
+  const fetchStub = (responses: Array<{ status: number; body: unknown }>) => () => {
+    const next = responses.shift()!;
+    return Promise.resolve(
+      new Response(JSON.stringify(next.body), {
+        status: next.status,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+  };
 
   it("sends the bearer key and marks 429 / 5xx retryable, 4xx not", async () => {
     let seen: RequestInit | undefined;
@@ -264,7 +282,10 @@ describe("http transport", () => {
     const transport: GatewayTransport = {
       post: (path, body) => {
         calls.push({ path, body });
-        return Promise.resolve({ referenceNumber: "ACE-LIVE1", receivedAt: "2026-09-06T12:00:00.000Z" });
+        return Promise.resolve({
+          referenceNumber: "ACE-LIVE1",
+          receivedAt: "2026-09-06T12:00:00.000Z",
+        });
       },
       get: (path) => {
         calls.push({ path });

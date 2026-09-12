@@ -25,9 +25,11 @@
 ### Task 1: Rebuild `packages/ui/src/tokens.css` (primitive + semantic + dark mode)
 
 **Files:**
+
 - Modify: `packages/ui/src/tokens.css:1-24` (full rewrite)
 
 **Interfaces:**
+
 - Produces: primitive CSS custom properties (`--color-ink-*` refreshed values, new `--color-brand-*`, refreshed `--color-signal-*`/`--color-ok-*`/`--color-warn-*`/`--color-danger-*`, `--radius-md`/`--radius-xl`, `--shadow-sm`/`--shadow-md`/`--shadow-lg`) and semantic tokens (`--color-surface-canvas`, `--color-surface-raised`, `--color-surface-sunken`, `--color-surface-overlay`, `--color-fg-primary`, `--color-fg-secondary`, `--color-fg-inverted`, `--color-border-default`, `--color-border-strong`, `--color-accent`, `--color-accent-hover`, `--color-accent-fg`, `--color-focus-ring`), each redefined under `[data-theme="dark"]` and `@media (prefers-color-scheme: dark)`. These generate Tailwind utilities of the same name (e.g. `bg-surface-raised`, `text-fg-secondary`, `ring-focus-ring/40`) that every later task consumes.
 - Consumes: nothing (first task).
 
@@ -67,7 +69,16 @@ unset so `packages/ui` itself carries no `next/font` dependency.
  * near-identical gold").
  */
 @theme {
-  --font-sans: var(--font-sans-loaded, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif);
+  --font-sans: var(
+    --font-sans-loaded,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    sans-serif
+  );
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 
   /* Neutral scale (historically "ink") — Tailwind's slate ramp. */
@@ -187,12 +198,14 @@ git commit -m "feat(ui): rebuild design tokens as primitive/semantic layers with
 ### Task 2: Theme bootstrap — `ThemeToggle` component + FOUC-safe root layout
 
 **Files:**
+
 - Create: `packages/ui/src/components/theme-toggle.tsx`
 - Create: `packages/ui/src/components/theme-toggle.test.tsx`
 - Modify: `packages/ui/src/index.ts:1` (add export)
 - Modify: `apps/web/src/app/layout.tsx:1-15` (full rewrite)
 
 **Interfaces:**
+
 - Consumes: `--color-fg-secondary`/`--color-fg-primary`/`--color-surface-sunken` semantic tokens (Task 1), which itself consumes the `--font-sans-loaded` custom property this task's layout change sets.
 - Produces: `ThemeToggle` component (no props besides `className`); the `data-theme` attribute + `corridor-theme` `localStorage` key contract that any future theming code relies on; the `--font-sans-loaded` CSS custom property (via `next/font/google`'s Plus Jakarta Sans, per the spec's Typography section) that `packages/ui/src/tokens.css`'s `--font-sans` wraps.
 
@@ -210,7 +223,9 @@ beforeEach(() => {
   document.documentElement.removeAttribute("data-theme");
   vi.stubGlobal(
     "matchMedia",
-    vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }),
+    vi
+      .fn()
+      .mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }),
   );
 });
 
@@ -230,7 +245,9 @@ describe("ThemeToggle", () => {
     localStorage.setItem("corridor-theme", "dark");
     render(<ThemeToggle />);
 
-    expect(await screen.findByRole("button", { name: /switch to light theme/i })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: /switch to light theme/i }),
+    ).toBeInTheDocument();
   });
 });
 ```
@@ -287,7 +304,11 @@ export function ThemeToggle({ className }: { className?: string }) {
         className,
       )}
     >
-      {theme === "dark" ? <Sun className="size-4" aria-hidden /> : <Moon className="size-4" aria-hidden />}
+      {theme === "dark" ? (
+        <Sun className="size-4" aria-hidden />
+      ) : (
+        <Moon className="size-4" aria-hidden />
+      )}
     </button>
   );
 }
@@ -370,6 +391,7 @@ git commit -m "feat(ui): add ThemeToggle and FOUC-safe theme bootstrap"
 ### Task 3: Reskin chrome components — button, badge, alert, skeleton, label, table
 
 **Files:**
+
 - Modify: `packages/ui/src/components/button.tsx:5-25`
 - Modify: `packages/ui/src/components/badge.tsx:5-23`
 - Modify: `packages/ui/src/components/alert.tsx:5-15`
@@ -379,6 +401,7 @@ git commit -m "feat(ui): add ThemeToggle and FOUC-safe theme bootstrap"
 - Create: `packages/ui/src/components/button.test.tsx`
 
 **Interfaces:**
+
 - Consumes: semantic tokens from Task 1 (`bg-accent`, `text-accent-fg`, `bg-surface-sunken`, `text-fg-primary`, `text-fg-secondary`, `border-border-default`, `ring-focus-ring`, `bg-fg-primary`, `text-fg-inverted`).
 - Produces: no prop/API changes — every existing call site (`variant="primary"`, `variant="signal"`, etc.) keeps working with new visuals.
 
@@ -398,7 +421,9 @@ describe("Button", () => {
 
   it("applies bordered neutral classes for the secondary variant", () => {
     render(<Button variant="secondary">Cancel</Button>);
-    expect(screen.getByRole("button", { name: "Cancel" }).className).toContain("border-border-default");
+    expect(screen.getByRole("button", { name: "Cancel" }).className).toContain(
+      "border-border-default",
+    );
   });
 
   it("keeps the signal variant's amber styling", () => {
@@ -424,7 +449,8 @@ export const buttonVariants = cva(
     variants: {
       variant: {
         primary: "bg-accent text-accent-fg hover:bg-accent-hover",
-        secondary: "border border-border-default bg-surface-raised text-fg-primary hover:bg-surface-sunken",
+        secondary:
+          "border border-border-default bg-surface-raised text-fg-primary hover:bg-surface-sunken",
         signal: "bg-signal-500 text-ink-950 hover:bg-signal-600",
         danger: "bg-danger-500 text-white hover:bg-danger-500/90",
         ghost: "text-fg-secondary hover:text-fg-primary",
@@ -576,11 +602,13 @@ git commit -m "feat(ui): reskin button, badge, alert, skeleton, label, table ont
 ### Task 4: Reskin `card.tsx`, `tabs.tsx`, `data-table.tsx`
 
 **Files:**
+
 - Modify: `packages/ui/src/components/card.tsx` (full file)
 - Modify: `packages/ui/src/components/tabs.tsx` (full file)
 - Modify: `packages/ui/src/components/data-table.tsx:175-232` (sort button + loading/empty text + pagination footer)
 
 **Interfaces:**
+
 - Consumes: semantic tokens from Task 1, `Button` from Task 3 (unchanged import, `DataTable`'s pagination controls already use it).
 - Produces: no API changes.
 
@@ -594,7 +622,10 @@ import { cn } from "../lib/cn";
 export function Card({ className, ...props }: ComponentProps<"div">) {
   return (
     <div
-      className={cn("rounded-xl border border-border-default bg-surface-raised shadow-sm", className)}
+      className={cn(
+        "rounded-xl border border-border-default bg-surface-raised shadow-sm",
+        className,
+      )}
       {...props}
     />
   );
@@ -689,15 +720,15 @@ with:
 Replace both loading/empty message cells' `text-ink-500` with `text-fg-secondary`:
 
 ```tsx
-              <TableCell className="py-6 text-fg-secondary" colSpan={columnCount}>
-                {loadingMessage}
-              </TableCell>
+<TableCell className="py-6 text-fg-secondary" colSpan={columnCount}>
+  {loadingMessage}
+</TableCell>
 ```
 
 ```tsx
-              <TableCell className="py-6 text-fg-secondary" colSpan={columnCount}>
-                {emptyMessage}
-              </TableCell>
+<TableCell className="py-6 text-fg-secondary" colSpan={columnCount}>
+  {emptyMessage}
+</TableCell>
 ```
 
 Replace the pagination footer:
@@ -734,11 +765,13 @@ git commit -m "feat(ui): reskin card, tabs, data-table onto semantic tokens"
 ### Task 5: Reskin form chrome — `input.tsx`, `textarea.tsx`, `select.tsx`, `dialog.tsx`
 
 **Files:**
+
 - Modify: `packages/ui/src/components/input.tsx:5-7`
 - Modify: `packages/ui/src/components/select.tsx` (full file)
 - Modify: `packages/ui/src/components/dialog.tsx` (full file)
 
 **Interfaces:**
+
 - Consumes: semantic tokens from Task 1. `select.tsx` and `textarea.tsx` both import `fieldClassName` from `input.tsx`, so updating it there is sufficient for both.
 - Produces: no API changes.
 
@@ -858,7 +891,10 @@ export function SelectSeparator({
   ...props
 }: ComponentProps<typeof SelectPrimitive.Separator>) {
   return (
-    <SelectPrimitive.Separator className={cn("my-1 h-px bg-border-default", className)} {...props} />
+    <SelectPrimitive.Separator
+      className={cn("my-1 h-px bg-border-default", className)}
+      {...props}
+    />
   );
 }
 ```
@@ -935,7 +971,10 @@ export function DialogDescription({
   ...props
 }: ComponentProps<typeof DialogPrimitive.Description>) {
   return (
-    <DialogPrimitive.Description className={cn("text-sm text-fg-secondary", className)} {...props} />
+    <DialogPrimitive.Description
+      className={cn("text-sm text-fg-secondary", className)}
+      {...props}
+    />
   );
 }
 ```
@@ -959,6 +998,7 @@ git commit -m "feat(ui): reskin input, select, dialog form chrome onto semantic 
 ### Task 6: New primitives — `Checkbox`, `RadioGroup`, `Switch`
 
 **Files:**
+
 - Create: `packages/ui/src/components/checkbox.tsx`
 - Create: `packages/ui/src/components/checkbox.test.tsx`
 - Create: `packages/ui/src/components/radio-group.tsx`
@@ -969,6 +1009,7 @@ git commit -m "feat(ui): reskin input, select, dialog form chrome onto semantic 
 - Modify: `packages/ui/src/index.ts` (add exports)
 
 **Interfaces:**
+
 - Consumes: semantic tokens from Task 1 (`border-border-strong`, `bg-surface-raised`, `bg-accent`, `text-accent-fg`, `ring-focus-ring`).
 - Produces: `Checkbox`, `RadioGroup` + `RadioGroupItem`, `Switch`; the `vitest.setup.ts` pointer-capture polyfill that Task 7 and Task 8's tests also rely on.
 
@@ -1204,12 +1245,14 @@ git commit -m "feat(ui): add Checkbox, RadioGroup, and Switch primitives"
 ### Task 7: New primitive — `Tooltip` + provider wiring
 
 **Files:**
+
 - Create: `packages/ui/src/components/tooltip.tsx`
 - Create: `packages/ui/src/components/tooltip.test.tsx`
 - Modify: `packages/ui/src/index.ts` (add exports)
 - Modify: `apps/web/src/app/layout.tsx` (wrap `children` in `TooltipProvider`)
 
 **Interfaces:**
+
 - Consumes: semantic tokens from Task 1 (`bg-fg-primary`, `text-surface-raised`), pointer-capture polyfill from Task 6.
 - Produces: `Tooltip`, `TooltipTrigger`, `TooltipContent`, `TooltipProvider` — any component built after this task may use them without further setup, since the provider is now global.
 
@@ -1352,11 +1395,13 @@ git commit -m "feat(ui): add Tooltip primitive and wire TooltipProvider into the
 ### Task 8: New primitives — `navItemVariants`, `NavItemContent`, `NavGroup`
 
 **Files:**
+
 - Create: `packages/ui/src/components/nav.tsx`
 - Create: `packages/ui/src/components/nav.test.tsx`
 - Modify: `packages/ui/src/index.ts` (add exports)
 
 **Interfaces:**
+
 - Consumes: semantic tokens from Task 1 (`bg-surface-sunken`, `text-fg-primary`, `text-fg-secondary`, `ring-focus-ring`), pointer-capture polyfill from Task 6.
 - Produces: `navItemVariants(props: { active?: boolean }) => string` (a `cva` function, applied by the caller to whatever link element it renders — kept framework-agnostic so `packages/ui` doesn't depend on `next/link`), `NavItemContent({ icon, children })` (icon + label row), `NavGroup({ icon, label, active, open?, defaultOpen?, onOpenChange?, children })` (collapsible section header + content, built on `@radix-ui/react-collapsible`). Task 9 (`app-shell.tsx`) consumes all three.
 
@@ -1527,9 +1572,11 @@ git commit -m "feat(ui): add navItemVariants, NavItemContent, NavGroup primitive
 ### Task 9: Consolidate `app-shell.tsx` navigation
 
 **Files:**
+
 - Modify: `apps/web/src/components/app-shell.tsx` (full file rewrite)
 
 **Interfaces:**
+
 - Consumes: `NavGroup`, `NavItemContent`, `navItemVariants` (Task 8), `ThemeToggle` (Task 2), all from `@corridor/ui`; `lucide-react` icons (already a `packages/ui` dependency and transitively available to `apps/web`).
 - Produces: no exported interface change — `AppShell`'s props are unchanged, only its internal nav rendering.
 
@@ -1594,12 +1641,27 @@ const REST: NavItem[] = [
 ];
 
 const SETTINGS: NavItem[] = [
-  { href: "/settings/organization", label: "Organization", icon: Building2, permission: "organization.read" },
+  {
+    href: "/settings/organization",
+    label: "Organization",
+    icon: Building2,
+    permission: "organization.read",
+  },
   { href: "/settings/users", label: "Users", icon: Users, permission: "organization.members.read" },
-  { href: "/settings/roles", label: "Roles", icon: ShieldCheck, permission: "organization.roles.manage" },
+  {
+    href: "/settings/roles",
+    label: "Roles",
+    icon: ShieldCheck,
+    permission: "organization.roles.manage",
+  },
   { href: "/settings/audit", label: "Audit log", icon: ScrollText, permission: "audit_log.read" },
   { href: "/settings/billing", label: "Billing", icon: CreditCard, permission: "billing.read" },
-  { href: "/settings/integrations", label: "Integrations", icon: Plug, permission: "integrations.manage" },
+  {
+    href: "/settings/integrations",
+    label: "Integrations",
+    icon: Plug,
+    permission: "integrations.manage",
+  },
   { href: "/settings/notifications", label: "Notifications", icon: Bell },
 ];
 
@@ -1635,7 +1697,11 @@ export function AppShell({
     setOpenGroups((prev) => ({ ...prev, [key]: open }));
 
   const renderItem = (item: NavItem) => (
-    <Link key={item.href} href={item.href} className={navItemVariants({ active: isActive(pathname, item.href) })}>
+    <Link
+      key={item.href}
+      href={item.href}
+      className={navItemVariants({ active: isActive(pathname, item.href) })}
+    >
       <NavItemContent icon={item.icon}>{item.label}</NavItemContent>
     </Link>
   );
@@ -1681,7 +1747,9 @@ export function AppShell({
         <div className="mt-auto space-y-2 border-t border-border-default pt-3">
           <div className="flex items-center justify-between px-3">
             <div className="min-w-0">
-              <div className="truncate text-sm text-fg-primary">{user.displayName ?? user.email}</div>
+              <div className="truncate text-sm text-fg-primary">
+                {user.displayName ?? user.email}
+              </div>
               <div className="truncate text-xs text-fg-secondary">{roleName}</div>
             </div>
             <ThemeToggle />
@@ -1723,9 +1791,11 @@ git commit -m "feat(web): consolidate app-shell nav into grouped, icon-led secti
 ### Task 10: Update `globals.css` legacy utilities to the new tokens
 
 **Files:**
+
 - Modify: `apps/web/src/app/globals.css` (full file)
 
 **Interfaces:**
+
 - Consumes: semantic tokens from Task 1.
 - Produces: the `.panel`, `label`, `input`, `btn`, `btn-primary`, `btn-secondary`, `btn-signal` utility classes that ~44 files across `apps/web` already reference directly — updating their definitions here makes every one of those call sites theme-correct without editing the call sites themselves. Also produces the app-wide `prefers-reduced-motion` rule the `ui-ux-pro-max` pre-delivery checklist requires (see the spec's Motion & accessibility section).
 

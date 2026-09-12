@@ -186,7 +186,9 @@ export const movementRouter = router({
                 limit 1)`,
               truckUnit: trucks.unitNumber,
               /** Every trailer in tow order, "TR-501 + TR-502" (0021). */
-              trailerUnit: sql<string | null>`(select string_agg(t.unit_number, ' + ' order by mt.position)
+              trailerUnit: sql<
+                string | null
+              >`(select string_agg(t.unit_number, ' + ' order by mt.position)
                 from public.movement_trailers mt
                 join public.trailers t on t.id = mt.trailer_id
                 where mt.movement_id = ${movements.id})`,
@@ -441,15 +443,10 @@ export const movementRouter = router({
             )
             .returning();
           if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "Not on this crossing" });
-          await writeAudit(
-            tx,
-            ctx.orgId,
-            "movement.crew_set_role",
-            "movement_crew",
-            row.id,
-            null,
-            { driverId: input.driverId, role: input.role },
-          );
+          await writeAudit(tx, ctx.orgId, "movement.crew_set_role", "movement_crew", row.id, null, {
+            driverId: input.driverId,
+            role: input.role,
+          });
           return row;
         }),
       ),
@@ -519,8 +516,7 @@ export const movementRouter = router({
               ),
             )
             .returning();
-          if (!removed)
-            throw new TRPCError({ code: "NOT_FOUND", message: "Not on this movement" });
+          if (!removed) throw new TRPCError({ code: "NOT_FOUND", message: "Not on this movement" });
           await writeAudit(
             tx,
             ctx.orgId,
@@ -864,7 +860,10 @@ export const movementRouter = router({
           .catch((e: unknown) => {
             const cause = (e as { cause?: { code?: string; message?: string } })?.cause;
             if (cause?.code === "P0001")
-              throw new TRPCError({ code: "BAD_REQUEST", message: cause.message ?? "Invalid amendment" });
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: cause.message ?? "Invalid amendment",
+              });
             throw e;
           });
         await addEvent(tx, actorOf(ctx), m.id, {

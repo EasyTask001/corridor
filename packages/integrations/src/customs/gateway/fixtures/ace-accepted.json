@@ -3,7 +3,11 @@
     {
       "status": "accepted",
       "message": "Manifest accepted by CBP (fixture).",
-      "events": [{ "code": "sending" }, { "code": "preliminary_check_passed" }, { "code": "accepted" }],
+      "events": [
+        { "code": "sending" },
+        { "code": "preliminary_check_passed" },
+        { "code": "accepted" }
+      ],
       "shipmentStatus": "accepted"
     },
     {

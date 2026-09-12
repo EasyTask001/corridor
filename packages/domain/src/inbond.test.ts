@@ -33,8 +33,13 @@ describe("in-bond inputs", () => {
 
   it("an external shipment needs a control number or a bond number", () => {
     expect(externalShipmentInput.safeParse({ regime: "ACE" }).success).toBe(false);
-    expect(externalShipmentInput.safeParse({ regime: "ACE", controlNumber: "abcd1234" }).data?.controlNumber).toBe("ABCD1234");
-    expect(externalShipmentInput.safeParse({ regime: "ACI", inBondNumber: "987654321" }).success).toBe(true);
+    expect(
+      externalShipmentInput.safeParse({ regime: "ACE", controlNumber: "abcd1234" }).data
+        ?.controlNumber,
+    ).toBe("ABCD1234");
+    expect(
+      externalShipmentInput.safeParse({ regime: "ACI", inBondNumber: "987654321" }).success,
+    ).toBe(true);
   });
 
   it("the lifecycle runs arrival then export, with cancel from any live state", () => {

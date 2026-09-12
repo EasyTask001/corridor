@@ -109,9 +109,7 @@ export async function createContext(opts: CreateContextOptions): Promise<Context
   }));
   const plansByOrg = new Map<string, SubscriptionPlan>(
     rows.flatMap((m) =>
-      m.subscriptionPlan
-        ? [[m.organizationId, m.subscriptionPlan] as const]
-        : [],
+      m.subscriptionPlan ? [[m.organizationId, m.subscriptionPlan] as const] : [],
     ),
   );
 

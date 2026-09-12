@@ -126,7 +126,11 @@ export function LoginForm({ next }: { next: string }) {
         </div>
       )}
 
-      {state?.error && <p className="text-sm text-status-danger">{state.error}</p>}
+      {state?.error && (
+        <p role="alert" className="text-sm text-status-danger">
+          {state.error}
+        </p>
+      )}
       {ssoError && <p className="text-sm text-status-danger">{ssoError}</p>}
 
       {hint?.sso && (

@@ -320,9 +320,9 @@ describe("validateForTransmit", () => {
     expect(aciWarnings.map((i) => i.code)).toEqual(
       expect.arrayContaining(["shipment_0_shipper_country", "shipment_0_consignee_country"]),
     );
-    expect(
-      aciWarnings.find((i) => i.code === "shipment_0_shipper_country")?.message,
-    ).toContain(`not ${expectedPartnerCountry("ACI", "shipper")}`);
+    expect(aciWarnings.find((i) => i.code === "shipment_0_shipper_country")?.message).toContain(
+      `not ${expectedPartnerCountry("ACI", "shipper")}`,
+    );
   });
 
   it("trailer without seal is a warning, not a block", () => {

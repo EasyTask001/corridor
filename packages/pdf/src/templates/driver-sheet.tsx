@@ -1,5 +1,11 @@
 import { Document, Page, Text, View } from "@react-pdf/renderer";
-import type { DriverSheetData, SheetCommodity, SheetCrew, SheetShipment, SheetUnit } from "../types";
+import type {
+  DriverSheetData,
+  SheetCommodity,
+  SheetCrew,
+  SheetShipment,
+  SheetUnit,
+} from "../types";
 import { Field, Footer, Masthead, Section, Table } from "./parts";
 import { fmtDate, styles } from "./theme";
 
@@ -29,13 +35,27 @@ export function DriverSheet({ data }: { data: DriverSheetData }) {
 
         <Section title="Crossing">
           <View style={styles.grid}>
-            <Field label={`${agency} port of entry`} value={trip.portCode && `${trip.portCode} ${trip.portName ?? ""}`} wide />
+            <Field
+              label={`${agency} port of entry`}
+              value={trip.portCode && `${trip.portCode} ${trip.portName ?? ""}`}
+              wide
+            />
             <Field label="Estimated crossing" value={fmtDate(trip.scheduledCrossingAt)} />
             <Field label="Status" value={trip.status} />
             <Field label={`${agency} reference`} value={trip.customsReferenceNumber} mono />
-            <Field label="Load" value={trip.isEmpty ? (trip.regime === "ACE" ? "Empty trailer" : "Empty trip") : "Laden"} />
-            <Field label="IIT" value={trip.iitIndicator === "none" ? "None" : trip.iitIndicator.replace(/_/g, " ")} />
-            {trip.aciFlags.length > 0 && <Field label="CBSA flags" value={trip.aciFlags.join(", ")} />}
+            <Field
+              label="Load"
+              value={
+                trip.isEmpty ? (trip.regime === "ACE" ? "Empty trailer" : "Empty trip") : "Laden"
+              }
+            />
+            <Field
+              label="IIT"
+              value={trip.iitIndicator === "none" ? "None" : trip.iitIndicator.replace(/_/g, " ")}
+            />
+            {trip.aciFlags.length > 0 && (
+              <Field label="CBSA flags" value={trip.aciFlags.join(", ")} />
+            )}
           </View>
         </Section>
 
@@ -44,9 +64,22 @@ export function DriverSheet({ data }: { data: DriverSheetData }) {
             columns={[
               { key: "name", label: "Name", width: 26 },
               { key: "role", label: "Role", width: 16, render: (c) => ROLE[c.role] ?? c.role },
-              { key: "licenseNumber", label: "Licence", width: 22, mono: true, render: (c) => c.licenseNumber ? `${c.licenseNumber} ${c.licenseJurisdiction ?? ""}` : "" },
+              {
+                key: "licenseNumber",
+                label: "Licence",
+                width: 22,
+                mono: true,
+                render: (c) =>
+                  c.licenseNumber ? `${c.licenseNumber} ${c.licenseJurisdiction ?? ""}` : "",
+              },
               { key: "citizenship", label: "Citizenship", width: 10 },
-              { key: "documents", label: "Travel documents", width: 26, render: (c) => c.documents.map((d) => `${d.type.replace(/_/g, " ")} ${d.number}`).join("; ") },
+              {
+                key: "documents",
+                label: "Travel documents",
+                width: 26,
+                render: (c) =>
+                  c.documents.map((d) => `${d.type.replace(/_/g, " ")} ${d.number}`).join("; "),
+              },
             ]}
             rows={data.crew}
             emptyText="No crew assigned."
@@ -59,8 +92,20 @@ export function DriverSheet({ data }: { data: DriverSheetData }) {
               { key: "kind", label: "Unit", width: 14 },
               { key: "unitNumber", label: "Number", width: 16, mono: true },
               { key: "type", label: "Type", width: 10, mono: true },
-              { key: "plates", label: "Plates", width: 30, mono: true, render: (u) => u.plates.join(", ") },
-              { key: "seals", label: "Seals", width: 30, mono: true, render: (u) => u.seals.join(", ") },
+              {
+                key: "plates",
+                label: "Plates",
+                width: 30,
+                mono: true,
+                render: (u) => u.plates.join(", "),
+              },
+              {
+                key: "seals",
+                label: "Seals",
+                width: 30,
+                mono: true,
+                render: (u) => u.seals.join(", "),
+              },
             ]}
             rows={[
               ...(data.truck ? [{ ...data.truck, kind: "Tractor" }] : []),
@@ -73,11 +118,30 @@ export function DriverSheet({ data }: { data: DriverSheetData }) {
         <Section title={trip.isEmpty ? "Shipments (none — empty)" : "Shipments"}>
           <Table<SheetShipment>
             columns={[
-              { key: "controlNumber", label: trip.regime === "ACE" ? "PAPS / SCN" : "PARS / CCN", width: 22, mono: true },
-              { key: "kind", label: "Type", width: 14, render: (s) => (s.kind ?? "").replace(/_/g, " ") },
+              {
+                key: "controlNumber",
+                label: trip.regime === "ACE" ? "PAPS / SCN" : "PARS / CCN",
+                width: 22,
+                mono: true,
+              },
+              {
+                key: "kind",
+                label: "Type",
+                width: 14,
+                render: (s) => (s.kind ?? "").replace(/_/g, " "),
+              },
               { key: "shipper", label: "Shipper", width: 20 },
               { key: "consignee", label: "Consignee", width: 20 },
-              { key: "entryNumber", label: "Entry #", width: 16, mono: true, render: (s) => s.entryNumber ? `${s.entryNumber}${s.entryPortCode ? ` @ ${s.entryPortCode}` : ""}` : "" },
+              {
+                key: "entryNumber",
+                label: "Entry #",
+                width: 16,
+                mono: true,
+                render: (s) =>
+                  s.entryNumber
+                    ? `${s.entryNumber}${s.entryPortCode ? ` @ ${s.entryPortCode}` : ""}`
+                    : "",
+              },
               { key: "status", label: "Status", width: 8 },
             ]}
             rows={data.shipments}
@@ -93,11 +157,31 @@ export function DriverSheet({ data }: { data: DriverSheetData }) {
                 { key: "line", label: "#", width: 4 },
                 { key: "description", label: "Description", width: 30 },
                 { key: "hsCode", label: "HS", width: 10, mono: true },
-                { key: "quantity", label: "Qty", width: 12, render: (c) => c.quantity != null ? `${c.quantity} ${c.quantityUnit ?? ""}` : "" },
-                { key: "weightKg", label: "Weight", width: 10, render: (c) => c.weightKg != null ? `${c.weightKg.toLocaleString("en-CA")} kg` : "" },
-                { key: "hazmat", label: "Hazmat", width: 16, mono: true, render: (c) => c.hazmat.join(", ") },
+                {
+                  key: "quantity",
+                  label: "Qty",
+                  width: 12,
+                  render: (c) =>
+                    c.quantity != null ? `${c.quantity} ${c.quantityUnit ?? ""}` : "",
+                },
+                {
+                  key: "weightKg",
+                  label: "Weight",
+                  width: 10,
+                  render: (c) =>
+                    c.weightKg != null ? `${c.weightKg.toLocaleString("en-CA")} kg` : "",
+                },
+                {
+                  key: "hazmat",
+                  label: "Hazmat",
+                  width: 16,
+                  mono: true,
+                  render: (c) => c.hazmat.join(", "),
+                },
               ]}
-              rows={data.shipments.flatMap((s) => s.commodities.map((c) => ({ ...c, controlNumber: s.controlNumber })))}
+              rows={data.shipments.flatMap((s) =>
+                s.commodities.map((c) => ({ ...c, controlNumber: s.controlNumber })),
+              )}
               emptyText="No commodity lines."
             />
           </Section>

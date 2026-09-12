@@ -12,15 +12,22 @@ export const MAX_EXCERPT_CHARS = 1500;
 
 function fence(id: string, source: "regulation" | "organization", text: string): string {
   const cleaned = text.replace(/<\/?excerpt\b[^>]*>/gi, "");
-  const body = cleaned.length > MAX_EXCERPT_CHARS ? `${cleaned.slice(0, MAX_EXCERPT_CHARS)}…` : cleaned;
+  const body =
+    cleaned.length > MAX_EXCERPT_CHARS ? `${cleaned.slice(0, MAX_EXCERPT_CHARS)}…` : cleaned;
   return `<excerpt id="${id}" source="${source}">\n${body}\n</excerpt>`;
 }
 
 export function buildContextBlock(regulations: string[], orgKnowledge: string[]): string {
   const parts: string[] = [];
   if (regulations.length)
-    parts.push("Retrieved regulation excerpts:\n" + regulations.map((r, i) => fence(`R${i + 1}`, "regulation", r)).join("\n\n"));
+    parts.push(
+      "Retrieved regulation excerpts:\n" +
+        regulations.map((r, i) => fence(`R${i + 1}`, "regulation", r)).join("\n\n"),
+    );
   if (orgKnowledge.length)
-    parts.push("Retrieved organization knowledge:\n" + orgKnowledge.map((k, i) => fence(`K${i + 1}`, "organization", k)).join("\n\n"));
+    parts.push(
+      "Retrieved organization knowledge:\n" +
+        orgKnowledge.map((k, i) => fence(`K${i + 1}`, "organization", k)).join("\n\n"),
+    );
   return parts.join("\n\n");
 }

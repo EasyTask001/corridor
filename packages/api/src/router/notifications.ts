@@ -28,20 +28,28 @@ export const notificationsRouter = router({
       if (input.cursor) {
         const [createdAt, id] = input.cursor.split("|");
         if (createdAt && id) {
-          conds.push(or(lt(notifications.createdAt, new Date(createdAt)), and(eq(notifications.createdAt, new Date(createdAt)), lt(notifications.id, id)))!);
+          conds.push(
+            or(
+              lt(notifications.createdAt, new Date(createdAt)),
+              and(eq(notifications.createdAt, new Date(createdAt)), lt(notifications.id, id)),
+            )!,
+          );
         }
       }
       const where = and(...conds);
       const rows = await tx
-          .select()
-          .from(notifications)
-          .where(where)
-          .orderBy(desc(notifications.createdAt), desc(notifications.id))
-          .limit(input.limit + 1);
+        .select()
+        .from(notifications)
+        .where(where)
+        .orderBy(desc(notifications.createdAt), desc(notifications.id))
+        .limit(input.limit + 1);
       const hasMore = rows.length > input.limit;
       const page = hasMore ? rows.slice(0, input.limit) : rows;
       const last = page.at(-1);
-      return { rows: page, nextCursor: hasMore && last ? `${new Date(last.createdAt).toISOString()}|${last.id}` : null };
+      return {
+        rows: page,
+        nextCursor: hasMore && last ? `${new Date(last.createdAt).toISOString()}|${last.id}` : null,
+      };
     }),
   ),
 

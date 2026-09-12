@@ -93,7 +93,10 @@ describe("reporting.run", () => {
   });
 
   it("accepts report.read alone (a reporting-only role)", async () => {
-    const { caller: api } = caller({ permissions: ["report.read"], sqlValues: { label: "All", value: 100 } });
+    const { caller: api } = caller({
+      permissions: ["report.read"],
+      sqlValues: { label: "All", value: 100 },
+    });
 
     await expect(api.run({ question: "How many movements all time?" })).resolves.toBeDefined();
   });

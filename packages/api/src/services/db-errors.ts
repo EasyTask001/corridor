@@ -12,8 +12,11 @@
 import { TRPCError } from "@trpc/server";
 
 export function mapDbError(e: unknown): never {
-  const cause = (e as { cause?: { code?: string; constraint_name?: string; constraint?: string; message?: string } })
-    ?.cause;
+  const cause = (
+    e as {
+      cause?: { code?: string; constraint_name?: string; constraint?: string; message?: string };
+    }
+  )?.cause;
   const constraint = cause?.constraint_name ?? cause?.constraint ?? "";
   if (cause?.code === "23505") {
     const which = constraint.includes("vin")

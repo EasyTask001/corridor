@@ -300,7 +300,9 @@ describe("organization_sso RLS", () => {
 
     // put Org B's row back for the remaining assertions
     await withServiceRole(db, (tx) =>
-      tx.insert(organizationSso).values({ organizationId: ownerB.orgId, providerId: PROVIDER_B, domains: [DOMAIN_B] }),
+      tx
+        .insert(organizationSso)
+        .values({ organizationId: ownerB.orgId, providerId: PROVIDER_B, domains: [DOMAIN_B] }),
     );
   });
 
