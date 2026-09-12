@@ -45,7 +45,8 @@ export const integrationConfigs = pgTable(
     lastError: text("last_error"),
     // 0023 — `mock` keeps the deterministic gateway; `gateway` files through
     // the certified EDI gateway's REST API (fixture replay when unconfigured).
-    mode: text("mode", { enum: ["mock", "gateway"] })
+    // 0047 — `border_connect` files through the BorderConnect eManifest API.
+    mode: text("mode", { enum: ["mock", "gateway", "border_connect"] })
       .notNull()
       .default("mock"),
     baseUrl: text("base_url"),
@@ -172,7 +173,8 @@ export const customsSubmissions = pgTable(
     movementId: uuid("movement_id"),
     kind: text("kind", { enum: CUSTOMS_SUBMISSION_KINDS }).notNull(),
     provider: text("provider", { enum: ["cbp_ace", "cbsa_aci"] }).notNull(),
-    mode: text("mode", { enum: ["mock", "gateway"] }).notNull(),
+    // 0047 — `border_connect` files through the BorderConnect eManifest API.
+    mode: text("mode", { enum: ["mock", "gateway", "border_connect"] }).notNull(),
     referenceNumber: text("reference_number"),
     correlationId: text("correlation_id"),
     status: text("status", { enum: CUSTOMS_SUBMISSION_STATUSES }).notNull().default("sent"),
@@ -223,6 +225,68 @@ export const carrierNotices = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("carrier_notices_published_idx").on(t.publishedAt.desc())],
+);
+
+export const CUSTOMS_INBOX_PROVIDERS = ["border_connect"] as const;
+
+/**
+ * 0047 — one inbound message from a provider's shared queue, received before
+ * its tenant is known (or, for SYSTEM_ALERT / RNS_SHIPMENT, belonging to no
+ * tenant at all). See migration 0047's header for why this is not a column on
+ * integration_events, customs_submissions or background_jobs.
+ */
+export const customsInbox = pgTable(
+  "customs_inbox",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    organizationId: uuid("organization_id").references(() => organizations.id, {
+      onDelete: "cascade",
+    }),
+    provider: text("provider", { enum: CUSTOMS_INBOX_PROVIDERS })
+      .notNull()
+      .default("border_connect"),
+    companyKey: text("company_key"),
+    dataType: text("data_type").notNull(),
+    sendId: text("send_id"),
+    tripNumber: text("trip_number"),
+    cargoControlNumber: text("cargo_control_number"),
+    shipmentControlNumber: text("shipment_control_number"),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    payloadSha256: text("payload_sha256").notNull().unique(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    processingError: text("processing_error"),
+    /** FK is composite — see customs_inbox_movement_org_fkey below. */
+    movementId: uuid("movement_id"),
+    /** FK is composite — see customs_inbox_submission_org_fkey below. */
+    customsSubmissionId: uuid("customs_submission_id"),
+  },
+  (t) => [
+    index("customs_inbox_unprocessed_idx")
+      .on(t.id)
+      .where(sql`${t.processedAt} is null`),
+    index("customs_inbox_org_received_idx")
+      .on(t.organizationId, t.receivedAt.desc())
+      .where(sql`${t.organizationId} is not null`),
+    // Settings inbox search
+    index("customs_inbox_trip_number_idx")
+      .on(t.tripNumber)
+      .where(sql`${t.tripNumber} is not null`),
+    // Settings inbox search
+    index("customs_inbox_cargo_control_number_idx")
+      .on(t.cargoControlNumber)
+      .where(sql`${t.cargoControlNumber} is not null`),
+    foreignKey({
+      name: "customs_inbox_movement_org_fkey",
+      columns: [t.movementId, t.organizationId],
+      foreignColumns: [movements.id, movements.organizationId],
+    }).onDelete("set null"),
+    foreignKey({
+      name: "customs_inbox_submission_org_fkey",
+      columns: [t.customsSubmissionId, t.organizationId],
+      foreignColumns: [customsSubmissions.id, customsSubmissions.organizationId],
+    }).onDelete("set null"),
+  ],
 );
 
 export const subscriptions = pgTable("subscriptions", {

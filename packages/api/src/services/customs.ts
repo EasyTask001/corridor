@@ -144,6 +144,15 @@ export async function customsClientFor(tx: RlsTransaction, orgId: string, regime
   const settings = (cfg?.settings ?? {}) as CustomsClientSettings;
   const environment = cfg?.environment ?? "sandbox";
   const mode = cfg?.mode ?? "mock";
+  // 0047 widened the column to allow 'border_connect', but the adapter that
+  // speaks BorderConnect's contract does not exist yet (a later task) — until
+  // it lands, `createCustomsClient` only knows `mock` and `gateway`.
+  if (mode === "border_connect") {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `${provider === "cbp_ace" ? "CBP ACE" : "CBSA ACI"} BorderConnect integration is not yet available`,
+    });
+  }
   // The mock gateway in sandbox never needs (and never decrypts) the org's
   // real credentials; a gateway needs its API key whatever the environment.
   const credentials =

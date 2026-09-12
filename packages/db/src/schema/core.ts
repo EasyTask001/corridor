@@ -38,47 +38,58 @@ const timestamps = {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 };
 
-export const organizations = pgTable("organizations", {
-  id: uuid("id")
-    .primaryKey()
-    .default(sql`gen_random_uuid()`),
-  name: text("name").notNull(),
-  legalName: text("legal_name"),
-  scacCode: text("scac_code"),
-  canadianCarrierCode: text("canadian_carrier_code"),
-  usDotNumber: text("us_dot_number"),
-  mcNumber: text("mc_number"),
-  filerCode: text("filer_code"),
-  billingEmail: citext("billing_email"),
-  stripeCustomerId: text("stripe_customer_id").unique(),
-  subscriptionPlan: text("subscription_plan", {
-    enum: ["trial", "starter", "professional", "enterprise"],
-  })
-    .notNull()
-    .default("trial"),
-  subscriptionStatus: text("subscription_status", {
-    enum: ["trialing", "active", "past_due", "canceled", "incomplete"],
-  })
-    .notNull()
-    .default("trialing"),
-  /** 0024 — Avaal's "simple" driver sheet: no commodity lines. */
-  simpleDriverSheet: boolean("simple_driver_sheet").notNull().default(false),
-  // 0025 — company profile
-  timezone: text("timezone").notNull().default("America/Toronto"),
-  // 0042 — billing_address as columns; the API nests them back as `billingAddress`.
-  billingLine1: text("billing_line1"),
-  billingLine2: text("billing_line2"),
-  billingCity: text("billing_city"),
-  billingRegion: text("billing_region"),
-  billingPostalCode: text("billing_postal_code"),
-  billingCountry: text("billing_country"),
-  includeParsInCargoNumbers: boolean("include_pars_in_cargo_numbers").notNull().default(false),
-  dispatchEmails: text("dispatch_emails")
-    .array()
-    .notNull()
-    .default(sql`'{}'::text[]`),
-  ...timestamps,
-});
+export const organizations = pgTable(
+  "organizations",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    name: text("name").notNull(),
+    legalName: text("legal_name"),
+    scacCode: text("scac_code"),
+    canadianCarrierCode: text("canadian_carrier_code"),
+    usDotNumber: text("us_dot_number"),
+    mcNumber: text("mc_number"),
+    filerCode: text("filer_code"),
+    billingEmail: citext("billing_email"),
+    stripeCustomerId: text("stripe_customer_id").unique(),
+    subscriptionPlan: text("subscription_plan", {
+      enum: ["trial", "starter", "professional", "enterprise"],
+    })
+      .notNull()
+      .default("trial"),
+    subscriptionStatus: text("subscription_status", {
+      enum: ["trialing", "active", "past_due", "canceled", "incomplete"],
+    })
+      .notNull()
+      .default("trialing"),
+    /** 0024 — Avaal's "simple" driver sheet: no commodity lines. */
+    simpleDriverSheet: boolean("simple_driver_sheet").notNull().default(false),
+    // 0025 — company profile
+    timezone: text("timezone").notNull().default("America/Toronto"),
+    // 0042 — billing_address as columns; the API nests them back as `billingAddress`.
+    billingLine1: text("billing_line1"),
+    billingLine2: text("billing_line2"),
+    billingCity: text("billing_city"),
+    billingRegion: text("billing_region"),
+    billingPostalCode: text("billing_postal_code"),
+    billingCountry: text("billing_country"),
+    includeParsInCargoNumbers: boolean("include_pars_in_cargo_numbers").notNull().default(false),
+    dispatchEmails: text("dispatch_emails")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    // 0047 — BorderConnect's per-account key, one-to-one with the org like
+    // scac_code / canadian_carrier_code.
+    borderConnectCompanyKey: text("border_connect_company_key"),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("organizations_border_connect_company_key_key")
+      .on(t.borderConnectCompanyKey)
+      .where(sql`${t.borderConnectCompanyKey} is not null`),
+  ],
+);
 
 export const permissions = pgTable("permissions", {
   id: uuid("id")

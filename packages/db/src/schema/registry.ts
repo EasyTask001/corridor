@@ -155,6 +155,8 @@ export const trucks = pgTable(
     insuranceCompany: text("insurance_company"),
     insuranceAmount: numeric("insurance_amount", { precision: 12, scale: 2, mode: "number" }),
     insuranceYear: integer("insurance_year"),
+    // 0047 — BorderConnect/CBP conveyance type code (truck-types.json).
+    truckType: text("truck_type").notNull().default("TR"),
   },
   (t) => [
     index("trucks_organization_id_idx").on(t.organizationId),
