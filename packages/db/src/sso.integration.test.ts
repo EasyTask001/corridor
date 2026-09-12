@@ -264,6 +264,75 @@ describe("organization_sso RLS", () => {
     expect(message).toMatch(/organization_sso_domains_shape|check constraint/i);
   });
 
+  it("rejects claiming a domain another organization already owns", async () => {
+    const message = await rejection(
+      withRls(db, as(ownerA), (tx) =>
+        tx
+          .update(organizationSso)
+          .set({ domains: [DOMAIN_A, DOMAIN_B] })
+          .where(eq(organizationSso.organizationId, ownerA.orgId)),
+      ),
+    );
+    expect(message).toMatch(/already configured for another organization/i);
+    // The other organization's name is never disclosed in the message.
+    expect(message).not.toMatch(/northbound|pathfinder/i);
+
+    const [row] = await withServiceRole(db, (tx) =>
+      tx.select().from(organizationSso).where(eq(organizationSso.organizationId, ownerA.orgId)),
+    );
+    expect(row?.domains).toEqual([DOMAIN_A, DOMAIN_A2]);
+  });
+
+  it("rejects the same collision on insert, not only update", async () => {
+    await withServiceRole(db, (tx) =>
+      tx.delete(organizationSso).where(eq(organizationSso.organizationId, ownerB.orgId)),
+    );
+    const message = await rejection(
+      withServiceRole(db, (tx) =>
+        tx.insert(organizationSso).values({
+          organizationId: ownerB.orgId,
+          providerId: "mock-sso-collision",
+          domains: [DOMAIN_A],
+        }),
+      ),
+    );
+    expect(message).toMatch(/already configured for another organization/i);
+
+    // put Org B's row back for the remaining assertions
+    await withServiceRole(db, (tx) =>
+      tx.insert(organizationSso).values({ organizationId: ownerB.orgId, providerId: PROVIDER_B, domains: [DOMAIN_B] }),
+    );
+  });
+
+  it("allows an organization to re-save its own domains, and to add a new non-overlapping one", async () => {
+    const NEW_DOMAIN = "sso-test-a3.example";
+    const resaved = await withRls(db, as(ownerA), (tx) =>
+      tx
+        .update(organizationSso)
+        .set({ domains: [DOMAIN_A, DOMAIN_A2] })
+        .where(eq(organizationSso.organizationId, ownerA.orgId))
+        .returning({ domains: organizationSso.domains }),
+    );
+    expect(resaved).toEqual([{ domains: [DOMAIN_A, DOMAIN_A2] }]);
+
+    const extended = await withRls(db, as(ownerA), (tx) =>
+      tx
+        .update(organizationSso)
+        .set({ domains: [DOMAIN_A, DOMAIN_A2, NEW_DOMAIN] })
+        .where(eq(organizationSso.organizationId, ownerA.orgId))
+        .returning({ domains: organizationSso.domains }),
+    );
+    expect(extended).toEqual([{ domains: [DOMAIN_A, DOMAIN_A2, NEW_DOMAIN] }]);
+
+    // restore, so the resolver assertions above stay true if re-run
+    await withRls(db, as(ownerA), (tx) =>
+      tx
+        .update(organizationSso)
+        .set({ domains: [DOMAIN_A, DOMAIN_A2] })
+        .where(eq(organizationSso.organizationId, ownerA.orgId)),
+    );
+  });
+
   it("keeps updated_at moving via the shared trigger", async () => {
     const [before] = await withServiceRole(db, (tx) =>
       tx.select().from(organizationSso).where(eq(organizationSso.organizationId, ownerA.orgId)),

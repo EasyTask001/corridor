@@ -333,10 +333,11 @@ where n.nspname = 'public' and p.prosecdef;
 
 The remaining definers in `public` are trigger functions (`movements_guard`,
 `movement_children_guard`, `movement_events_guard`, `movement_suggestions_guard`,
-`organization_member_role_scope_guard`, `sync_org_subscription`,
-`handle_new_auth_user`, `movement_events_immutable`) or the RLS helpers
-themselves (`is_org_member`, `has_permission`, `current_user_org_ids`), which
-derive everything from `auth.uid()` and are the check rather than a bypass of it.
+`organization_member_role_scope_guard`, `organization_sso_domain_collision_guard`
+(0046), `sync_org_subscription`, `handle_new_auth_user`, `movement_events_immutable`)
+or the RLS helpers themselves (`is_org_member`, `has_permission`,
+`current_user_org_ids`), which derive everything from `auth.uid()` and are the
+check rather than a bypass of it.
 
 ## 10. Other controls confirmed
 
@@ -347,6 +348,15 @@ derive everything from `auth.uid()` and are the check rather than a bypass of it
   `apps/web/src/lib/sso.ts` and the 0014 resolvers. The hint route also
   deliberately returns two booleans and nothing that turns a guessed address into
   information about a customer.
+- **SSO domain collision is guarded independently of Supabase Auth.**
+  `organization_sso_domain_collision_guard()` (0046) rejects an insert/update
+  whenever a domain would overlap another organization's row, checked directly
+  against `organization_sso` rather than trusting only GoTrue's own uniqueness
+  on SSO provider registration — closing a gap where `sso_provider_for_email`
+  (anon-reachable, on the unauthenticated login path) could otherwise resolve a
+  domain to the wrong tenant if that external guarantee were ever bypassed. The
+  error never names the other organization. Covered by
+  `packages/db/src/sso.integration.test.ts`.
 - **Audit coverage is enforced by a test.** `packages/api/src/audit-coverage.test.ts`
   asserts that mutating procedures write an audit row, so the trail cannot rot
   silently as routers grow.

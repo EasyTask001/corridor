@@ -39,6 +39,7 @@ import {
 } from "../trpc";
 import { writeAudit } from "../services/audit";
 import { invalidatePermissionCache } from "../infra/permission-cache";
+import { mapDbError } from "../services/db-errors";
 
 const {
   organizations,
@@ -575,7 +576,8 @@ export const organizationRouter = router({
                 enforced: input.enforced,
               },
             })
-            .returning();
+            .returning()
+            .catch(mapDbError);
           if (!saved) throw new TRPCError({ code: "FORBIDDEN", message: "Not permitted" });
           await writeAudit(
             tx,
