@@ -409,6 +409,7 @@ describe("background_jobs queue", () => {
           .insert(backgroundJobs)
           .values([
             // Claimed 20 minutes ago and never finished — its worker is gone.
+            // A 600s lease taken out 20 minutes ago expired 10 minutes ago.
             {
               organizationId: org!.id,
               jobType: "noop.test",
@@ -417,8 +418,9 @@ describe("background_jobs queue", () => {
               lockedBy: "dead-worker",
               lockedAt: new Date(Date.now() - 20 * 60_000),
               startedAt: new Date(Date.now() - 20 * 60_000),
+              leaseExpiresAt: new Date(Date.now() - 10 * 60_000),
             },
-            // Claimed a minute ago — still working.
+            // Claimed a minute ago — still working, lease not yet due.
             {
               organizationId: org!.id,
               jobType: "noop.test",
@@ -427,6 +429,7 @@ describe("background_jobs queue", () => {
               lockedBy: "live-worker",
               lockedAt: new Date(Date.now() - 60_000),
               startedAt: new Date(Date.now() - 60_000),
+              leaseExpiresAt: new Date(Date.now() + 9 * 60_000),
             },
           ])
           .returning({ id: backgroundJobs.id }),
@@ -482,6 +485,7 @@ describe("background_jobs queue", () => {
               maxAttempts: 3,
               lockedBy: "dead-worker",
               lockedAt: new Date(Date.now() - 60 * 60_000),
+              leaseExpiresAt: new Date(Date.now() - 50 * 60_000),
             },
             // Same, but it already recorded why it failed — that message must survive.
             {
@@ -493,6 +497,7 @@ describe("background_jobs queue", () => {
               lastError: "boom",
               lockedBy: "dead-worker",
               lockedAt: new Date(Date.now() - 60 * 60_000),
+              leaseExpiresAt: new Date(Date.now() - 50 * 60_000),
             },
           ])
           .returning({ id: backgroundJobs.id }),
@@ -548,6 +553,7 @@ describe("background_jobs queue", () => {
             maxAttempts: 5,
             lockedBy: "dead-worker",
             lockedAt: new Date(Date.now() - 30 * 60_000),
+            leaseExpiresAt: new Date(Date.now() - 20 * 60_000),
           },
           { organizationId: org!.id, jobType: "noop.test", runAt },
           { organizationId: org!.id, jobType: "noop.test", runAt },
