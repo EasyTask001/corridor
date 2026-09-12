@@ -1,0 +1,10 @@
+{
+  "data": "ACI_NOTICE",
+  "companyKey": "c-9000-2bcd8ae5954e0c48",
+  "tripNumber": "ABCD260912001",
+  "cbsaDateTime": "2026-09-12 10:00:00",
+  "type": "ARRIVAL_REPORTED",
+  "references": [
+    { "cargoControlNumber": "1234PARS0001" }
+  ]
+}

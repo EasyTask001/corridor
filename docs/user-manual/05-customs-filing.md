@@ -2,7 +2,7 @@
 
 ## Modes
 
-Under Settings → Integrations each regime runs in **mock** mode (a deterministic simulator, the default with no credentials) or **gateway** mode (a certified EDI gateway's API, with a base URL and API key). **Test connection** checks the gateway.
+Under Settings → Integrations each regime runs in **mock** mode (a deterministic simulator, the default with no credentials), **gateway** mode (a certified EDI gateway's API, with a base URL and API key), or **BorderConnect** mode (BorderConnect's Service Provider eManifest API — set your BorderConnect company key on Settings → Organization; the API URL and key are account-wide, configured once for all tenants). **Test connection** checks the gateway; in BorderConnect mode it drains the shared inbox instead ("Check inbox").
 
 ## What happens on transmit
 

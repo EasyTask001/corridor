@@ -11,6 +11,15 @@ import type {
 export interface ManifestParty {
   name: string;
   address: string | null;
+  /** The same address, structured — BorderConnect files parts, not one printed line. */
+  postal: {
+    line1: string | null;
+    line2: string | null;
+    city: string | null;
+    region: string | null;
+    postalCode: string | null;
+    country: string | null;
+  } | null;
 }
 
 export interface ManifestPlate {
@@ -30,6 +39,11 @@ export interface ManifestPayload {
     filerCode: string | null;
     usDotNumber: string | null;
     name: string;
+    /** SCAC — the org's own, distinct from the movement-level `code` above. */
+    scac: string | null;
+    canadianCarrierCode: string | null;
+    /** The org's operating timezone (organizations.timezone, defaults 'America/Toronto'). */
+    timezone: string;
   };
   trip: {
     movementNumber: string;
@@ -52,6 +66,8 @@ export interface ManifestPayload {
     licenseNumber: string | null;
     licenseJurisdiction: string | null;
     citizenship: string | null;
+    /** ISO date (YYYY-MM-DD), null when not on file. */
+    dateOfBirth: string | null;
     hazmatEndorsement: boolean;
     documents: Array<{
       type: DriverDocumentType;
@@ -68,6 +84,8 @@ export interface ManifestPayload {
     plateJurisdiction: string;
     /** Additional plates (equipment_plates, 0021) — the primary is `plate`. */
     plates: ManifestPlate[];
+    /** CBP/BorderConnect conveyance type code (trucks.truck_type, 0047) — defaults 'TR'. */
+    truckType: string;
     dotNumber: string | null;
     insurance: {
       company: string | null;
@@ -97,6 +115,10 @@ export interface ManifestPayload {
     /** CBP port code the entry is filed at. */
     entryPort: string | null;
     inBond: { entryType: string; destinationPort: string | null; number: string | null } | null;
+    /** Origin of the goods (shipments.loading_country/province/city, 0047). */
+    loading: { country: string | null; province: string | null; city: string | null };
+    /** Final delivery place, structured — distinct from the consignee's own address. */
+    delivery: ManifestParty["postal"];
     shipper: ManifestParty | null;
     consignee: ManifestParty | null;
     commodities: Array<{
@@ -105,6 +127,10 @@ export interface ManifestPayload {
       quantity: number | null;
       quantityUnit: string | null;
       weightKg: number | null;
+      /** What the user typed the weight in (commodities.weight_unit). */
+      weightUnit: "KG" | "LB" | null;
+      /** CBP/BorderConnect packaging code (commodities.packaging_type). */
+      packagingType: string | null;
       marksAndNumbers: string | null;
       hazmat: Array<{ unCode: string; description: string | null }>;
       countryOfOrigin: string | null;
@@ -192,7 +218,7 @@ export interface CustomsCancelAck {
   raw: Record<string, unknown>;
 }
 
-export type CustomsClientMode = "mock" | "gateway";
+export type CustomsClientMode = "mock" | "gateway" | "border_connect";
 
 /** An in-bond move as CBP wants to hear about it (0026). */
 export interface InBondMessage {

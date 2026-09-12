@@ -1,0 +1,15 @@
+{
+  "extends": "@corridor/config/tsconfig/base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "noEmit": true,
+    // Not a React app, but @corridor/api's barrel transitively reaches
+    // @corridor/pdf's .tsx templates (services/pdf.ts) — tsc needs a jsx
+    // mode configured to type-check that reachable graph, same as
+    // packages/api/tsconfig.json itself.
+    "jsx": "react-jsx"
+  },
+  "include": ["src/**/*.ts", "vitest.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

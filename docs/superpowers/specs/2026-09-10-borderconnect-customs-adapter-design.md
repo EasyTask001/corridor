@@ -1,6 +1,6 @@
 # BorderConnect customs gateway adapter — design
 
-Status: approved for implementation in chat on 2026-09-10
+Status: superseded 2026-09-12 — Service Provider mode, shared inbox; implemented by docs/superpowers/plans/2026-09-12-borderconnect-service-provider.md
 
 ## Why
 
@@ -50,18 +50,14 @@ gateway's assumptions, and without silently mismapping the two CBP concepts abov
 ## Non-goals
 
 - Implementing BorderConnect's WebSocket transport. The HTTP send/receive pair is sufficient and
-  fits Corridor's existing cron-driven polling job (`customs.poll_status`); a persistent
+  fits Corridor's existing cron-driven polling job (`customs.borderconnect_drain`); a persistent
   WebSocket connection would need new always-on worker infrastructure this repo doesn't have.
 - Implementing `fetchNotices` or any of the four `inBondArrival`/`inBondExport`/`inBondCancel`/
   `inBondStatus` methods for BorderConnect. Both throw `CustomsTransportError` with a clear
   "not supported by BorderConnect" message. Revisiting either requires separate research
   (BorderConnect's QP In-Bond Manager API for in-bond; there is no notice-broadcast equivalent
   to research for notices).
-- Restructuring `packages/api/src/services/jobs.ts`'s per-movement poll loop into a per-organization
-  mailbox drain. The existing "one `customs.poll_status` job per movement, self-rescheduling while
-  pending" model is kept; BorderConnect's adapter fits inside it (see Data flow).
-- Service-provider mode (`companyKey`-scoped multi-carrier connections). EasyTask AI Corp
-  connects as a single carrier; `companyKey` is not sent.
+- Carrier-key (non-SP) mode: not built; `companyKey` is always sent.
 
 ## Chosen architecture
 
@@ -95,112 +91,142 @@ interface BorderConnectTransport {
   in `[]` if the body isn't already an array) and this must be verified against a live sandbox
   call before `border_connect` mode is enabled for a real organization.
 
-### `mapping.ts`
+### Outbound mappers (`ace.ts`, `aci.ts`, `send-request.ts`, `validate.ts`)
 
-- `toTripMessage(manifest: ManifestPayload, opts: { sendId: string }): Record<string, unknown>` —
-  builds `ACE_TRIP`/`ACI_TRIP` (branching on `manifest.regime`) with `operation: "CREATE"`,
-  `autoSend: true`, `tripNumber: manifest.trip.movementNumber`. `transmit()` needs only this one
-  call; there is no separate send-request round trip for an original filing.
-- `toSendRequestMessage(kind: "amend" | "cancel", regime, tripNumber, sendId)` — builds
-  `ACE_SEND_REQUEST`/`ACI_SEND_REQUEST` with the confirmed `type` values:
-  - ACE: `AMEND_TRIP_AND_SHIPMENTS` / `CANCEL_TRIP_AND_SHIPMENTS`
-  - ACI: `AMEND` / `CANCEL`
-    `amend()` also re-uploads the trip body first via `toTripMessage` with
-    **`operation: "UPDATE"` — unconfirmed.** Only `"CREATE"` appears in any fetched BorderConnect
-    example or PDF reference. This is called out with an inline comment and must be confirmed
-    against BorderConnect (sandbox test or their support) before amendments are used in production;
-    until then `amend()` in `border_connect` mode is considered experimental.
-- `fromInboundMessage(msg: unknown): { referenceNumber: string | null; shipmentControlNumbers:
-string[]; status: CustomsStatusMessage }` — branches on `msg.data`:
-  - `API_RESPONSE` (`status: OK|IMPORTED|DATA_ERROR`) → acknowledgement of the upload itself,
-    maps to `"pending"`/`"rejected"` respectively (`DATA_ERROR` before customs ever sees it is a
-    local rejection, not a CBP/CBSA decision).
-  - `ACE_RESPONSE` (`processingResponse.shipmentsAccepted/shipmentsRejected`) → `"accepted"` or
-    `"rejected"`; ACE has no separate ongoing-status message type in the fetched docs, so this is
-    also where later status changes are expected to arrive (unconfirmed — flagged for the same
-    sandbox verification pass as amend).
-  - `ACI_RESPONSE` (`type: ACCEPT|REJECT`, keyed by `tripNumber`) → `"accepted"`/`"rejected"`.
-  - `ACI_NOTICE` (keyed by `cargoControlNumber`, not `tripNumber`) → resolved to its owning trip
-    through the store (below) before being turned into a `CustomsStatusMessage`.
+- `toAceTrip(manifest, opts): ACE_TRIP` — builds `ACE_TRIP` with fields from `ManifestPayload`
+  extended in Task 3 (carrier code, timezone, crew dateOfBirth, truck type, shipment loading
+  place, delivery postal address, commodity packaging & units). `operation` (CREATE | UPDATE),
+  `autoSend`, `companyKey` passed through `opts`; `companyKey` also on every nested shipment.
+  Throws `CustomsTransportError` 422 listing every missing required field at once.
+- `toAciTrip(manifest, opts): ACI_TRIP` — builds `ACI_TRIP`, same error handling.
+- `toCancelSendRequest(regime, tripNumber, opts): ACE_SEND_REQUEST | ACI_SEND_REQUEST` —
+  ACE: `{ data: "ACE_SEND_REQUEST", type: "CANCEL_TRIP_AND_SHIPMENTS", … }`;
+  ACI: `{ data: "ACI_SEND_REQUEST", type: "CANCEL", bundleTripAndShipments: true, … }`.
+- `validateForBorderConnect(manifest): string[]` — collects all compliance problems (missing
+  carrier code, bad trip number pattern, unsupported shipment types, hazmat/in-bond flags, etc.);
+  returns empty list when valid.
 
 ### `client.ts`
 
-`createBorderConnectCustomsClient(opts: { provider, environment, apiUrlSuffix, apiKey, store,
+`createBorderConnectCustomsClient(opts: { provider, environment, apiUrlSuffix, apiKey, companyKey,
 transport?, now? })` implements `CustomsClient`:
 
-- `transmit` → one `send()` call with `toTripMessage(...)`.
-- `amend` → `send()` the updated trip body, then `send()` the `AMEND_*` send-request.
-- `cancel` → `send()` the `CANCEL_*` send-request only (no trip re-upload; cancel doesn't need
-  shipment data).
-- `fetchStatus`/`fetchDecision` → the drain-then-serve cycle (Data flow, below).
-- `ping` → `receive()` and report `ok: true` on any non-throwing response (200), `ok: false` on
-  an authentication or transport error. BorderConnect has no dedicated health endpoint.
-- `fetchNotices`, `inBondArrival`, `inBondExport`, `inBondCancel`, `inBondStatus` → immediately
-  throw `new CustomsTransportError("... not supported by BorderConnect", 501, false)`.
+- `transmit` → one `send()` call with `toAceTrip|toAciTrip(..., {operation: "CREATE", autoSend: true, companyKey})`.
+  Returns `{referenceNumber: tripNumber, receivedAt: ..., raw: {...}}`.
+- `amend` → `send()` the updated trip with `operation: "UPDATE"` (same `tripNumber`), then
+  `send()` the `AMEND_*` send-request. Throws if trip re-upload is unconfirmed with BorderConnect.
+- `cancel` → `send()` the `CANCEL_*` send-request only.
+- `fetchStatus`, `fetchDecision`, `fetchNotices`, `inBond*` → throw `CustomsTransportError` 501
+  — status arrives through the shared inbox drain, not per-movement polling.
+- `ping()` → `receive()` and report; **not used in production** (drains the queue). Task 10 routes
+  the "Test connection" button to the drain instead.
 
-### `store.ts` — the necessary deviation from the gateway client's pattern
+### Service Provider identity
 
-The existing gateway `client.ts` never touches the database; `transport.ts`'s `HttpTransportOptions`
-takes only `baseUrl`/`apiKey`. That works because a generic gateway answers "what's the status of
-reference X" directly. BorderConnect cannot: `GET /api/receive` drains everything queued for the
-account in one shot, not filtered to one trip. If `fetchStatus(refA)` drains the queue and finds
-messages for `refA`, `refB`, and `refC`, but only returns `refA`'s and discards the rest, `refB`
-and `refC`'s messages are gone forever — BorderConnect does not requeue what it has already handed
-out.
+- `organizations.border_connect_company_key: text | null` — each carrier organization's assigned
+  `companyKey` from BorderConnect (e.g., `c-9000-2bcd8ae5954e0c48`). EasyTask's own account
+  connects with a single API key and API URL suffix (from env: `BORDERCONNECT_API_KEY`,
+  `BORDERCONNECT_API_URL_SUFFIX`), multiplexing all tenants through a shared queue. Outbound
+  messages include the organization's `companyKey` on every trip and nested shipment.
+- Router: when `mode === "border_connect"` is selected, require `companyKey` to be set on the
+  organization. Production fails fast with `PRECONDITION_FAILED` if it is not.
 
-So the BorderConnect client is given a small injected store, unlike the generic gateway client:
+### Shared inbox
 
-```ts
-interface BorderConnectSubmissionStore {
-  /** Resolve a drained message's tripNumber, or an ACI_NOTICE's cargoControlNumber (via the
-   *  shipments recorded in customs_submissions.request), to the customs_submissions row it
-   *  belongs to. Null when no matching submission exists yet (message dropped, logged). */
-  resolveReference(key: {
-    tripNumber?: string;
-    cargoControlNumber?: string;
-  }): Promise<string | null>;
-  /** Cache one drained-but-not-yet-consumed message against its reference. */
-  cachePendingMessage(referenceNumber: string, message: unknown): Promise<void>;
-  /** Read and clear the cached message for a reference (the "serve" half of drain-then-serve).
-   *  Null when nothing new has arrived since the last read. */
-  takePendingMessage(referenceNumber: string): Promise<unknown | null>;
-}
-```
+- `customs_inbox` table (grain: one inbound message from the shared BorderConnect queue, before its
+  tenant is known):
+  - `id`, `provider` (always `'border_connect'`), `company_key`, `data_type` (the message's `data`
+    field), `send_id`, `trip_number`, `cargo_control_number`, `shipment_control_number`,
+    `payload` (the full JSON), `payload_sha256` (dedup on retries / socket+poll overlap), `received_at`.
+  - After processing: `organization_id` (resolved by `company_key`), `customs_submission_id`
+    (resolved by `tripNumber` or `cargoControlNumber`), `movement_id` (resolved from submission),
+    `processed_at`, `processing_error` (unroutable messages kept with their error for Settings UI).
+  - RLS: `organization_id is not null and has_permission(organization_id, 'integrations.manage')`
+    for authenticated read; service role reads all.
+- Drain job `customs.borderconnect_drain` (cron, every minute):
+  1. `transport.receive()` from the shared queue.
+  2. For each message, extract keys via `inboundKeys()` and compute `payload_sha256`.
+  3. Insert into `customs_inbox` with `received_at: now()`, `organization_id: null` (unrouted yet).
+  4. Route each row: resolve `company_key` to `organization_id`; resolve `tripNumber` or
+     `cargoControlNumber` to `customs_submission_id` and thence to `movement_id` via
+     `customs_submissions.movement_id`; update the row or write `processing_error`.
+  5. For each successfully routed message, call `applyStatusMessage(parsed, orgId, movementId)`.
 
-Backed by Drizzle against `customs_submissions`, constructed with the `tx` and `orgId` already in
-scope at `customsClientFor()` (`packages/api/src/services/customs.ts`) — the same place that
-today builds the generic gateway client. `resolveReference` reads `customs_submissions.reference_number`
-directly for a `tripNumber` match, or scans `customs_submissions.request->'shipments'` for a
-`cargoControlNumber`/`controlNumber` match. `cachePendingMessage`/`takePendingMessage` read/write
-the new `customs_submissions.pending_inbound` column (below).
+### Confirmed protocol facts
 
-This keeps the `CustomsClient` interface itself unchanged and keeps `pollCustomsStatus`/
-`applyStatusMessage` in `services/customs.ts` completely unaware that BorderConnect's
-`fetchStatus` call has a side effect of caching other movements' messages: those movements pick
-their own cached message up next time their own `customs.poll_status` job calls `fetchStatus`,
-which already happens on a self-rescheduling loop while a filing is pending.
+From the ACE/ACI response PDFs and BorderConnect's vendor-supplied JSON Schemas:
+
+- Outbound `operation` field: `CREATE` for a new trip (initial filing), `UPDATE` for an existing
+  trip already on file. Both can have `autoSend: true` to transmit immediately. Both
+  **confirmed in PDF reference**.
+- Inbound ACE status: arrives in `ACE_RESPONSE.processingResponse` (when shipments are accepted),
+  `validationResponses[]` (rejections), `tripStatus` (AAD/RTR/HTR/RCO), and `shipmentStatusList[]`
+  (02/05/1C/1D/1G/1H/11/12/13/19 codes per the CBP eManifest spec).
+- Inbound `API_RESPONSE`: echoes the `sendId` from the upload. Subsequent `ACE_RESPONSE` and
+  `ACI_RESPONSE` do not echo `sendId`.
+- `GET /api/receive` success response shape: **undocumented**. The transport normalises defensively
+  (array vs. single object vs. nested messages) and this must be confirmed with a live smoke script
+  (Task 16) against BorderConnect's sandbox before mode is enabled for a real organization.
+
+### Amend / cancel
+
+- Amend: full re-upload of the trip body with `operation: UPDATE, autoSend: true`. BorderConnect
+  applies the new shipment list and replaces the old. Shipment control numbers must match — a
+  change to control numbers is a cancel + file-new cycle, not an amend.
+- Cancel: `ACE_SEND_REQUEST` with `type: CANCEL_TRIP_AND_SHIPMENTS` (ACE) or `ACI_SEND_REQUEST`
+  with `type: CANCEL, bundleTripAndShipments: true` (ACI). No trip body required (cancel does not
+  need shipment details).
+
+### RNS / SYSTEM_ALERT
+
+- `RNS_SHIPMENT` messages (Release Notification System — CBP release notifications):
+  parsed as an inbound customs event (`released`, with `releaseCode`, `releaseName`, `officeCode`).
+  No `tripNumber` or `cargoControlNumber` link is provided — Task 11 (RNS integration) handles
+  matching by shipment control number in the payload.
+- `SYSTEM_ALERT` messages (BorderConnect service notices): parsed as `kind: "alert"` with a message
+  string. No customs event correlation — logged and stored in `customs_inbox` for audit.
+
+### Readiness
+
+- A new `crossingReadiness()` function (Task 11) computes readiness per crossing by checking:
+  - RNS received (`customs_inbox.data_type = 'RNS_SHIPMENT'` + processed + released).
+  - `PARS_MATCHED` / `PARS_NOT_MATCHED` / `CSA_REPORTED` events on shipments.
+  - `entry_on_file` + no holds for ACE; `accepted` + no holds for ACI.
+  - Rolling 7-day average of decision time for forecast.
+
+### WebSocket listener (hosting deferred)
+
+- A separate app `apps/borderconnect-listener/` (Node.js/Fastify + `ws` client):
+  - Opens a persistent WebSocket to BorderConnect's `/api/sockets/[suffix]` with the same
+    `Api-Key` auth.
+  - On each message, writes to `customs_inbox` (bypassing the HTTP drain).
+  - Runs on dedicated infrastructure; enqueues a `customs.borderconnect_drain` job if the socket
+    closes, to catch up any messages missed.
+  - Hosting and config for this app are deferred (out of scope for Tasks 1–15).
 
 ## Data flow
 
 **Transmit:**
 `transmitMovement` (unchanged) → `client.transmit(manifest)` → one `POST /api/send/[suffix]` with
-an `autoSend: true` `ACE_TRIP`/`ACI_TRIP`. `recordSubmission` (unchanged) stores the ack.
+an `autoSend: true` `ACE_TRIP`/`ACI_TRIP`. `recordSubmission` (unchanged) stores the ack with
+`mode: "border_connect"`.
 
-**Poll (`customs.poll_status` job, per movement, self-rescheduling while pending — unchanged
-job shape):**
+**Inbox drain (`customs.borderconnect_drain` cron job, global, every minute — replaces per-movement polling):**
 
-1. `client.fetchStatus(ref)` calls `transport.receive()`, draining every message currently queued
-   for the account.
-2. For each drained message, `mapping.fromInboundMessage` extracts its `data` type and
-   correlating key (`tripNumber` or `cargoControlNumber`); `store.resolveReference` finds which
-   `customs_submissions` row it belongs to (or drops it with a log, mirroring
-   `applyInboundCustomsMessage`'s existing "unknown reference" no-op); `store.cachePendingMessage`
-   writes it to that row's `pending_inbound`.
-3. `store.takePendingMessage(ref)` reads and clears _this_ reference's cache. Nothing new →
-   `fetchStatus` returns the same status as last time (`"pending"` while the last cached message
-   hasn't changed that).
-4. The returned `CustomsStatusMessage` flows into `applyStatusMessage` exactly as it does for
-   `mock`/`gateway` today — no changes there.
+1. HTTP GET `/api/receive/[suffix]` drains every message currently queued for EasyTask's account.
+2. For each message:
+   a. Extract routing keys via `inboundKeys()`: `companyKey`, `sendId`, `tripNumber`,
+      `cargoControlNumber`, `shipmentControlNumber`.
+   b. Compute `payload_sha256` and INSERT into `customs_inbox` (dedup on hash).
+   c. Route by `companyKey → organizations.border_connect_company_key` to find `organization_id`.
+   d. Route by `tripNumber` or `cargoControlNumber` to find `customs_submission_id` and
+      `movement_id`.
+   e. UPDATE the `customs_inbox` row with `organization_id`, `customs_submission_id`, `movement_id`,
+      `processed_at: now()`.
+   f. If unroutable (missing `companyKey` mapping or no matching submission), write
+      `processing_error` and leave `organization_id` null.
+3. For each successfully routed message, call `parseInbound()` and `applyStatusMessage()` exactly
+   as today — no difference from `mock`/`gateway` in how status events are recorded.
 
 **Amend / cancel:** as in "Chosen architecture" above; `transmitAmendment`/`cancelAtCustoms`
 (unchanged) call `client.amend`/`client.cancel`, which are two-message and one-message send-only
@@ -208,34 +234,64 @@ operations respectively.
 
 ## Schema change
 
-One migration:
+One migration (0047):
 
+- `organizations`: add `border_connect_company_key text unique nullable` with a CHECK constraint.
+- `trucks`: add `truck_type text not null default 'TR'` (BorderConnect/CBP conveyance code,
+  validated with a CHECK regex).
 - `integration_configs.mode` and `customs_submissions.mode`: widen the enum to add
   `"border_connect"` alongside `"mock"`/`"gateway"`.
-- `customs_submissions`: add `pending_inbound jsonb` (nullable). Provider payload data — fits the
-  existing "jsonb is for provider payloads and free-form metadata" rule; not a settings bag. Every
-  other field the drain-then-serve cycle needs (`reference_number`, `request` for shipment control
-  number resolution) already exists.
-- `integration_configs.base_url`, for `border_connect` mode only, is reinterpreted as the
-  account's **API URL suffix** (e.g. `EasyTask`) rather than a full base URL — `transport.ts`
-  hardcodes the `borderconnect.com` host. Documented in the adapter's README and in a migration
-  comment, since this repurposes an existing generic column's meaning for one mode rather than
-  adding a new one.
+- `customs_inbox` table (new, grain: one inbound BorderConnect message):
+  - `id bigserial primary key`
+  - `organization_id uuid nullable references organizations(id) on delete cascade` (resolved during routing)
+  - `provider text not null default 'border_connect'` (enum: just border_connect for now)
+  - `company_key text` (echoed from the message)
+  - `data_type text not null` (the message's `data` field: API_RESPONSE, ACE_RESPONSE, etc.)
+  - `send_id text` (echoed on API_RESPONSE only)
+  - `trip_number`, `cargo_control_number`, `shipment_control_number text` (routing keys)
+  - `payload jsonb not null` (the full message)
+  - `payload_sha256 text not null unique` (dedup on retries)
+  - `received_at timestamptz default now()` (when BorderConnect queued it)
+  - `processed_at timestamptz` (when drain job processed it)
+  - `processing_error text` (if routing failed)
+  - `movement_id uuid nullable references movements(id, organization_id) on delete set null`
+  - `customs_submission_id uuid nullable references customs_submissions(id, organization_id) on delete set null`
+  - Indexes: `(id) where processed_at is null` (drain query), `(organization_id, received_at desc)`
+    (Settings inbox list)
+  - RLS: authenticated read where `organization_id is not null and has_permission(...)`;
+    service role unrestricted.
+- `background_jobs` policy: add `customs.borderconnect_drain` as job_type, enqueued only by the
+  service role (no authenticated user can enqueue it).
 
-Mirrored in `packages/db/src/schema/integrations.ts` per the usual migration → schema → `db reset`
+Mirrored in `packages/db/src/schema/` per the usual migration → schema → `db reset`
 → `verify:mirror` → `db:lint` → `test:integration` sequence.
 
 ## Wiring
 
 - `packages/integrations/src/customs/index.ts`: `createCustomsClient` gains a `border_connect`
   branch calling `createBorderConnectCustomsClient`, alongside the existing `mock`/`gateway`
-  branches.
-- `packages/api/src/services/customs.ts`: `customsClientFor` builds a `BorderConnectSubmissionStore`
-  from `tx`/`orgId` and passes it (only) when `mode === "border_connect"`. `apiUrlSuffix` comes
-  from `cfg.baseUrl`; `apiKey` from the same Vault/env fallback path already used for `gateway`
-  (`credentials?.apiKey ?? process.env.CUSTOMS_GATEWAY_API_KEY`) — extended to also fall back to
-  `process.env.BORDERCONNECT_API_KEY` for `border_connect` mode, matching the env var already
-  added to `.env.local`/`.env.example`.
+  branches. Exports: `createBorderConnectCustomsClient`, `createBorderConnectHttpTransport`,
+  `normaliseReceiveBody`, `parseInbound`, `inboundKeys`, `toAceTrip`, `toAciTrip`,
+  `toCancelSendRequest`, and type exports.
+- `packages/api/src/services/customs.ts`:
+  - `customsClientFor`: when `mode === "border_connect"`, read `organizations.border_connect_company_key`
+    and pass `{apiUrlSuffix: process.env.BORDERCONNECT_API_URL_SUFFIX, apiKey: process.env.BORDERCONNECT_API_KEY,
+    companyKey}` to the client. Fail with `PRECONDITION_FAILED` in production if `companyKey` is
+    not set.
+  - `scheduleDecision`: for `border_connect` clients, do nothing (status arrives through the
+    inbox drain, not per-movement polling).
+  - `applyStatusMessage`: unchanged — branches on `status.status` and `decision` fields, which
+    are populated the same way for all three modes.
+- `packages/api/src/services/borderconnect.ts` (new): `drainAndApplyCustomsInbox()`
+  implementing steps 1–5 of the inbox drain above. Called by the cron route.
+- `packages/api/src/services/jobs.ts`: `customs.borderconnect_drain` job type, callable only by
+  service role, with no organization-specific payload (global drain per EasyTask's account).
+- `packages/api/src/router/integrations.ts`: `mode` enum becomes `["mock", "gateway", "border_connect"]`;
+  when `mode === "border_connect"` is selected, force `baseUrl: null` server-side (not exposed
+  to the client).
+- `apps/web/src/app/api/jobs/borderconnect-drain/route.ts` (new): Vercel cron endpoint
+  enqueuing `customs.borderconnect_drain` with the service role.
+- `apps/web/vercel.json`: cron config scheduling the route every minute.
 
 ## Fixture replay (offline default)
 
@@ -259,11 +315,23 @@ credentials, consistent with every other external service in this repo.
 
 ## Open risks carried into implementation (not resolved by this design)
 
-1. `GET /api/receive` response shape when messages are pending (array vs. single object) —
-   unconfirmed, needs a live sandbox call.
-2. `operation: "UPDATE"` for amend's trip re-upload — unconfirmed, only `"CREATE"` is evidenced.
-3. Whether ACE has a distinct ongoing-status message beyond `ACE_RESPONSE` — unconfirmed.
-
-None of these block writing the adapter (it's built defensively around them and fails loudly
-rather than guessing wrong), but all three should be confirmed against BorderConnect's sandbox
-(or their support) before `border_connect` mode is turned on for a production organization.
+1. `GET /api/receive` response shape when messages are pending (array vs. single object vs.
+   nested in a wrapper) — undocumented, needs a live smoke script (Task 16) against BorderConnect's
+   sandbox.
+2. ACI `AMEND` with `autoSend: true` and amendment reason codes — the ACI PDF PDFs list update
+   reason codes but don't confirm they are valid with autoSend + UPDATE operation. Confirmed via
+   test when implemented.
+3. `time-zones.json` endpoint and values — fetch during Task 4 to check if the codes match IANA
+   names (to decide whether to send `estimatedArrivalTimeZone` on ACE trips). If not IANA, omit
+   the field and document the list in the README.
+4. ACE hazmat `emergencyContact` field and in-bond `irsNumber`/`fda` fields — BorderConnect
+   requires these but `ManifestPayload` does not capture them. v1 throws 422 listing them as
+   missing; they are deferred to v2.
+5. `companyKey` length: BorderConnect's PDFs document it as max 30 chars; a sample in the live
+   docs is 32 chars. Do not hard-validate; rely on BorderConnect's rejection if oversized.
+6. Error-code spelling: BorderConnect may return `"FAILED"` vs. `"FAILURE"` inconsistently. The
+   transport parser accepts both.
+7. WebSocket vs. HTTP queue diversion: unknown whether an open persistent WebSocket connection
+   diverts messages away from the HTTP `GET /api/receive` queue or if both are fed in parallel.
+   Task 16's smoke script does not test this; it is a known open question for the WebSocket
+   listener (Task 15, hosting deferred).

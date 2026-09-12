@@ -236,11 +236,54 @@ reachable from a browser bundle:
 The RLS-bypassing **database** path is `withServiceRole()` (`packages/db/src/rls.ts:56`),
 whose contract is that callers must filter by `organization_id` themselves. Its
 call sites are the job worker and cron routes (`api/jobs/process`,
-`api/jobs/expiry-scan`, `api/jobs/notices-sync`) and `packages/api/src/services/jobs.ts`.
-The one service-role claim a signed-in user can trigger, `integrations.jobs.runNow`,
-passes `organizationId: ctx.orgId` to `processDueJobs`, which forwards it as
-`claim_jobs(…, p_organization_id)` (0041) so only that organization's rows are
-claimed, and the procedure returns counts only — never a job's `result` payload.
+`api/jobs/expiry-scan`, `api/jobs/notices-sync`, and — since the BorderConnect
+adapter — `api/jobs/borderconnect-drain`) and `packages/api/src/services/jobs.ts`.
+
+`api/jobs/borderconnect-drain` (cron, every minute) enqueues and immediately runs
+`customs.borderconnect_drain`: `services/borderconnect.ts`'s `drainBorderConnectInbox`
+calls `withServiceRole` to store every message BorderConnect's shared `GET /api/receive`
+queue returns into `customs_inbox` (queue-wide, no `organization_id` yet), then
+`processInboxRow` opens one `withServiceRole` transaction **per row** (never one for the
+whole batch, so a bad row can't roll back the others) to route it by `companyKey →
+organizations.border_connect_company_key` and apply it. A second, standalone process,
+`apps/borderconnect-listener` (a persistent WebSocket client, not deployed/wired into
+any cron in this repo yet — see its README), opens its own service-role Postgres
+connection the same way and calls the same `storeInboundMessages` for every frame it
+receives, so the "queue-wide until routed" contract is identical from either entry point.
+
+RNS messages are the one BorderConnect exception to "route by companyKey": `RNS_SHIPMENT`
+carries no `companyKey` at all (CBSA's release-notification format has no per-carrier field),
+so `findShipmentsForRns` (`services/borderconnect.ts`) resolves them by `cargo control
+number → shipments.control_number` searched **across every organization**, not scoped to
+one tenant — the one cross-org lookup this adapter performs. Since `control_number` is
+unique only per organization, a collision is narrowed by keeping only candidates whose
+movement is ACI and still `sent`/`accepted`/`held`; the message is applied only when
+**exactly one** candidate survives — 0 or >1 is stamped `unroutable` (`"unknown CCN"` /
+`"ambiguous CCN (<n> candidates)"`) and never applied to the wrong tenant's shipment.
+Two service-role claims a signed-in user can trigger:
+
+1. `integrations.jobs.runNow` passes `organizationId: ctx.orgId` to `processDueJobs`,
+   which forwards it as `claim_jobs(…, p_organization_id)` (0041) so only that
+   organization's rows are claimed, and the procedure returns counts only — never
+   a job's `result` payload.
+2. `integrations.testCustoms` in `border_connect` mode (the Settings "Check inbox"
+   button, since the BorderConnect adapter). This one is **not** org-scoped, by
+   design: BorderConnect's inbox is one queue for the whole deployment and
+   `customs.borderconnect_drain` is enqueued with `organization_id` null (no tenant
+   until each message is routed by `companyKey`), so an org-scoped claim could never
+   pick it up. It does not call `drainBorderConnectInbox` directly — that would
+   bypass the single-flighting the cron relies on and let a click racing the cron
+   double-write `customs_event` / `pars_rns_events` rows for *other* tenants'
+   movements and burn the shared BorderConnect rate limit. Instead it mirrors
+   `api/jobs/borderconnect-drain` exactly: `enqueueJob` under a per-minute
+   idempotency key (service-role, because `background_jobs_insert` refuses this job
+   type from any session) and then `processDueJobs`, so `claim_jobs`'s lock decides
+   who runs it. `processInboxRow` additionally takes a `for update skip locked` row
+   lock on the `customs_inbox` row it is about to process, so even two workers in the
+   same batch window can never both claim one message. The procedure returns only
+   the drain job's own counts (`received`/`stored`) — a job belonging to another
+   organization is never reported back.
+
 The remaining call sites are `packages/api/src/services/audit.ts` (audit rows for
 actorless events), `packages/api/src/router/billing.ts` (Stripe webhook's
 subscription mirror, no session), `packages/api/src/services/usage.ts`

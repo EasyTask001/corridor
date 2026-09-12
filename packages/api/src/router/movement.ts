@@ -12,6 +12,7 @@ import {
   crewInput,
   crewRemoveInput,
   crewSetRoleInput,
+  crossingReadiness,
   customsResponseInput,
   hasBlockingIssues,
   isEditable,
@@ -25,6 +26,7 @@ import {
   trailerRemoveInput,
   trailerReorderInput,
   uuid,
+  type CustomsEventPayload,
   type MovementPatch,
   type MovementStatus,
 } from "@corridor/domain";
@@ -35,7 +37,7 @@ import {
   router,
   type OrgContext,
 } from "../trpc";
-import { simulateCustomsEvents } from "@corridor/integrations";
+import { ACI_RELEASING_RELEASE_CODES, simulateCustomsEvents } from "@corridor/integrations";
 import { cancelAtCustoms, transmitAmendment, transmitMovement } from "../services/customs";
 import { enqueueJob } from "../services/jobs";
 import {
@@ -47,6 +49,7 @@ import {
   addEvent,
   applyCustomsDecision,
   applyTransition,
+  latestRnsByShipment,
   loadFull,
   markShipmentsArrived,
   requireMovement,
@@ -193,6 +196,59 @@ export const movementRouter = router({
                 join public.trailers t on t.id = mt.trailer_id
                 where mt.movement_id = ${movements.id})`,
               shipmentCount: sql<number>`(select count(*)::int from public.shipments s where s.movement_id = ${movements.id})`,
+              /**
+               * List-row readiness summary (Task 14) — a cheap SQL heuristic,
+               * not `crossingReadiness()` run per row (that would be N+1 and
+               * duplicate logic the domain layer already owns). `held`/
+               * `rejected` are always `blocked`; `accepted`/`released` are
+               * `ready` when every attached shipment already clears the
+               * regime's own gate — ACE: has an entry number; ACI: has a
+               * `pars_rns_events` row **whose release code actually means
+               * "released"** (`ACI_RELEASING_RELEASE_CODES`, inlined below —
+               * the table logs every RNS message, including code `5`
+               * "Examination Required" and `24`/`34` "Awaiting CBSA
+               * Processing", so "a row exists" is not "customs released it";
+               * PARS shipments only — a non-PARS shipment never gets one,
+               * mirroring `rnsReleaseCheck`'s own `isPars` filter in
+               * readiness.ts) — and `pending` otherwise;
+               * any other status (draft/sent/arrived/cancelled) is `null`
+               * (no readiness opinion). A movement with zero shipments (or,
+               * for ACI, zero PARS shipments) has no shipment failing either
+               * `not exists` check, so it reads `ready` once
+               * accepted/released — the same outcome `crossingReadiness()`
+               * gives an empty trip, which only carries the `manifest` and
+               * `rejects` checks (see readiness.ts). The panel on the
+               * movement page still shows the full per-check breakdown; this
+               * column is only the list's compact badge.
+               */
+              readyToCross: sql<"ready" | "pending" | "blocked" | null>`(
+                case
+                  when ${movements.status} in ('held', 'rejected') then 'blocked'
+                  when ${movements.status} in ('accepted', 'released') then
+                    case
+                      when ${movements.regime} = 'ACE' then
+                        case when not exists (
+                          select 1 from public.shipments s
+                          where s.movement_id = ${movements.id} and s.entry_number is null
+                        ) then 'ready' else 'pending' end
+                      else
+                        case when not exists (
+                          select 1 from public.shipments s
+                          where s.movement_id = ${movements.id}
+                            and s.is_pars
+                            and not exists (
+                              select 1 from public.pars_rns_events e
+                              where e.shipment_id = s.id
+                                and e.release_code in (${sql.join(
+                                  ACI_RELEASING_RELEASE_CODES.map((c) => sql`${c}`),
+                                  sql`, `,
+                                )})
+                            )
+                        ) then 'ready' else 'pending' end
+                    end
+                  else null
+                end
+              )`,
               updatedAt: movements.updatedAt,
               createdAt: movements.createdAt,
             })
@@ -230,7 +286,45 @@ export const movementRouter = router({
 
   get: anyPermissionProcedure("movement.read", "movement.read_assigned")
     .input(z.object({ id: uuid }))
-    .query(({ ctx, input }) => ctx.rls((tx) => loadFull(tx, ctx.orgId, input.id))),
+    .query(({ ctx, input }) =>
+      ctx.rls(async (tx) => {
+        const full = await loadFull(tx, ctx.orgId, input.id);
+        const rnsByShipment = await latestRnsByShipment(
+          tx,
+          full.shipments.map((s) => s.id),
+        );
+        // Only `customs_event` rows carry a `CustomsEventCode` (0022); every
+        // other event type (status_change, amendment, note, ...) is outside
+        // crossingReadiness's vocabulary.
+        const customsEvents = full.events.flatMap((e) => {
+          if (e.eventType !== "customs_event" || !e.payload) return [];
+          const payload = e.payload as CustomsEventPayload;
+          return [
+            {
+              code: payload.code,
+              shipmentControlNumber: payload.shipmentControlNumber ?? null,
+              occurredAt: e.occurredAt.toISOString(),
+            },
+          ];
+        });
+        const readiness = crossingReadiness({
+          regime: full.regime,
+          status: full.status,
+          shipments: full.shipments.map((s) => ({
+            controlNumber: s.controlNumber,
+            status: s.status,
+            entryNumber: s.entryNumber,
+            isPars: s.isPars,
+            rnsReleasedAt: rnsByShipment.get(s.id)?.toISOString() ?? null,
+            // ACI shipments never carry an ACE shipmentType, so this is
+            // always false for them (see readiness.ts's ReadinessShipment).
+            isInBond: s.shipmentType === "in_bond",
+          })),
+          events: customsEvents,
+        });
+        return { ...full, readiness };
+      }),
+    ),
 
   validate: anyPermissionProcedure("movement.read", "movement.read_assigned")
     .input(z.object({ id: uuid }))

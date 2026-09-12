@@ -17,6 +17,19 @@ describe("mapDbError", () => {
     }
   });
 
+  it("maps a border_connect_company_key unique violation to CONFLICT naming the company key", () => {
+    try {
+      mapDbError(
+        pgError("23505", { constraint_name: "organizations_border_connect_company_key_key" }),
+      );
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBeInstanceOf(TRPCError);
+      expect((e as TRPCError).code).toBe("CONFLICT");
+      expect((e as TRPCError).message).toContain("BorderConnect company key");
+    }
+  });
+
   it("maps 23514 (check violation) to BAD_REQUEST", () => {
     try {
       mapDbError(pgError("23514"));

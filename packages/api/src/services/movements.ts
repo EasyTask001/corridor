@@ -6,7 +6,11 @@
  */
 import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, inArray, schema, type RlsTransaction } from "@corridor/db";
-import type { CustomsEventMessage, CustomsShipmentMessage } from "@corridor/integrations";
+import {
+  isAciReleaseCode,
+  type CustomsEventMessage,
+  type CustomsShipmentMessage,
+} from "@corridor/integrations";
 import { platesFor, trailersForMovement } from "./equipment";
 import { shipmentsForMovement } from "./shipments";
 import {
@@ -111,27 +115,50 @@ const SHIPMENT_STAMP: Partial<
 };
 
 /**
- * Fan a customs decision out to the shipments riding the movement (0022):
- * every gateway message becomes a `customs_event` timeline row (linked to its
- * shipment when it names one), entry numbers land on the shipment, and each
- * shipment's status follows the decision as far as its own state machine
- * allows. Shipments the gateway did not mention still cascade.
+ * Move one shipment's status forward through its own state machine (the
+ * single-shipment version of the per-step loop in `applyShipmentOutcomes`),
+ * stamping the same lifecycle timestamp column that loop stamps
+ * (`SHIPMENT_STAMP`). Used by callers with no movement-wide decision to
+ * cascade (e.g. a BorderConnect RNS release naming one PARS shipment
+ * directly) — returns the status actually applied, or `null` if the
+ * shipment's current status doesn't allow moving to `target` (the caller's
+ * write is skipped, matching how a cascade silently no-ops for a shipment
+ * already past the target state).
  */
-async function applyShipmentOutcomes(
+export async function stampShipmentStatus(
+  tx: Tx,
+  shipmentId: string,
+  current: ShipmentStatus,
+  target: ShipmentStatus,
+): Promise<ShipmentStatus | null> {
+  const next = cascadedShipmentStatus(current, target);
+  if (!next) return null;
+  const set: Partial<typeof shipments.$inferInsert> = { status: next };
+  const stamp = SHIPMENT_STAMP[next];
+  if (stamp) set[stamp] = new Date();
+  await tx.update(shipments).set(set).where(eq(shipments.id, shipmentId));
+  return next;
+}
+
+/**
+ * Record the provider-agnostic, decision-independent part of a customs
+ * message: every event becomes a `customs_event` timeline row (linked to its
+ * shipment when it names one, and fed to the PARS RNS feed when it carries
+ * CBSA's release fields (0027)), and any shipment the message names an entry
+ * number for gets that entry number written — with no bearing on, and no
+ * dependency on, a movement-level decision. This is the part of
+ * `applyShipmentOutcomes` a decision-free message (an inbound event/outcome
+ * with no accepted/rejected/released/held verdict) still needs.
+ */
+export async function recordCustomsEvents(
   tx: Tx,
   actor: Actor,
   m: typeof movements.$inferSelect,
-  decision: "accepted" | "rejected" | "released" | "held",
   events: CustomsEventMessage[],
   outcomes: CustomsShipmentMessage[],
-) {
+): Promise<void> {
   const attached = await tx
-    .select({
-      id: shipments.id,
-      controlNumber: shipments.controlNumber,
-      status: shipments.status,
-      entryNumber: shipments.entryNumber,
-    })
+    .select({ id: shipments.id, controlNumber: shipments.controlNumber })
     .from(shipments)
     .where(eq(shipments.movementId, m.id));
   const byControl = new Map(attached.map((s) => [s.controlNumber, s]));
@@ -185,7 +212,49 @@ async function applyShipmentOutcomes(
   }
 
   const mentioned = new Map(outcomes.map((o) => [o.controlNumber, o]));
+  for (const s of attached) {
+    const o = mentioned.get(s.controlNumber);
+    if (!o?.entryNumber) continue;
+    await tx
+      .update(shipments)
+      .set({
+        entryNumber: o.entryNumber,
+        entryPortId: (await portIdFor(o.entryPortCode)) ?? undefined,
+      })
+      .where(eq(shipments.id, s.id));
+  }
+}
+
+/**
+ * Fan a customs decision out to the shipments riding the movement (0022):
+ * every gateway message becomes a `customs_event` timeline row (linked to its
+ * shipment when it names one), entry numbers land on the shipment, and each
+ * shipment's status follows the decision as far as its own state machine
+ * allows. Shipments the gateway did not mention still cascade.
+ */
+async function applyShipmentOutcomes(
+  tx: Tx,
+  actor: Actor,
+  m: typeof movements.$inferSelect,
+  decision: "accepted" | "rejected" | "released" | "held",
+  events: CustomsEventMessage[],
+  outcomes: CustomsShipmentMessage[],
+) {
+  const attached = await tx
+    .select({
+      id: shipments.id,
+      controlNumber: shipments.controlNumber,
+      status: shipments.status,
+      entryNumber: shipments.entryNumber,
+    })
+    .from(shipments)
+    .where(eq(shipments.movementId, m.id));
+
   const hadAllEntries = attached.length > 0 && attached.every((s) => !!s.entryNumber);
+
+  await recordCustomsEvents(tx, actor, m, events, outcomes);
+
+  const mentioned = new Map(outcomes.map((o) => [o.controlNumber, o]));
   let entries = 0;
   for (const s of attached) {
     const o = mentioned.get(s.controlNumber);
@@ -204,10 +273,6 @@ async function applyShipmentOutcomes(
       set.status = next;
       const stamp = SHIPMENT_STAMP[next];
       if (stamp) set[stamp] = new Date();
-    }
-    if (o?.entryNumber) {
-      set.entryNumber = o.entryNumber;
-      set.entryPortId = (await portIdFor(o.entryPortCode)) ?? undefined;
     }
     if (o?.entryNumber || s.entryNumber) entries += 1;
     if (Object.keys(set).length > 0)
@@ -576,6 +641,59 @@ export function validationFor(full: FullMovement) {
     })),
     seals: full.seals.map((s) => ({ sealNumber: s.sealNumber })),
   });
+}
+
+/**
+ * The most recent CBSA RNS **release** per shipment (0027), keyed by shipment
+ * id — `movement.get` folds this into `crossingReadiness`'s `rnsReleasedAt`
+ * input, and `rnsReleaseCheck` (packages/domain/src/readiness.ts) reads a
+ * non-null value as "customs released this shipment".
+ *
+ * `pars_rns_events` is an audit log of *every* RNS message, releasing or not
+ * (`processInboxRow`, services/borderconnect.ts) — a code `5` "Examination
+ * Required" or `24`/`34` "Awaiting CBSA Processing" writes a row exactly like
+ * a code `4` does. So rows are filtered to the releasing codes
+ * (`isAciReleaseCode`) before the max is taken: a shipment CBSA has only
+ * flagged for examination must never read as ready to cross. The drain's own
+ * `shipments.status = "released"` stamp is monotonic (a later non-releasing
+ * message never un-releases a shipment), so this matches it by taking the
+ * latest *releasing* row rather than requiring the latest row overall to be
+ * one.
+ *
+ * Reduced in application code, not SQL: the fake transaction the router unit
+ * tests run against ignores `where`/`orderBy` (it is a shape fake, not a
+ * database — see `packages/api/src/test/mock-context.ts`), so a `distinct on`
+ * / `order by … limit 1` would silently return the wrong row there even
+ * though it's correct against real Postgres. Filtering and reducing here
+ * works identically against both.
+ */
+export async function latestRnsByShipment(
+  tx: Tx,
+  shipmentIds: string[],
+): Promise<Map<string, Date>> {
+  const latest = new Map<string, Date>();
+  if (shipmentIds.length === 0) return latest;
+  const wanted = new Set(shipmentIds);
+  const rows = await tx
+    .select({
+      shipmentId: parsRnsEvents.shipmentId,
+      releaseCode: parsRnsEvents.releaseCode,
+      releasedAt: parsRnsEvents.releasedAt,
+      receivedAt: parsRnsEvents.receivedAt,
+    })
+    .from(parsRnsEvents)
+    .where(inArray(parsRnsEvents.shipmentId, shipmentIds));
+  for (const row of rows) {
+    if (!row.shipmentId || !wanted.has(row.shipmentId)) continue;
+    if (!isAciReleaseCode(row.releaseCode)) continue;
+    // A release message always carries `releasedAt`; fall back to when we
+    // received it only for a hand-seeded/malformed row with neither.
+    const at = row.releasedAt ?? row.receivedAt;
+    if (!at) continue;
+    const current = latest.get(row.shipmentId);
+    if (!current || at > current) latest.set(row.shipmentId, at);
+  }
+  return latest;
 }
 
 export async function loadOrganization(tx: Tx, orgId: string) {

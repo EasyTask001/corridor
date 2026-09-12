@@ -12,6 +12,10 @@
     {
       "path": "/api/jobs/notices-sync",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/jobs/borderconnect-drain",
+      "schedule": "* * * * *"
     }
   ]
 }

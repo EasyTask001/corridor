@@ -95,6 +95,12 @@ export interface FakeDbOptions {
    * how the routers detect "already exists".
    */
   insertConflicts?: string[];
+  /**
+   * Tables (by `schema` key) whose UPDATE hits a unique constraint — the value
+   * is the `constraint_name` a real Postgres driver would report, so a test can
+   * exercise `.catch(mapDbError)` the way `party.ts`/`organization.ts` use it.
+   */
+  updateConflicts?: Record<string, string>;
 }
 
 export interface FakeDb {
@@ -112,6 +118,7 @@ export function createFakeDb(options: FakeDbOptions = {}): FakeDb {
   for (const [name, seed] of Object.entries(options.rows ?? {})) rows[name] = [...seed];
   const sqlValues = options.sqlValues ?? {};
   const insertConflicts = new Set(options.insertConflicts ?? []);
+  const updateConflicts = options.updateConflicts ?? {};
   const executed: unknown[] = [];
 
   const table = (name: string): Row[] => (rows[name] ??= []);
@@ -154,11 +161,16 @@ export function createFakeDb(options: FakeDbOptions = {}): FakeDb {
       "$dynamic",
     ];
     for (const method of passthrough) self[method] = () => self;
+    // `resolve` may throw synchronously (a simulated Postgres constraint
+    // violation from `updateConflicts`) rather than reject — wrapping the call
+    // in an `async` function turns that throw into a rejected promise, so
+    // `.then`/`.catch`/`.finally` behave the same way a real (always-async)
+    // query builder's would.
+    const settle = async (): Promise<Row[]> => resolve();
     self.then = (onFulfilled?: (rows: Row[]) => unknown, onRejected?: (e: unknown) => unknown) =>
-      Promise.resolve(resolve()).then(onFulfilled, onRejected);
-    self.catch = (onRejected?: (e: unknown) => unknown) =>
-      Promise.resolve(resolve()).catch(onRejected);
-    self.finally = (onFinally?: () => void) => Promise.resolve(resolve()).finally(onFinally);
+      settle().then(onFulfilled, onRejected);
+    self.catch = (onRejected?: (e: unknown) => unknown) => settle().catch(onRejected);
+    self.finally = (onFinally?: () => void) => settle().finally(onFinally);
     return self;
   }
 
@@ -213,6 +225,14 @@ export function createFakeDb(options: FakeDbOptions = {}): FakeDb {
     const name = storeKey(target);
     let patch: Row = {};
     const apply = () => {
+      const constraintName = updateConflicts[name];
+      if (constraintName) {
+        const err = new Error(
+          `duplicate key value violates unique constraint "${constraintName}"`,
+        ) as Error & { cause?: unknown };
+        err.cause = { code: "23505", constraint_name: constraintName };
+        throw err;
+      }
       const updated = table(name);
       for (const row of updated) Object.assign(row, patch);
       return updated;

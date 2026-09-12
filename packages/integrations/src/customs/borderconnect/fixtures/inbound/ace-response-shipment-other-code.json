@@ -1,0 +1,14 @@
+{
+  "data": "ACE_RESPONSE",
+  "companyKey": "c-9000-2bcd8ae5954e0c48",
+  "tripNumber": "ABCD260912001",
+  "cbpDateTime": "2026-09-12 17:30:00",
+  "shipmentStatusList": [
+    {
+      "shipmentControlNumber": "1234PARS0001",
+      "code": "01",
+      "description": "Preliminary manifest check passed",
+      "port": "0901"
+    }
+  ]
+}

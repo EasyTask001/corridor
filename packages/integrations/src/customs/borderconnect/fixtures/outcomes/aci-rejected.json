@@ -1,0 +1,7 @@
+{
+  "data": "ACI_RESPONSE",
+  "type": "REJECT",
+  "errorResponses": [
+    { "errorCode": "E100", "errorField": "shipment.consignee", "errorDescription": "Missing consignee name" }
+  ]
+}

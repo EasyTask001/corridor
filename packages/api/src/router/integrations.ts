@@ -1,13 +1,13 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, desc, eq, schema, sql } from "@corridor/db";
+import { and, desc, eq, schema, sql, withServiceRole } from "@corridor/db";
 import { uuid } from "@corridor/domain";
 import { getBorderWait, lookupHsCode, searchTariff } from "@corridor/integrations";
 import { permissionProcedure, router } from "../trpc";
 import { isSafeGatewayBaseUrl } from "@corridor/integrations";
 import { writeAudit } from "../services/audit";
 import { customsClientFor } from "../services/customs";
-import { processDueJobs } from "../services/jobs";
+import { enqueueJob, processDueJobs } from "../services/jobs";
 
 const { integrationConfigs, integrationEvents, backgroundJobs, movements } = schema;
 
@@ -66,8 +66,12 @@ export const integrationsRouter = router({
           provider,
           environment: z.enum(["sandbox", "production"]).default("sandbox"),
           status: z.enum(["active", "disabled"]).default("active"),
-          /** 0023 — mock gateway, or the certified EDI gateway's REST API. */
-          mode: z.enum(["mock", "gateway"]).default("mock"),
+          /**
+           * 0023 — mock gateway, or the certified EDI gateway's REST API.
+           * 0047 adds `border_connect` — BorderConnect's Service Provider
+           * eManifest API, which has no per-org base URL (see `baseUrl` below).
+           */
+          mode: z.enum(["mock", "gateway", "border_connect"]).default("mock"),
           baseUrl: z
             .string()
             .trim()
@@ -87,6 +91,11 @@ export const integrationsRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const credentials = cleanCredentials(input.credentials);
+        // BorderConnect has no per-org base URL — it's addressed by the
+        // deployment-wide BORDERCONNECT_API_URL_SUFFIX env var and the org's
+        // company key, not a tenant-supplied gateway URL. Force it server-side
+        // rather than trusting the client to have left it blank.
+        const baseUrl = input.mode === "border_connect" ? null : (input.baseUrl ?? null);
 
         // The config row must exist before store_integration_secret can hang a
         // credentials_ref on it, and the RPC runs on its own connection — so
@@ -111,7 +120,7 @@ export const integrationsRouter = router({
               status: input.status,
               settings: input.settings,
               mode: input.mode,
-              baseUrl: input.baseUrl ?? null,
+              baseUrl,
             })
             .onConflictDoUpdate({
               target: [integrationConfigs.organizationId, integrationConfigs.provider],
@@ -120,7 +129,7 @@ export const integrationsRouter = router({
                 status: input.status,
                 settings: input.settings,
                 mode: input.mode,
-                baseUrl: input.baseUrl ?? null,
+                baseUrl,
                 lastError: null,
               },
             })
@@ -195,27 +204,109 @@ export const integrationsRouter = router({
       }),
   }),
 
-  /** "Test connection" on the integrations page: GET /manifests/ping (or the fixture / mock). */
+  /**
+   * "Test connection" on the integrations page: GET /manifests/ping (or the
+   * fixture / mock) — except in `border_connect` mode, where there is no
+   * synchronous ping to make (BorderConnect answers through the shared
+   * inbox, not a request/response round trip): this drains it instead, the
+   * same job `customs.borderconnect_drain` runs every minute.
+   *
+   * The drain is NOT called directly here. BorderConnect's inbox is one queue
+   * shared by every tenant, and `processInboxRow` writes `customs_event` and
+   * `pars_rns_events` rows that no compare-and-swap dedupes — so a click
+   * racing the cron (or a second click) could double-log another tenant's
+   * message and burn the shared BorderConnect rate limit for everyone. This
+   * goes through exactly the mechanism the cron route uses
+   * (`apps/web/src/app/api/jobs/borderconnect-drain/route.ts`): enqueue
+   * `customs.borderconnect_drain` under a per-minute idempotency key, then let
+   * `claim_jobs`'s lock decide who actually runs it. A click in the same
+   * minute as the cron's own enqueue finds the job already claimed and reports
+   * that rather than draining a second time.
+   *
+   * Unlike `jobs.runNow` below, the `processDueJobs` call is deliberately NOT
+   * scoped to `ctx.orgId`: the drain job is queue-wide (`organization_id` is
+   * null — it has no tenant until each message is routed by `companyKey`), so
+   * an org-scoped claim could never pick it up. Only this job's own counts are
+   * reported back; another tenant's job result is never returned.
+   *
+   * Two-transaction shape, like `jobs.runNow` above: read the config in one
+   * `ctx.rls`, enqueue/run on `ctx.db` with no RLS transaction open
+   * (`withServiceRole` must never nest inside one, packages/db/src/rls.ts),
+   * then audit in a second `ctx.rls`.
+   */
   testCustoms: permissionProcedure("integrations.manage")
     .input(z.object({ provider: z.enum(["cbp_ace", "cbsa_aci"]) }))
-    .mutation(({ ctx, input }) =>
-      ctx.rls(async (tx) => {
-        const regime = input.provider === "cbp_ace" ? "ACE" : "ACI";
+    .mutation(async ({ ctx, input }) => {
+      const regime = input.provider === "cbp_ace" ? "ACE" : "ACI";
+      const started = Date.now();
+      const prepared = await ctx.rls(async (tx) => {
         const { client } = await customsClientFor(tx, ctx.orgId, regime);
-        const started = Date.now();
-        let result: { ok: boolean; mode: string; live: boolean; detail: unknown; error?: string };
+        if (client.mode === "border_connect") return { deferred: true as const };
         try {
-          result = await client.ping();
+          return { deferred: false as const, result: await client.ping() };
+        } catch (e) {
+          return {
+            deferred: false as const,
+            result: {
+              ok: false,
+              mode: client.mode,
+              live: false,
+              detail: null,
+              error: e instanceof Error ? e.message : String(e),
+            },
+          };
+        }
+      });
+
+      let result: { ok: boolean; mode: string; live: boolean; detail: unknown; error?: string };
+      if (prepared.deferred) {
+        // No RLS transaction is open here — the ctx.rls above already
+        // committed — so the enqueue and the job worker are free to open their
+        // own withServiceRole transactions.
+        const { borderConnectEnv } = await import("../services/borderconnect");
+        try {
+          // `background_jobs_insert` refuses this job type from any session
+          // (migration 0047), so the enqueue itself must be service-role.
+          const job = await withServiceRole(ctx.db, (tx) =>
+            enqueueJob(tx, {
+              orgId: null,
+              jobType: "customs.borderconnect_drain",
+              payload: {},
+              idempotencyKey: `bc-drain:${new Date().toISOString().slice(0, 16)}`,
+              maxAttempts: 2,
+            }),
+          );
+          const run = await processDueJobs(ctx.db, {
+            limit: 5,
+            worker: `manual-bc-${ctx.session.user.id.slice(0, 8)}`,
+          });
+          // Only this job's counts — never another tenant's job result.
+          const drain = run.results.find((r) => r.id === job.id);
+          const counts = drain?.result as { received?: number; stored?: number } | undefined;
+          result = {
+            ok: drain ? drain.ok : true,
+            mode: "border_connect",
+            live: borderConnectEnv().live,
+            detail: drain
+              ? { jobId: job.id, received: counts?.received ?? 0, stored: counts?.stored ?? 0 }
+              : { jobId: job.id, alreadyRunning: true },
+            ...(drain?.error ? { error: drain.error } : {}),
+          };
         } catch (e) {
           result = {
             ok: false,
-            mode: client.mode,
-            live: false,
+            mode: "border_connect",
+            live: borderConnectEnv().live,
             detail: null,
             error: e instanceof Error ? e.message : String(e),
           };
         }
-        await writeAudit(
+      } else {
+        result = prepared.result;
+      }
+
+      await ctx.rls((tx) =>
+        writeAudit(
           tx,
           ctx.orgId,
           "integration.test_connection",
@@ -223,10 +314,10 @@ export const integrationsRouter = router({
           input.provider,
           null,
           { ok: result.ok, mode: result.mode, live: result.live, error: result.error ?? null },
-        );
-        return { ...result, durationMs: Date.now() - started };
-      }),
-    ),
+        ),
+      );
+      return { ...result, durationMs: Date.now() - started };
+    }),
 
   events: router({
     list: permissionProcedure("integrations.manage")

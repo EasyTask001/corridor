@@ -71,6 +71,16 @@ the section headings are the build phases, not versions.
   mode, a FOUC-safe `ThemeToggle`, and every `@corridor/ui` primitive reskinned onto the new
   tokens (button, badge, alert, table, card, tabs, data-table, input, select, dialog, checkbox,
   radio, switch, tooltip); the app shell nav was consolidated into grouped, icon-led sections.
+- BorderConnect eManifest API (migration 0047): a third customs filing mode, `border_connect`,
+  alongside `mock`/`gateway` — one Service Provider account (EasyTask) files ACE/ACI e-manifests
+  for every tenant, told apart by `organizations.border_connect_company_key`. Outbound `ACE_TRIP`/
+  `ACI_TRIP` mapping, a durable shared `customs_inbox` drained every minute
+  (`api/jobs/borderconnect-drain`) into movement status/RNS/system-alert updates, a standalone
+  WebSocket listener (`apps/borderconnect-listener`, hosting deferred), a ready-to-cross readiness
+  panel, and `packages/integrations/scripts/borderconnect-smoke.ts` — a live smoke test against
+  the real BorderConnect account (`autoSend: false`, never reaches CBP) designed to settle what
+  `GET /api/receive` actually returns, not yet run against a real account (it needs a test
+  `companyKey` nobody has supplied — see the BorderConnect README's "Open risks").
 
 ### Changed
 

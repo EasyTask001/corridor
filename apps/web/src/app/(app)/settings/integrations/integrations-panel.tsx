@@ -50,6 +50,34 @@ const PROVIDERS = [
   },
 ] as const;
 
+/** `testCustoms`'s result, rendered next to the button that triggered it. */
+function formatTestResult(r: {
+  ok: boolean;
+  mode: string;
+  live: boolean;
+  durationMs: number;
+  detail?: unknown;
+  error?: string;
+}): string {
+  if (!r.ok) return `Failed: ${r.error ?? "no response"}`;
+  if (r.mode === "border_connect") {
+    // No synchronous ping in this mode — the button queues the shared inbox
+    // drain instead, so "connected" would be misleading; report what actually
+    // moved. `alreadyRunning` is the healthy race with the every-minute cron:
+    // the job was enqueued but another worker holds its claim.
+    const detail = r.detail as {
+      received?: number;
+      stored?: number;
+      alreadyRunning?: boolean;
+    } | null;
+    if (detail?.alreadyRunning) {
+      return `Inbox drain already running (${r.live ? "live" : "fixture"} · queued, another worker holds it)`;
+    }
+    return `Inbox drained (${r.live ? "live" : "fixture"} · received ${detail?.received ?? 0} · stored ${detail?.stored ?? 0})`;
+  }
+  return `Connected (${r.mode}${r.live ? ", live" : ", fixture replay"}, ${r.durationMs} ms)`;
+}
+
 export function IntegrationsPanel({
   initialConfigs,
   initialEvents,
@@ -82,6 +110,9 @@ export function IntegrationsPanel({
     initialData: initialStats,
     refetchInterval: 5000,
   });
+  // Live, not a prop: the BorderConnect company-key status below must reflect
+  // whatever was just saved on Settings → Organization, in this tab or another.
+  const orgQ = useQuery(trpc.organization.get.queryOptions());
   const invalidate = () => qc.invalidateQueries({ queryKey: trpc.integrations.pathKey() });
   const upsert = useMutation(
     trpc.integrations.configs.upsert.mutationOptions({ onSuccess: invalidate }),
@@ -94,20 +125,22 @@ export function IntegrationsPanel({
   );
   const [saved, setSaved] = useState<string | null>(null);
   const [tested, setTested] = useState<Record<string, string>>({});
+  // Uncontrolled everywhere else on this form, but the mode select needs to be
+  // controlled: hiding base URL / credentials / mock-delay inputs and the
+  // BorderConnect status row depends on the *currently chosen* option, not
+  // just the saved config.
+  const [modeOverride, setModeOverride] = useState<Record<string, string>>({});
   const testCustoms = useMutation(
     trpc.integrations.testCustoms.mutationOptions({
       onSuccess: (r, vars) =>
-        setTested((t) => ({
-          ...t,
-          [vars.provider]: r.ok
-            ? `Connected (${r.mode}${r.live ? ", live" : ", fixture replay"}, ${r.durationMs} ms)`
-            : `Failed: ${r.error ?? "no response"}`,
-        })),
+        setTested((t) => ({ ...t, [vars.provider]: formatTestResult(r) })),
       onError: (e, vars) => setTested((t) => ({ ...t, [vars.provider]: `Failed: ${e.message}` })),
     }),
   );
 
   const cfgFor = (p: string) => configsQ.data.find((c) => c.provider === p);
+  const hasCompanyKey = Boolean(orgQ.data?.borderConnectCompanyKey);
+  const filingAs = `${orgQ.data?.scacCode ?? "—"} (ACE) / ${orgQ.data?.canadianCarrierCode ?? "—"} (ACI)`;
 
   return (
     <div className="space-y-6">
@@ -118,6 +151,8 @@ export function IntegrationsPanel({
             mockDelayMs?: number;
             mockFailureRate?: number;
           };
+          const selectedMode = modeOverride[p.key] ?? cfg?.mode ?? "mock";
+          const isBorderConnect = selectedMode === "border_connect";
           return (
             <form
               key={p.key}
@@ -135,7 +170,9 @@ export function IntegrationsPanel({
                     provider: p.key,
                     environment: (fd.get("environment") as "sandbox" | "production") ?? "sandbox",
                     status: fd.get("enabled") ? "active" : "disabled",
-                    mode: p.mock ? ((fd.get("mode") as "mock" | "gateway") ?? "mock") : "mock",
+                    mode: p.mock
+                      ? ((fd.get("mode") as "mock" | "gateway" | "border_connect") ?? "mock")
+                      : "mock",
                     baseUrl: p.mock ? String(fd.get("baseUrl") ?? "").trim() || null : null,
                     settings: p.mock
                       ? {
@@ -224,57 +261,89 @@ export function IntegrationsPanel({
                         <select
                           id={`${p.key}-mode`}
                           name="mode"
-                          defaultValue={cfg?.mode ?? "mock"}
+                          value={selectedMode}
+                          onChange={(e) =>
+                            setModeOverride((m) => ({ ...m, [p.key]: e.target.value }))
+                          }
                           className="input"
                         >
                           <option value="mock">Mock gateway (in-process)</option>
                           <option value="gateway">EDI gateway (REST API)</option>
+                          <option value="border_connect">
+                            BorderConnect (EasyTask service provider)
+                          </option>
                         </select>
                       </div>
-                      <div>
-                        <label className="label" htmlFor={`${p.key}-base-url`}>
-                          Gateway base URL
-                        </label>
-                        <input
-                          id={`${p.key}-base-url`}
-                          name="baseUrl"
-                          type="url"
-                          placeholder="https://gateway.example.com/api (blank = fixtures)"
-                          defaultValue={cfg?.baseUrl ?? ""}
-                          className="input"
-                        />
-                      </div>
-                      <div>
-                        <label className="label" htmlFor={`${p.key}-delay`}>
-                          Decision delay (ms)
-                        </label>
-                        <input
-                          id={`${p.key}-delay`}
-                          name="mockDelayMs"
-                          type="number"
-                          min={0}
-                          step={500}
-                          defaultValue={settings.mockDelayMs ?? 4000}
-                          className="input"
-                        />
-                      </div>
-                      <div>
-                        <label className="label" htmlFor={`${p.key}-fail`}>
-                          Failure injection (%)
-                        </label>
-                        <input
-                          id={`${p.key}-fail`}
-                          name="mockFailureRate"
-                          type="number"
-                          min={0}
-                          max={100}
-                          defaultValue={Math.round((settings.mockFailureRate ?? 0) * 100)}
-                          className="input"
-                        />
-                      </div>
+                      {isBorderConnect ? (
+                        <div
+                          className="col-span-2 space-y-1.5 rounded border border-border-default bg-surface-sunken p-3 text-sm"
+                          aria-live="polite"
+                        >
+                          <p className={hasCompanyKey ? undefined : "font-medium"}>
+                            Company key:{" "}
+                            {orgQ.isLoading ? (
+                              <span className="text-fg-secondary">checking…</span>
+                            ) : hasCompanyKey ? (
+                              <span className="text-status-ok">set ✓</span>
+                            ) : (
+                              <span role="alert" className="text-status-danger">
+                                missing — set it in{" "}
+                                <Link href="/settings/organization" className="underline">
+                                  Settings → Organization
+                                </Link>
+                              </span>
+                            )}
+                          </p>
+                          <p className="text-fg-secondary">Filing as: {filingAs}</p>
+                        </div>
+                      ) : (
+                        <>
+                          <div>
+                            <label className="label" htmlFor={`${p.key}-base-url`}>
+                              Gateway base URL
+                            </label>
+                            <input
+                              id={`${p.key}-base-url`}
+                              name="baseUrl"
+                              type="url"
+                              placeholder="https://gateway.example.com/api (blank = fixtures)"
+                              defaultValue={cfg?.baseUrl ?? ""}
+                              className="input"
+                            />
+                          </div>
+                          <div>
+                            <label className="label" htmlFor={`${p.key}-delay`}>
+                              Decision delay (ms)
+                            </label>
+                            <input
+                              id={`${p.key}-delay`}
+                              name="mockDelayMs"
+                              type="number"
+                              min={0}
+                              step={500}
+                              defaultValue={settings.mockDelayMs ?? 4000}
+                              className="input"
+                            />
+                          </div>
+                          <div>
+                            <label className="label" htmlFor={`${p.key}-fail`}>
+                              Failure injection (%)
+                            </label>
+                            <input
+                              id={`${p.key}-fail`}
+                              name="mockFailureRate"
+                              type="number"
+                              min={0}
+                              max={100}
+                              defaultValue={Math.round((settings.mockFailureRate ?? 0) * 100)}
+                              className="input"
+                            />
+                          </div>
+                        </>
+                      )}
                     </>
                   )}
-                  {p.credentials && (
+                  {p.credentials && !isBorderConnect && (
                     <fieldset className="col-span-2 space-y-2 rounded border border-border-default p-3">
                       <legend className="px-1 text-xs font-medium uppercase tracking-wide text-fg-secondary">
                         Gateway credentials
@@ -355,7 +424,7 @@ export function IntegrationsPanel({
                         disabled={testCustoms.isPending}
                         onClick={() => testCustoms.mutate({ provider: p.key })}
                       >
-                        Test connection
+                        {isBorderConnect ? "Check inbox" : "Test connection"}
                       </button>
                     )}
                     {tested[p.key] && (

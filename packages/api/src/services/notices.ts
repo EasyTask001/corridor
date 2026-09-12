@@ -26,13 +26,87 @@ export function noticesClientFor(provider: (typeof PROVIDERS)[number]) {
   });
 }
 
+/**
+ * Insert whatever notices the caller already has in hand (already fetched
+ * from a client, or — 0047/Task 11 — synthesized from a BorderConnect
+ * SYSTEM_ALERT) and fan the newly-inserted ones out to every organization
+ * with an enabled config for that provider. Extracted from `syncCarrierNotices`
+ * so the BorderConnect inbox drain can reuse the same insert + fan-out logic
+ * for an alert instead of duplicating it; `syncCarrierNotices` itself is
+ * unchanged in behavior, just now calling this for the part that used to be
+ * inline.
+ */
+export async function recordCarrierNotices(
+  tx: RlsTransaction,
+  notices: CarrierNotice[],
+): Promise<{ inserted: number; notified: number }> {
+  // Dynamic import: notifications.ts -> customs.ts -> movements.ts would otherwise cycle.
+  const { notifyOrganization } = await import("./notifications");
+
+  const fresh: CarrierNotice[] = [];
+  for (const n of notices) {
+    const inserted = await tx
+      .insert(carrierNotices)
+      .values({
+        provider: n.provider,
+        externalId: n.externalId,
+        severity: n.severity,
+        title: n.title,
+        body: n.body,
+        startsAt: n.startsAt ? new Date(n.startsAt) : null,
+        endsAt: n.endsAt ? new Date(n.endsAt) : null,
+        publishedAt: new Date(n.publishedAt),
+      })
+      .onConflictDoNothing()
+      .returning({ id: carrierNotices.id });
+    if (inserted.length > 0) fresh.push(n);
+  }
+
+  let notified = 0;
+  if (fresh.length > 0) {
+    // Grouped by provider: the fan-out audience (`integrationConfigs`) differs
+    // per provider, and `syncCarrierNotices` only ever calls this with one
+    // provider's notices at a time — but a caller like the BorderConnect
+    // alert branch passes both providers in a single call, so this must not
+    // assume a single provider the way the pre-extraction loop could.
+    const byProvider = new Map<string, CarrierNotice[]>();
+    for (const n of fresh) {
+      const list = byProvider.get(n.provider) ?? [];
+      list.push(n);
+      byProvider.set(n.provider, list);
+    }
+    for (const [provider, list] of byProvider) {
+      const orgs = await tx
+        .selectDistinct({ orgId: integrationConfigs.organizationId })
+        .from(integrationConfigs)
+        .where(
+          and(
+            eq(integrationConfigs.provider, provider as (typeof PROVIDERS)[number]),
+            ne(integrationConfigs.status, "disabled"),
+          ),
+        );
+      for (const n of list) {
+        for (const { orgId } of orgs) {
+          const r = await notifyOrganization(tx, {
+            orgId,
+            eventType: "customs.notice",
+            title: `${LABEL[provider as (typeof PROVIDERS)[number]]} notice: ${n.title}`,
+            body: n.body ?? undefined,
+            linkPath: "/settings/integrations",
+          });
+          notified += r.notified;
+        }
+      }
+    }
+  }
+  return { inserted: fresh.length, notified };
+}
+
 export async function syncCarrierNotices(
   tx: RlsTransaction,
   clientFor: typeof noticesClientFor = noticesClientFor,
 ) {
   const summary: Record<string, { fetched: number; inserted: number; notified: number }> = {};
-  // Dynamic import: notifications.ts -> customs.ts -> movements.ts would otherwise cycle.
-  const { notifyOrganization } = await import("./notifications");
 
   for (const provider of PROVIDERS) {
     const [latest] = await tx
@@ -44,47 +118,8 @@ export async function syncCarrierNotices(
     const fetched: CarrierNotice[] = await clientFor(provider).fetchNotices(
       latest?.publishedAt ?? null,
     );
-    const fresh: CarrierNotice[] = [];
-    for (const n of fetched) {
-      const inserted = await tx
-        .insert(carrierNotices)
-        .values({
-          provider: n.provider,
-          externalId: n.externalId,
-          severity: n.severity,
-          title: n.title,
-          body: n.body,
-          startsAt: n.startsAt ? new Date(n.startsAt) : null,
-          endsAt: n.endsAt ? new Date(n.endsAt) : null,
-          publishedAt: new Date(n.publishedAt),
-        })
-        .onConflictDoNothing()
-        .returning({ id: carrierNotices.id });
-      if (inserted.length > 0) fresh.push(n);
-    }
-
-    let notified = 0;
-    if (fresh.length > 0) {
-      const orgs = await tx
-        .selectDistinct({ orgId: integrationConfigs.organizationId })
-        .from(integrationConfigs)
-        .where(
-          and(eq(integrationConfigs.provider, provider), ne(integrationConfigs.status, "disabled")),
-        );
-      for (const n of fresh) {
-        for (const { orgId } of orgs) {
-          const r = await notifyOrganization(tx, {
-            orgId,
-            eventType: "customs.notice",
-            title: `${LABEL[provider]} notice: ${n.title}`,
-            body: n.body ?? undefined,
-            linkPath: "/settings/integrations",
-          });
-          notified += r.notified;
-        }
-      }
-    }
-    summary[provider] = { fetched: fetched.length, inserted: fresh.length, notified };
+    const { inserted, notified } = await recordCarrierNotices(tx, fetched);
+    summary[provider] = { fetched: fetched.length, inserted, notified };
   }
   return summary;
 }
