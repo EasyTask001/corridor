@@ -5,7 +5,7 @@
  * (`organization.sso.*` has its own suite in ../sso.test.ts.)
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { PermissionKey } from "@corridor/domain";
+import type { PermissionKey, SubscriptionPlan } from "@corridor/domain";
 import type * as AuditModule from "../services/audit";
 import { TEST_ORG_ID, TEST_USER_ID, createMockCaller, type Row } from "../test/mock-context";
 
@@ -46,15 +46,22 @@ function caller(
     roles?: Row[];
     grants?: PermissionKey[];
     conflict?: boolean;
+    plan?: SubscriptionPlan;
+    seatCount?: number;
+    subscriptionSeats?: number;
   } = {},
 ) {
   return createMockCaller(createCaller, {
     permissions: over.permissions ?? OWNER,
+    plan: over.plan,
     rows: {
       roles: over.roles ?? [dispatcherRole()],
       rolePermissions: rolePermissionRows(over.grants ?? ["movement.read", "movement.write"]),
       organizationMembers: [],
+      subscriptions:
+        over.subscriptionSeats === undefined ? [] : [{ seats: over.subscriptionSeats }],
     },
+    sqlValues: over.seatCount === undefined ? {} : { count: over.seatCount },
     insertConflicts: over.conflict ? ["organizationMembers"] : [],
   });
 }
@@ -146,5 +153,48 @@ describe("organization.members.invite", () => {
       message: "Missing permission: organization.members.manage",
     });
     expect(db.table("organizationMembers")).toHaveLength(0);
+  });
+
+  describe("seat limit (ISSUE-007)", () => {
+    it("refuses an invite once the plan's seat cap is already met", async () => {
+      const { caller: api, db } = caller({ plan: "starter", seatCount: 3 }); // starter = 3 seats
+
+      await expect(api.members.invite(INVITE)).rejects.toMatchObject({
+        code: "PRECONDITION_FAILED",
+        message: "This plan is limited to 3 seat(s). Remove a member or upgrade to invite another.",
+      });
+      expect(db.table("organizationMembers")).toHaveLength(0);
+      expect(writeAudit).not.toHaveBeenCalled();
+    });
+
+    it("allows an invite while under the plan's seat cap", async () => {
+      const { caller: api, db } = caller({ plan: "starter", seatCount: 2 });
+
+      await api.members.invite(INVITE);
+
+      expect(db.table("organizationMembers")).toHaveLength(1);
+    });
+
+    it("a live subscription's purchased seat count overrides the plan default", async () => {
+      // professional's default is 10, but this org bought 15.
+      const under = caller({ plan: "professional", subscriptionSeats: 15, seatCount: 12 });
+      await under.caller.members.invite(INVITE);
+      expect(under.db.table("organizationMembers")).toHaveLength(1);
+
+      const atCap = caller({ plan: "professional", subscriptionSeats: 15, seatCount: 15 });
+      await expect(atCap.caller.members.invite(INVITE)).rejects.toMatchObject({
+        code: "PRECONDITION_FAILED",
+        message: "This plan is limited to 15 seat(s). Remove a member or upgrade to invite another.",
+      });
+    });
+
+    it("a trial organization is capped like Starter", async () => {
+      const { caller: api } = caller({ plan: "trial", seatCount: 3 });
+
+      await expect(api.members.invite(INVITE)).rejects.toMatchObject({
+        code: "PRECONDITION_FAILED",
+        message: "This plan is limited to 3 seat(s). Remove a member or upgrade to invite another.",
+      });
+    });
   });
 });

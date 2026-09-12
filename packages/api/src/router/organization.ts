@@ -23,6 +23,7 @@ import {
   createSsoProvider,
   deleteSsoProvider,
   isMockProviderId,
+  seatsForPlan,
   ssoMode,
   SsoProviderError,
   updateSsoProvider,
@@ -49,6 +50,7 @@ const {
   roles,
   rolePermissions,
   permissions,
+  subscriptions,
   userProfiles,
 } = schema;
 
@@ -139,6 +141,39 @@ async function assignableRole(tx: RlsTransaction, ctx: OrgContext, roleId: strin
   if (!role) throw new TRPCError({ code: "BAD_REQUEST", message: "Unknown role" });
   assertCanGrant(ctx, await permissionKeysForRole(tx, role.id));
   return role;
+}
+
+/**
+ * Refuse an invite once the organization is at its seat cap (ISSUE-007).
+ * `subscriptions.seats` — the actual Stripe subscription quantity — wins when
+ * a subscription exists; otherwise the plan's advertised default applies
+ * (`seatsForPlan`, same trial-falls-back-to-Starter rule as `planUsageFor`).
+ * A seat is held by any member not yet removed: `invited` and `active` both
+ * count, `suspended` does not.
+ */
+async function assertSeatAvailable(tx: RlsTransaction, ctx: OrgContext): Promise<void> {
+  const [subscription] = await tx
+    .select({ seats: subscriptions.seats })
+    .from(subscriptions)
+    .where(eq(subscriptions.organizationId, ctx.orgId))
+    .limit(1);
+  const seatCap = subscription?.seats ?? seatsForPlan(ctx.session.plan);
+
+  const [row] = await tx
+    .select({ count: sql<number>`count(*)::int` })
+    .from(organizationMembers)
+    .where(
+      and(
+        eq(organizationMembers.organizationId, ctx.orgId),
+        inArray(organizationMembers.status, ["invited", "active"]),
+      ),
+    );
+  if (row!.count >= seatCap) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `This plan is limited to ${seatCap} seat(s). Remove a member or upgrade to invite another.`,
+    });
+  }
 }
 
 function mapRoleError(error: unknown): never {
@@ -814,6 +849,7 @@ export const organizationRouter = router({
       .mutation(({ ctx, input }) =>
         ctx.rls(async (tx) => {
           await assignableRole(tx, ctx, input.roleId);
+          await assertSeatAvailable(tx, ctx);
 
           const token = randomBytes(24).toString("base64url");
           const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);

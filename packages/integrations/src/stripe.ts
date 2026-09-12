@@ -95,6 +95,17 @@ export function planUsageFor(plan: SubscriptionPlan): PlanUsage {
   return (BILLING_PLANS.find((p) => p.plan === plan) ?? BILLING_PLANS[0]!).usage;
 }
 
+/**
+ * The seat allowance a plan advertises. Like `planUsageFor`, `trial` has no
+ * plan row of its own, so it is metered against Starter, the plan a trial
+ * converts into. An organization's actual `subscriptions.seats` (the real
+ * Stripe subscription quantity, which can exceed the plan default) takes
+ * precedence over this wherever a live subscription exists.
+ */
+export function seatsForPlan(plan: SubscriptionPlan): number {
+  return (BILLING_PLANS.find((p) => p.plan === plan) ?? BILLING_PLANS[0]!).seats;
+}
+
 const METER_ENV_PREFIX = "STRIPE_METER_";
 
 export interface StripeEnv {
