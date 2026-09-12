@@ -66,8 +66,12 @@ export const integrationsRouter = router({
           provider,
           environment: z.enum(["sandbox", "production"]).default("sandbox"),
           status: z.enum(["active", "disabled"]).default("active"),
-          /** 0023 — mock gateway, or the certified EDI gateway's REST API. */
-          mode: z.enum(["mock", "gateway"]).default("mock"),
+          /**
+           * 0023 — mock gateway, or the certified EDI gateway's REST API.
+           * 0047 adds `border_connect` — BorderConnect's Service Provider
+           * eManifest API, which has no per-org base URL (see `baseUrl` below).
+           */
+          mode: z.enum(["mock", "gateway", "border_connect"]).default("mock"),
           baseUrl: z
             .string()
             .trim()
@@ -87,6 +91,11 @@ export const integrationsRouter = router({
       )
       .mutation(async ({ ctx, input }) => {
         const credentials = cleanCredentials(input.credentials);
+        // BorderConnect has no per-org base URL — it's addressed by the
+        // deployment-wide BORDERCONNECT_API_URL_SUFFIX env var and the org's
+        // company key, not a tenant-supplied gateway URL. Force it server-side
+        // rather than trusting the client to have left it blank.
+        const baseUrl = input.mode === "border_connect" ? null : (input.baseUrl ?? null);
 
         // The config row must exist before store_integration_secret can hang a
         // credentials_ref on it, and the RPC runs on its own connection — so
@@ -111,7 +120,7 @@ export const integrationsRouter = router({
               status: input.status,
               settings: input.settings,
               mode: input.mode,
-              baseUrl: input.baseUrl ?? null,
+              baseUrl,
             })
             .onConflictDoUpdate({
               target: [integrationConfigs.organizationId, integrationConfigs.provider],
@@ -120,7 +129,7 @@ export const integrationsRouter = router({
                 status: input.status,
                 settings: input.settings,
                 mode: input.mode,
-                baseUrl: input.baseUrl ?? null,
+                baseUrl,
                 lastError: null,
               },
             })

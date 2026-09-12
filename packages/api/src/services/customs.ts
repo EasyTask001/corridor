@@ -44,7 +44,7 @@ import {
   type FullMovement,
 } from "./movements";
 
-const { integrationConfigs, integrationEvents, customsSubmissions } = schema;
+const { integrationConfigs, integrationEvents, customsSubmissions, organizations } = schema;
 
 type MovementRow = typeof schema.movements.$inferSelect;
 
@@ -144,19 +144,33 @@ export async function customsClientFor(tx: RlsTransaction, orgId: string, regime
   const settings = (cfg?.settings ?? {}) as CustomsClientSettings;
   const environment = cfg?.environment ?? "sandbox";
   const mode = cfg?.mode ?? "mock";
-  // 0047 widened the column to allow 'border_connect', but the adapter that
-  // speaks BorderConnect's contract does not exist yet (a later task) — until
-  // it lands, `createCustomsClient` only knows `mock` and `gateway`.
-  if (mode === "border_connect") {
+  // BorderConnect's Service Provider company key is per-organization
+  // (Settings → Organization), one-to-one with the org like scac_code /
+  // canadian_carrier_code (0047) — read straight off `organizations`, never
+  // through the Vault the `gateway` mode uses below.
+  const [org] =
+    mode === "border_connect"
+      ? await tx
+          .select({ companyKey: organizations.borderConnectCompanyKey })
+          .from(organizations)
+          .where(eq(organizations.id, orgId))
+          .limit(1)
+      : [];
+  if (mode === "border_connect" && environment === "production" && !org?.companyKey) {
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
-      message: `${provider === "cbp_ace" ? "CBP ACE" : "CBSA ACI"} BorderConnect integration is not yet available`,
+      message:
+        "BorderConnect company key is not set for this organization (Settings → Organization)",
     });
   }
   // The mock gateway in sandbox never needs (and never decrypts) the org's
   // real credentials; a gateway needs its API key whatever the environment.
+  // BorderConnect's key is EasyTask's own, from the deployment-wide env vars
+  // below — never a per-org Vault secret — so the read is skipped entirely.
   const credentials =
-    (mode === "gateway" || environment === "production") && cfg?.credentialsRef
+    mode !== "border_connect" &&
+    (mode === "gateway" || environment === "production") &&
+    cfg?.credentialsRef
       ? await credentialsFor(orgId, provider)
       : undefined;
   if (
@@ -178,9 +192,18 @@ export async function customsClientFor(tx: RlsTransaction, orgId: string, regime
       credentials,
       baseUrl: cfg?.baseUrl ?? process.env.CUSTOMS_GATEWAY_BASE_URL ?? null,
       // A tenant URL must never receive the deployment-wide fallback secret.
-      apiKey: cfg ? (credentials?.apiKey ?? null) : (process.env.CUSTOMS_GATEWAY_API_KEY ?? null),
+      apiKey:
+        mode === "border_connect"
+          ? (process.env.BORDERCONNECT_API_KEY ?? null)
+          : cfg
+            ? (credentials?.apiKey ?? null)
+            : (process.env.CUSTOMS_GATEWAY_API_KEY ?? null),
       webhookSecret: process.env.CUSTOMS_GATEWAY_WEBHOOK_SECRET ?? null,
       tenantKey: orgId,
+      // BorderConnect-only: the per-company API URL suffix (deployment-wide)
+      // and the org's Service Provider company key (per-org, read above).
+      apiUrlSuffix: process.env.BORDERCONNECT_API_URL_SUFFIX ?? null,
+      companyKey: org?.companyKey ?? null,
     }),
     config: cfg ?? null,
   };
@@ -231,6 +254,11 @@ async function scheduleDecision(
   payload: { movementId: string; referenceNumber: string; correlationId: string | null },
   etaMs: number,
 ) {
+  // BorderConnect has no synchronous decision and no per-movement poll: every
+  // real answer arrives later through the shared inbox drain job
+  // (customs.borderconnect_drain, a later task), not a timer keyed to this
+  // one movement.
+  if (client.mode === "border_connect") return;
   if (client.mode === "gateway") {
     await enqueueJob(tx, {
       orgId,

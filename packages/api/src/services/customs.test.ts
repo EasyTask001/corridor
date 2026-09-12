@@ -1,6 +1,24 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type * as IntegrationsModule from "@corridor/integrations";
 import { clearCustomsFixtureState } from "@corridor/integrations";
 import { parseCustomsCredentials } from "./customs";
+
+// A transparent spy over the real implementation: every existing mock/gateway
+// test below still exercises the real client, but a border_connect test can
+// assert on exactly what customsClientFor forwarded (env suffix/key, the
+// org's company key) without reaching into the integrations package's
+// private fixture-transport state.
+vi.mock("@corridor/integrations", async (importOriginal) => {
+  const actual = await importOriginal<typeof IntegrationsModule>();
+  return { ...actual, createCustomsClient: vi.fn(actual.createCustomsClient) };
+});
+
+// transmitMovement refreshes risk findings before filing; that has its own
+// coverage (risk.test.ts) and no bearing on border_connect wiring, so it's
+// stubbed here exactly as movement.test.ts stubs it for the router path.
+vi.mock("./risk", () => ({
+  syncMovementRiskAlerts: vi.fn().mockResolvedValue({ created: 0, resolved: 0 }),
+}));
 
 beforeEach(() => clearCustomsFixtureState());
 
@@ -45,8 +63,8 @@ describe("parseCustomsCredentials", () => {
 // ---------------------------------------------------------------------------
 
 import type { CustomsStatusMessage } from "@corridor/integrations";
-import { createFakeDb, TEST_ORG_ID, type Row } from "../test/mock-context";
-import { applyStatusMessage } from "./customs";
+import { createFakeDb, TEST_ORG_ID, TEST_USER_ID, type Row } from "../test/mock-context";
+import { applyStatusMessage, customsClientFor, transmitMovement } from "./customs";
 
 const MOVEMENT_ID = "44444444-4444-4444-8444-444444444444";
 const SHIPMENT_ID = "12121212-1212-4212-8212-121212121212";
@@ -242,5 +260,358 @@ describe("pollCustomsStatus (gateway mode, fixture replay)", () => {
     });
     expect(r.again).toBe(false);
     expect(r.reason).toBe("poll window elapsed");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// customsClientFor (border_connect mode, 0047 / Task 8)
+// ---------------------------------------------------------------------------
+
+describe("customsClientFor (border_connect mode)", () => {
+  const bcConfigRow = (over: Row = {}): Row => ({
+    organizationId: TEST_ORG_ID,
+    provider: "cbp_ace",
+    environment: "sandbox",
+    status: "active",
+    mode: "border_connect",
+    baseUrl: null,
+    credentialsRef: null,
+    settings: {},
+    ...over,
+  });
+
+  afterEach(() => {
+    delete process.env.BORDERCONNECT_API_URL_SUFFIX;
+    delete process.env.BORDERCONNECT_API_KEY;
+  });
+
+  it("returns a border_connect client carrying the org's company key and the env suffix/key", async () => {
+    process.env.BORDERCONNECT_API_URL_SUFFIX = "acme-carrier";
+    process.env.BORDERCONNECT_API_KEY = "bc-secret-key";
+    const { createCustomsClient } = await import("@corridor/integrations");
+    vi.mocked(createCustomsClient).mockClear();
+    const db = createFakeDb({
+      rows: {
+        organizations: [{ id: TEST_ORG_ID, borderConnectCompanyKey: "BC-COMPANY-1" }],
+        integrationConfigs: [bcConfigRow()],
+      },
+    });
+
+    const { client } = await customsClientFor(db.tx, TEST_ORG_ID, "ACE");
+
+    expect(client.mode).toBe("border_connect");
+    expect(createCustomsClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "border_connect",
+        apiUrlSuffix: "acme-carrier",
+        apiKey: "bc-secret-key",
+        companyKey: "BC-COMPANY-1",
+      }),
+    );
+  });
+
+  it("in production with mode border_connect and no company key throws PRECONDITION_FAILED", async () => {
+    const db = createFakeDb({
+      rows: {
+        organizations: [{ id: TEST_ORG_ID, borderConnectCompanyKey: null }],
+        integrationConfigs: [bcConfigRow({ environment: "production" })],
+      },
+    });
+
+    await expect(customsClientFor(db.tx, TEST_ORG_ID, "ACE")).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: expect.stringContaining("BorderConnect company key is not set"),
+    });
+  });
+
+  it("in sandbox with no BORDERCONNECT_API_KEY the client is not live (fixture)", async () => {
+    process.env.BORDERCONNECT_API_URL_SUFFIX = "acme-carrier";
+    delete process.env.BORDERCONNECT_API_KEY;
+    const db = createFakeDb({
+      rows: {
+        organizations: [{ id: TEST_ORG_ID, borderConnectCompanyKey: null }],
+        integrationConfigs: [bcConfigRow()],
+      },
+    });
+
+    const { client } = await customsClientFor(db.tx, TEST_ORG_ID, "ACE");
+
+    expect(client.mode).toBe("border_connect");
+    expect((client as unknown as { live: boolean }).live).toBe(false);
+  });
+
+  it("does not read Vault credentials for border_connect (the key is env-level, never per-org Vault)", async () => {
+    const db = createFakeDb({
+      rows: {
+        organizations: [{ id: TEST_ORG_ID, borderConnectCompanyKey: "BC-COMPANY-1" }],
+        // A populated credentialsRef must NOT trigger a Vault read in this mode.
+        integrationConfigs: [bcConfigRow({ credentialsRef: "vault-ref-1" })],
+      },
+    });
+
+    // No NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY configured — if
+    // credentialsFor() were called it would warn to console.warn and still
+    // resolve, but the client must come back mock/border_connect either way.
+    // The real assertion is `createCustomsClient`'s `credentials` argument.
+    const { createCustomsClient } = await import("@corridor/integrations");
+    vi.mocked(createCustomsClient).mockClear();
+
+    await customsClientFor(db.tx, TEST_ORG_ID, "ACE");
+
+    expect(createCustomsClient).toHaveBeenCalledWith(
+      expect.objectContaining({ credentials: undefined }),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// transmitMovement / scheduleDecision (border_connect mode, 0047 / Task 8)
+// ---------------------------------------------------------------------------
+
+describe("transmitMovement (border_connect mode)", () => {
+  const BC_DRIVER_ID = "aaaaaaaa-1111-4111-8111-111111111111";
+  const BC_TRUCK_ID = "aaaaaaaa-2222-4222-8222-222222222222";
+  const BC_TRAILER_ID = "aaaaaaaa-3333-4333-8333-333333333333";
+  const BC_PARTNER_ID = "aaaaaaaa-4444-4444-8444-444444444444";
+  const BC_PORT_ID = "aaaaaaaa-5555-4555-8555-555555555555";
+  const BC_SLOT_ID = "aaaaaaaa-6666-4666-8666-666666666666";
+
+  const isoDay = (days: number) => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
+  const inDays = (days: number) => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + days);
+    return d;
+  };
+
+  const SQL_VALUES = {
+    shipperName: "Maple Ridge Steel Ltd",
+    shipperCountry: "CA",
+    shipperAddress: { line1: "100 King St", city: "Hamilton", postalCode: "L8N1A1", country: "CA" },
+    consigneeName: "Great Lakes Fabrication Inc",
+    consigneeCountry: "US",
+    consigneeAddress: {
+      line1: "200 Michigan Ave",
+      city: "Detroit",
+      postalCode: "48226",
+      country: "US",
+    },
+    entryPortCode: null,
+    inBondDestinationPortCode: null,
+  };
+
+  /** A movement with everything `validateForTransmit` demands, filed under a
+   * border_connect config — no `baseUrl`, `mode: "border_connect"`. Leaves
+   * BORDERCONNECT_API_URL_SUFFIX/API_KEY unset so the client replays fixtures
+   * rather than attempting a real HTTP call. */
+  function bcTransmittableRows(): Record<string, Row[]> {
+    return {
+      organizations: [
+        {
+          id: TEST_ORG_ID,
+          name: "Corridor Test Carrier",
+          scacCode: "CTCX",
+          canadianCarrierCode: "CTC1",
+          usDotNumber: "7654321",
+          filerCode: "F01",
+          borderConnectCompanyKey: "BC-COMPANY-1",
+        },
+      ],
+      movements: [
+        {
+          id: MOVEMENT_ID,
+          organizationId: TEST_ORG_ID,
+          regime: "ACE",
+          movementNumber: "ACE-26-00042",
+          tripNumber: "TRIP-1042",
+          status: "draft",
+          portId: BC_PORT_ID,
+          carrierCode: "PFTR",
+          scheduledCrossingAt: inDays(1),
+          truckId: BC_TRUCK_ID,
+          isEmpty: false,
+          customsReferenceNumber: null,
+          notes: null,
+          createdBy: TEST_USER_ID,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ],
+      ports: [
+        {
+          id: BC_PORT_ID,
+          regime: "ACE",
+          kind: "port_of_entry",
+          code: "3801",
+          name: "Detroit",
+          country: "US",
+        },
+      ],
+      movementCrew: [
+        {
+          id: "bbbbbbbb-1111-4111-8111-111111111111",
+          organizationId: TEST_ORG_ID,
+          movementId: MOVEMENT_ID,
+          driverId: BC_DRIVER_ID,
+          role: "person_in_charge",
+          position: 1,
+          firstName: "Gurpreet",
+          lastName: "Singh",
+          status: "active",
+          personType: "driver",
+          gender: "M",
+          licenseNumber: "S1234-56789-01234",
+          licenseJurisdiction: "ON",
+          licenseExpiry: isoDay(400),
+          citizenship: "CA",
+          hazmatEndorsement: false,
+        },
+      ],
+      drivers: [{ id: BC_DRIVER_ID, organizationId: TEST_ORG_ID }],
+      driverDocuments: [],
+      trucks: [
+        {
+          id: BC_TRUCK_ID,
+          organizationId: TEST_ORG_ID,
+          unitNumber: "T-101",
+          status: "active",
+          plateNumber: "AB12345",
+          registrationExpiry: isoDay(300),
+          insuranceExpiry: isoDay(200),
+          vin: "1HGCM82633A123456",
+        },
+      ],
+      trailers: [
+        {
+          id: BC_TRAILER_ID,
+          organizationId: TEST_ORG_ID,
+          unitNumber: "TR-501",
+          status: "active",
+          plateNumber: "TRL5011",
+          registrationExpiry: isoDay(180),
+        },
+      ],
+      movementTrailers: [
+        {
+          id: BC_SLOT_ID,
+          organizationId: TEST_ORG_ID,
+          movementId: MOVEMENT_ID,
+          trailerId: BC_TRAILER_ID,
+          position: 1,
+          unitNumber: "TR-501",
+          trailerType: "TF",
+          status: "active",
+          plateNumber: "TRL5011",
+          plateJurisdiction: "ON",
+          registrationExpiry: isoDay(180),
+        },
+      ],
+      equipmentPlates: [],
+      shipments: [
+        {
+          id: SHIPMENT_ID,
+          organizationId: TEST_ORG_ID,
+          regime: "ACE",
+          movementId: MOVEMENT_ID,
+          carrierCode: "CTCX",
+          shipmentType: "regular_bill",
+          cargoType: null,
+          controlReference: "PAPS90210",
+          controlNumber: "CTCXPAPS90210",
+          status: "draft",
+          entryNumber: null,
+          entryPortId: null,
+          inBondEntryType: null,
+          inBondDestinationPortId: null,
+          inBondNumber: null,
+          shipperId: BC_PARTNER_ID,
+          consigneeId: BC_PARTNER_ID,
+          loadingCountry: "CA",
+          loadingProvince: "ON",
+          loadingCity: "Hamilton",
+        },
+      ],
+      commodities: [
+        {
+          id: "cccccccc-1111-4111-8111-111111111111",
+          organizationId: TEST_ORG_ID,
+          shipmentId: SHIPMENT_ID,
+          lineNumber: 1,
+          commodityDescription: "Hot-rolled steel coils",
+          hsCode: "7208.39",
+          weightKg: 18000,
+          weightUnit: "KG",
+          quantity: 6,
+          quantityUnit: "Coil",
+          packagingType: "Skid",
+          marksAndNumbers: null,
+          valueAmount: 42000,
+          valueCurrency: "USD",
+          countryOfOrigin: "CA",
+        },
+      ],
+      seals: [
+        {
+          id: "dddddddd-1111-4111-8111-111111111111",
+          organizationId: TEST_ORG_ID,
+          movementId: MOVEMENT_ID,
+          movementTrailerId: BC_SLOT_ID,
+          sealNumber: "SL-100231",
+        },
+      ],
+      integrationConfigs: [
+        {
+          organizationId: TEST_ORG_ID,
+          provider: "cbp_ace",
+          environment: "sandbox",
+          status: "active",
+          mode: "border_connect",
+          baseUrl: null,
+          credentialsRef: null,
+          settings: {},
+        },
+      ],
+      movementEvents: [],
+      movementAmendments: [],
+      backgroundJobs: [],
+      integrationEvents: [],
+      customsSubmissions: [],
+    };
+  }
+
+  afterEach(() => {
+    delete process.env.BORDERCONNECT_API_URL_SUFFIX;
+    delete process.env.BORDERCONNECT_API_KEY;
+  });
+
+  it("records a customs_submissions row with mode border_connect and status acknowledged", async () => {
+    const db = createFakeDb({ rows: bcTransmittableRows(), sqlValues: SQL_VALUES });
+
+    const result = await transmitMovement(
+      db.tx,
+      { orgId: TEST_ORG_ID, userId: TEST_USER_ID },
+      MOVEMENT_ID,
+    );
+
+    expect(result.movement.status).toBe("sent");
+    const [submission] = db.table("customsSubmissions");
+    expect(submission).toMatchObject({
+      organizationId: TEST_ORG_ID,
+      movementId: MOVEMENT_ID,
+      mode: "border_connect",
+      provider: "cbp_ace",
+      status: "acknowledged",
+    });
+  });
+
+  it("enqueues no background job (status arrives through the BorderConnect inbox, not a poll)", async () => {
+    const db = createFakeDb({ rows: bcTransmittableRows(), sqlValues: SQL_VALUES });
+
+    await transmitMovement(db.tx, { orgId: TEST_ORG_ID, userId: TEST_USER_ID }, MOVEMENT_ID);
+
+    expect(db.table("backgroundJobs")).toHaveLength(0);
   });
 });
