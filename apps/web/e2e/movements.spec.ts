@@ -119,6 +119,7 @@ async function addShipmentWithLine(page: Page, reference: string) {
 
 const heading = (page: Page) => page.getByRole("heading", { name: /ACE-\d{2}-\d{5}/ });
 const timeline = (page: Page) => page.getByRole("list", { name: "Movement timeline" });
+const readinessPanel = (page: Page) => page.getByRole("region", { name: "Ready to cross" });
 
 test.describe("movement builder", () => {
   test("board lists every status chip and filters by status", async ({ page }) => {
@@ -263,6 +264,48 @@ test.describe("movement builder", () => {
     await page.getByRole("button", { name: "accepted", exact: true }).click();
     await expect(heading(page).getByText("accepted")).toBeVisible();
     await expect(page.getByText(/#1 · accepted/)).toBeVisible();
+  });
+
+  test("readiness panel moves from waiting to ready, and the list badge matches (Task 14)", async ({
+    page,
+  }) => {
+    await login(page, "dispatch@pathfinder.demo");
+    await buildReadyMovement(page);
+    const url = page.url();
+    const id = url.match(/\/movements\/([0-9a-f-]{36})/)![1];
+    const row = page.locator(`tr:has(a[href="/movements/${id}"])`);
+
+    await page.getByRole("button", { name: "Transmit to CBP" }).click();
+    await expect(heading(page).getByText("sent")).toBeVisible();
+    await page.getByRole("button", { name: "accepted", exact: true }).click();
+    await expect(heading(page).getByText("accepted")).toBeVisible();
+
+    // Accepted, but the shipment has no entry number yet: WAITING, and the
+    // "entries assigned" check names the outstanding shipment.
+    const panel = readinessPanel(page);
+    await expect(panel.getByText("Waiting", { exact: true })).toBeVisible();
+    await expect(panel.getByText("Entries assigned")).toBeVisible();
+    await expect(panel.getByText(/Waiting on entry number for 1 shipment/)).toBeVisible();
+    await expect(panel.getByText("Manifest filed")).toBeVisible();
+
+    // The list's compact badge shows nothing while readiness is "pending".
+    await page.goto("/movements");
+    await expect(row.getByText("Ready", { exact: true })).toHaveCount(0);
+    await expect(row.getByText("Blocked", { exact: true })).toHaveCount(0);
+
+    // Customs releases the movement: the mock gateway assigns an entry
+    // number as part of the `released` transition (0022's `entry_on_file`
+    // event) — the same signal `crossingReadiness()`'s `entries` check reads.
+    await page.goto(url);
+    await page.getByRole("button", { name: "released", exact: true }).click();
+    await expect(heading(page).getByText("released")).toBeVisible();
+    await expect(panel.getByText("Ready", { exact: true })).toBeVisible();
+    await expect(panel.getByText("Entries assigned")).toBeVisible();
+
+    // The list badge now reflects "ready" — computed by movement.list's SQL
+    // subquery, not a second crossingReadiness() call.
+    await page.goto("/movements");
+    await expect(row.getByText("Ready", { exact: true })).toBeVisible();
   });
 
   test("read-only user sees the movement but no controls", async ({ page }) => {

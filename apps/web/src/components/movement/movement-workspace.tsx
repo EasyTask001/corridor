@@ -19,6 +19,7 @@ import {
 import { PortPicker, type PickablePort } from "@/components/port-picker";
 import { useTRPC } from "@/lib/trpc/client";
 import { Field } from "./field";
+import { ReadinessPanel } from "./readiness-panel";
 import { RegimeBadge, StatusBadge } from "./status-badge";
 import { Timeline } from "./timeline";
 import { useMovementRealtime } from "./use-movement-realtime";
@@ -579,13 +580,16 @@ export function MovementWorkspace({
           </section>
         </div>
 
-        <div className="panel p-4 xl:sticky xl:top-20 xl:max-h-[calc(100dvh-6rem)] xl:overflow-y-auto">
-          <Timeline
-            movementId={id}
-            events={m.events}
-            canNote={permissions.write}
-            onChanged={refresh}
-          />
+        <div className="flex flex-col gap-4 xl:sticky xl:top-20 xl:max-h-[calc(100dvh-6rem)] xl:overflow-y-auto">
+          <ReadinessPanel readiness={m.readiness} />
+          <div className="panel p-4">
+            <Timeline
+              movementId={id}
+              events={m.events}
+              canNote={permissions.write}
+              onChanged={refresh}
+            />
+          </div>
         </div>
       </div>
     </WorkspaceProvider>

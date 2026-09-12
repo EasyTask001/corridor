@@ -79,6 +79,7 @@ export function MovementsList({
     unitsLabel: `${m.truckUnit ?? "—"} / ${m.trailerUnit ?? "—"}`,
     shipmentCount: m.shipmentCount,
     customsReferenceLabel: m.customsReferenceNumber ?? "—",
+    readyToCross: m.readyToCross,
   }));
 
   return (

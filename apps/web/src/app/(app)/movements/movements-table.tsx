@@ -24,6 +24,8 @@ export interface MovementRow {
   unitsLabel: string;
   shipmentCount: number;
   customsReferenceLabel: string;
+  /** SQL-computed list summary (Task 14) — see `movement.list`'s `readyToCross`. */
+  readyToCross: "ready" | "pending" | "blocked" | null;
 }
 
 /** Every column the table can show, for the column chooser (Task 14). */
@@ -38,6 +40,31 @@ export const MOVEMENT_COLUMNS = [
   { key: "customsRef", label: "Customs ref" },
 ] as const;
 export type MovementColumnKey = (typeof MOVEMENT_COLUMNS)[number]["key"];
+
+/**
+ * Compact list badge (Task 14) for `MovementRow.readyToCross` — a colored dot
+ * plus label next to `StatusBadge`, using the same `ok`/`danger` status
+ * tokens as `status-badge.tsx`. `"pending"` and `null` render nothing: the
+ * list is not the place to explain "waiting on entries", the movement's own
+ * "Ready to cross" panel is.
+ */
+function ReadyToCrossBadge({ value }: { value: MovementRow["readyToCross"] }) {
+  if (value !== "ready" && value !== "blocked") return null;
+  const isReady = value === "ready";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-xs font-medium ${
+        isReady ? "text-status-ok" : "text-status-danger"
+      }`}
+    >
+      <span
+        aria-hidden
+        className={`size-1.5 rounded-full ${isReady ? "bg-ok-500" : "bg-danger-500"}`}
+      />
+      {isReady ? "Ready" : "Blocked"}
+    </span>
+  );
+}
 
 export function MovementsTable({
   rows,
@@ -82,7 +109,12 @@ export function MovementsTable({
       helper.display({
         id: "status",
         header: "Status",
-        cell: ({ row }) => <StatusBadge status={row.original.status} />,
+        cell: ({ row }) => (
+          <div className="flex items-center gap-2">
+            <StatusBadge status={row.original.status} />
+            <ReadyToCrossBadge value={row.original.readyToCross} />
+          </div>
+        ),
       }),
       helper.accessor("crossingLabel", { id: "crossing", header: "Crossing" }),
       helper.accessor("etaLabel", {

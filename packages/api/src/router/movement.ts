@@ -196,6 +196,45 @@ export const movementRouter = router({
                 join public.trailers t on t.id = mt.trailer_id
                 where mt.movement_id = ${movements.id})`,
               shipmentCount: sql<number>`(select count(*)::int from public.shipments s where s.movement_id = ${movements.id})`,
+              /**
+               * List-row readiness summary (Task 14) — a cheap SQL heuristic,
+               * not `crossingReadiness()` run per row (that would be N+1 and
+               * duplicate logic the domain layer already owns). `held`/
+               * `rejected` are always `blocked`; `accepted`/`released` are
+               * `ready` when every attached shipment already clears the
+               * regime's own gate — ACE: has an entry number; ACI: has a
+               * `pars_rns_events` row — and `pending` otherwise; any other
+               * status (draft/sent/arrived/cancelled) is `null` (no readiness
+               * opinion). A movement with zero shipments has no shipment
+               * failing either `not exists` check, so it reads `ready` once
+               * accepted/released — the same outcome `crossingReadiness()`
+               * gives an empty trip, which only carries the `manifest` and
+               * `rejects` checks (see readiness.ts). The panel on the
+               * movement page still shows the full per-check breakdown; this
+               * column is only the list's compact badge.
+               */
+              readyToCross: sql<"ready" | "pending" | "blocked" | null>`(
+                case
+                  when ${movements.status} in ('held', 'rejected') then 'blocked'
+                  when ${movements.status} in ('accepted', 'released') then
+                    case
+                      when ${movements.regime} = 'ACE' then
+                        case when not exists (
+                          select 1 from public.shipments s
+                          where s.movement_id = ${movements.id} and s.entry_number is null
+                        ) then 'ready' else 'pending' end
+                      else
+                        case when not exists (
+                          select 1 from public.shipments s
+                          where s.movement_id = ${movements.id}
+                            and not exists (
+                              select 1 from public.pars_rns_events e where e.shipment_id = s.id
+                            )
+                        ) then 'ready' else 'pending' end
+                    end
+                  else null
+                end
+              )`,
               updatedAt: movements.updatedAt,
               createdAt: movements.createdAt,
             })
