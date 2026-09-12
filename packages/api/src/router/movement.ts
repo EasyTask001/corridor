@@ -12,6 +12,7 @@ import {
   crewInput,
   crewRemoveInput,
   crewSetRoleInput,
+  crossingReadiness,
   customsResponseInput,
   hasBlockingIssues,
   isEditable,
@@ -25,6 +26,7 @@ import {
   trailerRemoveInput,
   trailerReorderInput,
   uuid,
+  type CustomsEventPayload,
   type MovementPatch,
   type MovementStatus,
 } from "@corridor/domain";
@@ -47,6 +49,7 @@ import {
   addEvent,
   applyCustomsDecision,
   applyTransition,
+  latestRnsByShipment,
   loadFull,
   markShipmentsArrived,
   requireMovement,
@@ -230,7 +233,45 @@ export const movementRouter = router({
 
   get: anyPermissionProcedure("movement.read", "movement.read_assigned")
     .input(z.object({ id: uuid }))
-    .query(({ ctx, input }) => ctx.rls((tx) => loadFull(tx, ctx.orgId, input.id))),
+    .query(({ ctx, input }) =>
+      ctx.rls(async (tx) => {
+        const full = await loadFull(tx, ctx.orgId, input.id);
+        const rnsByShipment = await latestRnsByShipment(
+          tx,
+          full.shipments.map((s) => s.id),
+        );
+        // Only `customs_event` rows carry a `CustomsEventCode` (0022); every
+        // other event type (status_change, amendment, note, ...) is outside
+        // crossingReadiness's vocabulary.
+        const customsEvents = full.events.flatMap((e) => {
+          if (e.eventType !== "customs_event" || !e.payload) return [];
+          const payload = e.payload as CustomsEventPayload;
+          return [
+            {
+              code: payload.code,
+              shipmentControlNumber: payload.shipmentControlNumber ?? null,
+              occurredAt: e.occurredAt.toISOString(),
+            },
+          ];
+        });
+        const readiness = crossingReadiness({
+          regime: full.regime,
+          status: full.status,
+          shipments: full.shipments.map((s) => ({
+            controlNumber: s.controlNumber,
+            status: s.status,
+            entryNumber: s.entryNumber,
+            isPars: s.isPars,
+            rnsReleasedAt: rnsByShipment.get(s.id)?.toISOString() ?? null,
+            // ACI shipments never carry an ACE shipmentType, so this is
+            // always false for them (see readiness.ts's ReadinessShipment).
+            isInBond: s.shipmentType === "in_bond",
+          })),
+          events: customsEvents,
+        });
+        return { ...full, readiness };
+      }),
+    ),
 
   validate: anyPermissionProcedure("movement.read", "movement.read_assigned")
     .input(z.object({ id: uuid }))

@@ -639,6 +639,43 @@ export function validationFor(full: FullMovement) {
   });
 }
 
+/**
+ * The most recent CBSA RNS release per shipment (0027), keyed by shipment id
+ * — `movement.get` folds this into `crossingReadiness`'s `rnsReleasedAt`
+ * input. Reduced in application code, not SQL: the fake transaction the
+ * router unit tests run against ignores `where`/`orderBy` (it is a shape
+ * fake, not a database — see `packages/api/src/test/mock-context.ts`), so a
+ * `distinct on` / `order by … limit 1` would silently return the wrong row
+ * there even though it's correct against real Postgres. Filtering and
+ * reducing here works identically against both.
+ */
+export async function latestRnsByShipment(
+  tx: Tx,
+  shipmentIds: string[],
+): Promise<Map<string, Date>> {
+  const latest = new Map<string, Date>();
+  if (shipmentIds.length === 0) return latest;
+  const wanted = new Set(shipmentIds);
+  const rows = await tx
+    .select({
+      shipmentId: parsRnsEvents.shipmentId,
+      releasedAt: parsRnsEvents.releasedAt,
+      receivedAt: parsRnsEvents.receivedAt,
+    })
+    .from(parsRnsEvents)
+    .where(inArray(parsRnsEvents.shipmentId, shipmentIds));
+  for (const row of rows) {
+    if (!row.shipmentId || !wanted.has(row.shipmentId)) continue;
+    // A release message always carries `releasedAt`; fall back to when we
+    // received it only for a hand-seeded/malformed row with neither.
+    const at = row.releasedAt ?? row.receivedAt;
+    if (!at) continue;
+    const current = latest.get(row.shipmentId);
+    if (!current || at > current) latest.set(row.shipmentId, at);
+  }
+  return latest;
+}
+
 export async function loadOrganization(tx: Tx, orgId: string) {
   const [org] = await tx.select().from(organizations).where(eq(organizations.id, orgId)).limit(1);
   if (!org) throw new TRPCError({ code: "NOT_FOUND", message: "Organization not found" });
