@@ -204,27 +204,76 @@ export const integrationsRouter = router({
       }),
   }),
 
-  /** "Test connection" on the integrations page: GET /manifests/ping (or the fixture / mock). */
+  /**
+   * "Test connection" on the integrations page: GET /manifests/ping (or the
+   * fixture / mock) — except in `border_connect` mode, where there is no
+   * synchronous ping to make (BorderConnect answers through the shared
+   * inbox, not a request/response round trip): this drains it instead, the
+   * same job `customs.borderconnect_drain` runs every minute. Messages are
+   * stored before they are interpreted (services/borderconnect.ts), so
+   * clicking this is always safe — nothing is discarded, worst case it just
+   * runs the routing a minute early.
+   *
+   * Two-transaction shape, like `jobs.runNow` above: read the config in one
+   * `ctx.rls`, drain on `ctx.db` with no RLS transaction open (`withServiceRole`
+   * must never nest inside one, packages/db/src/rls.ts), then audit in a
+   * second `ctx.rls`.
+   */
   testCustoms: permissionProcedure("integrations.manage")
     .input(z.object({ provider: z.enum(["cbp_ace", "cbsa_aci"]) }))
-    .mutation(({ ctx, input }) =>
-      ctx.rls(async (tx) => {
-        const regime = input.provider === "cbp_ace" ? "ACE" : "ACI";
+    .mutation(async ({ ctx, input }) => {
+      const regime = input.provider === "cbp_ace" ? "ACE" : "ACI";
+      const started = Date.now();
+      const prepared = await ctx.rls(async (tx) => {
         const { client } = await customsClientFor(tx, ctx.orgId, regime);
-        const started = Date.now();
-        let result: { ok: boolean; mode: string; live: boolean; detail: unknown; error?: string };
+        if (client.mode === "border_connect") return { deferred: true as const };
         try {
-          result = await client.ping();
+          return { deferred: false as const, result: await client.ping() };
+        } catch (e) {
+          return {
+            deferred: false as const,
+            result: {
+              ok: false,
+              mode: client.mode,
+              live: false,
+              detail: null,
+              error: e instanceof Error ? e.message : String(e),
+            },
+          };
+        }
+      });
+
+      let result: { ok: boolean; mode: string; live: boolean; detail: unknown; error?: string };
+      if (prepared.deferred) {
+        // No RLS transaction is open here — the ctx.rls above already
+        // committed — so drainBorderConnectInbox is free to open its own
+        // withServiceRole transactions.
+        const { drainBorderConnectInbox, borderConnectEnv } = await import(
+          "../services/borderconnect"
+        );
+        try {
+          const drain = await drainBorderConnectInbox(ctx.db);
+          result = {
+            ok: true,
+            mode: "border_connect",
+            live: borderConnectEnv().live,
+            detail: { received: drain.received, stored: drain.stored },
+          };
         } catch (e) {
           result = {
             ok: false,
-            mode: client.mode,
-            live: false,
+            mode: "border_connect",
+            live: borderConnectEnv().live,
             detail: null,
             error: e instanceof Error ? e.message : String(e),
           };
         }
-        await writeAudit(
+      } else {
+        result = prepared.result;
+      }
+
+      await ctx.rls((tx) =>
+        writeAudit(
           tx,
           ctx.orgId,
           "integration.test_connection",
@@ -232,10 +281,10 @@ export const integrationsRouter = router({
           input.provider,
           null,
           { ok: result.ok, mode: result.mode, live: result.live, error: result.error ?? null },
-        );
-        return { ...result, durationMs: Date.now() - started };
-      }),
-    ),
+        ),
+      );
+      return { ...result, durationMs: Date.now() - started };
+    }),
 
   events: router({
     list: permissionProcedure("integrations.manage")

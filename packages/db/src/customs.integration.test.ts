@@ -13,7 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createClient } from "@supabase/supabase-js";
 import { eq, sql } from "drizzle-orm";
 import { createDb } from "./client";
-import { withRls } from "./rls";
+import { withRls, withServiceRole } from "./rls";
 import {
   backgroundJobs,
   carrierNotices,
@@ -242,5 +242,36 @@ describe("background_jobs_insert after 0023", () => {
       ),
     );
     expect(reader).toMatch(/row-level security/);
+  });
+});
+
+describe("background_jobs_insert after 0047", () => {
+  it("nobody enqueues customs.borderconnect_drain from a session — even with an organization_id, even a transmitter", async () => {
+    // background_jobs_insert's with-check also requires organization_id is not
+    // null, and this job type's arm is a bare `false` regardless — the cron
+    // route is the only enqueuer, under the service role (services/jobs.ts /
+    // apps/web/src/app/api/jobs/borderconnect-drain/route.ts).
+    const msg = await rejection(
+      withRls(db, as(dispatcherA), (tx) =>
+        tx
+          .insert(backgroundJobs)
+          .values({
+            organizationId: dispatcherA.orgId,
+            jobType: "customs.borderconnect_drain",
+            payload: {},
+          })
+          .returning(),
+      ),
+    );
+    expect(msg).toMatch(/row-level security/);
+
+    const [job] = await withServiceRole(db, (tx) =>
+      tx
+        .insert(backgroundJobs)
+        .values({ organizationId: null, jobType: "customs.borderconnect_drain", payload: {} })
+        .returning({ id: backgroundJobs.id }),
+    );
+    expect(job?.id).toBeTypeOf("number");
+    await withServiceRole(db, (tx) => tx.delete(backgroundJobs).where(eq(backgroundJobs.id, job!.id)));
   });
 });

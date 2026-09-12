@@ -35,6 +35,7 @@ export type JobType =
   | "customs.decide"
   | "customs.poll_status"
   | "customs.notices_sync"
+  | "customs.borderconnect_drain"
   | "driver.notify"
   | "compliance.scan"
   | "document.extract"
@@ -274,6 +275,18 @@ export const detachedJobHandlers: Partial<Record<JobType, DetachedHandler>> = {
    * transaction held across those would pin a pooled connection for minutes.
    */
   "billing.report_usage": (db) => reportPendingUsage(db),
+
+  /**
+   * Every minute (vercel.json → /api/jobs/borderconnect-drain): pull
+   * BorderConnect's shared inbox, store every message, then route and apply
+   * whatever is unprocessed. Detached: draining the queue and applying each
+   * row each open their own short transaction (services/borderconnect.ts),
+   * so no transaction may span the HTTP poll itself.
+   */
+  "customs.borderconnect_drain": async (db) => {
+    const { drainBorderConnectInbox } = await import("./borderconnect");
+    return drainBorderConnectInbox(db);
+  },
 };
 
 export interface ProcessResult {
