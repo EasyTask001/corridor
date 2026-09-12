@@ -164,6 +164,7 @@ describe("toAceTrip — full valid manifest", () => {
       tripNumber: "PFTR00001",
       estimatedArrivalDate: "2026-09-08 10:30:00",
       usPortOfArrival: "3801",
+      instrumentsOfInternationalTrafficBond: { type: "CARRIER" },
       truck: {
         number: "T-101",
         type: "TR",
@@ -238,10 +239,27 @@ describe("toAceTrip — full valid manifest", () => {
               countryOfOrigin: "CA",
             },
           ],
-          instrumentsOfInternationalTrafficBond: { type: "CARRIER" },
         },
       ],
     });
+  });
+
+  it("puts instrumentsOfInternationalTrafficBond at the trip level, never on a nested shipment", () => {
+    const m = buildManifest(makeSource());
+    const out = toAceTrip(m, opts) as {
+      instrumentsOfInternationalTrafficBond?: { type: string };
+      shipments: Array<Record<string, unknown>>;
+    };
+    expect(out.instrumentsOfInternationalTrafficBond).toEqual({ type: "CARRIER" });
+    expect(out.shipments[0]).not.toHaveProperty("instrumentsOfInternationalTrafficBond");
+  });
+
+  it("omits instrumentsOfInternationalTrafficBond entirely when iitIndicator is none", () => {
+    const src = makeSource();
+    src.movement.iitIndicator = "none";
+    const m = buildManifest(src);
+    const out = toAceTrip(m, opts);
+    expect(out).not.toHaveProperty("instrumentsOfInternationalTrafficBond");
   });
 
   it("carries companyKey on the trip and on every nested shipment", () => {
@@ -267,6 +285,14 @@ describe("toAceTrip — full valid manifest", () => {
     const m = buildManifest(makeSource());
     const out = toAceTrip(m, { ...opts, tripNumberOverride: "PFTRZZZZZ" }) as { tripNumber: string };
     expect(out.tripNumber).toBe("PFTRZZZZZ");
+  });
+
+  it("matches the packaging-unit name case-insensitively", () => {
+    const src = makeSource();
+    src.shipments[0]!.commodities[0]!.packagingType = "sKiD"; // real value is "Skid" in code-lists.ts
+    const m = buildManifest(src);
+    const out = toAceTrip(m, opts) as { shipments: Array<{ commodities: Array<{ packagingUnit: string }> }> };
+    expect(out.shipments[0]!.commodities[0]!.packagingUnit).toBe("SKD");
   });
 
   it("omits gender X instead of sending it", () => {
@@ -381,6 +407,21 @@ describe("toAceTrip — 422 validation", () => {
       expect((e as CustomsTransportError).message).toBe(
         "BorderConnect: manifest is missing 1 required field(s): " +
           "shipments[0].inBond: irsNumber/fda not captured yet",
+      );
+    }
+  });
+
+  it("a malformed shipmentControlNumber 422s", () => {
+    const src = makeSource();
+    src.shipments[0]!.controlNumber = "bad!";
+    const m = buildManifest(src);
+    try {
+      toAceTrip(m, opts);
+      throw new Error("expected toAceTrip to throw");
+    } catch (e) {
+      expect((e as CustomsTransportError).message).toBe(
+        "BorderConnect: manifest is missing 1 required field(s): " +
+          "shipments[0].controlNumber: must be 4 letters followed by 4-12 alphanumerics",
       );
     }
   });

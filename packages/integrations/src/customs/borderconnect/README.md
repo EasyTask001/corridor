@@ -82,7 +82,11 @@ never emits a separate `estimatedArrivalTimeZone` field.
 - **Commodity `value`**: BorderConnect's exact commodity-value field shape
   isn't documented in the task-5 brief; it's mapped as `{amount, currency}`
   (unchanged from `ManifestPayload`) rather than guessing a different shape.
-- **`instrumentsOfInternationalTrafficBond`** placement: the brief lists this
-  rule under "ACE shipments", so it's emitted per-shipment (from the
-  trip-level `iitIndicator`, replicated across shipments) rather than once
-  at the trip level.
+- **`instrumentsOfInternationalTrafficBond`** is a **top-level `ACE_TRIP`
+  field**, computed once from `m.trip.iitIndicator` — never attached to a
+  nested `ACE_SHIPMENT`. (The task-5 brief's wording listed this rule under
+  the "ACE shipments" bullet, which read as per-shipment; that was corrected
+  during code review against BorderConnect's real ACE_TRIP reference, and the
+  master plan's ruling was updated to match. `iitIndicator` is already a
+  trip-scoped field in `ManifestPayload`, consistent with the corrected
+  placement.)

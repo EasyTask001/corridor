@@ -90,6 +90,12 @@ function buildPassenger(c: ManifestPayload["crew"][number]): Record<string, unkn
   };
 }
 
+/**
+ * `instrumentsOfInternationalTrafficBond` is a top-level `ACE_TRIP` field
+ * (one per trip), computed once from `m.trip.iitIndicator` — matching that
+ * field already being trip-scoped in `ManifestPayload`, not one per
+ * shipment. Never attach this to a nested `ACE_SHIPMENT`.
+ */
 function iitBondField(
   indicator: ManifestPayload["trip"]["iitIndicator"],
 ): { type: "CARRIER" | "IMPORTER" } | undefined {
@@ -112,12 +118,7 @@ function buildAceCommodity(c: ManifestPayload["shipments"][number]["commodities"
   };
 }
 
-function buildAceShipment(
-  s: ManifestPayload["shipments"][number],
-  companyKey: string,
-  iitIndicator: ManifestPayload["trip"]["iitIndicator"],
-): Record<string, unknown> {
-  const bond = iitBondField(iitIndicator);
+function buildAceShipment(s: ManifestPayload["shipments"][number], companyKey: string): Record<string, unknown> {
   return {
     data: "ACE_SHIPMENT",
     companyKey,
@@ -127,7 +128,6 @@ function buildAceShipment(
     shipper: buildParty(s.shipper),
     consignee: buildParty(s.consignee),
     commodities: s.commodities.map(buildAceCommodity),
-    ...(bond ? { instrumentsOfInternationalTrafficBond: bond } : {}),
   };
 }
 
@@ -147,6 +147,7 @@ export function toAceTrip(m: ManifestPayload, o: OutboundOptions): Record<string
 
   const tripNumber = o.tripNumberOverride ?? tripNumberFor(m);
   const passengers = m.crew.filter((c) => c.role === "passenger").map(buildPassenger);
+  const bond = iitBondField(m.trip.iitIndicator);
 
   return {
     data: "ACE_TRIP",
@@ -157,6 +158,7 @@ export function toAceTrip(m: ManifestPayload, o: OutboundOptions): Record<string
     tripNumber,
     estimatedArrivalDate: bcDateTime(m.trip.estimatedArrival, m.carrier.timezone),
     usPortOfArrival: m.trip.portOfEntry.padStart(4, "0"),
+    ...(bond ? { instrumentsOfInternationalTrafficBond: bond } : {}),
     truck: {
       number: m.conveyance.unitNumber,
       type: m.conveyance.truckType,
@@ -178,7 +180,7 @@ export function toAceTrip(m: ManifestPayload, o: OutboundOptions): Record<string
       .filter((c) => c.role === "person_in_charge" || c.role === "crew_member")
       .map(buildDriver),
     ...(passengers.length > 0 ? { passengers } : {}),
-    shipments: m.shipments.map((s) => buildAceShipment(s, o.companyKey, m.trip.iitIndicator)),
+    shipments: m.shipments.map((s) => buildAceShipment(s, o.companyKey)),
   };
 }
 
