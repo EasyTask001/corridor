@@ -134,18 +134,26 @@ function formatAddress(address: PostalAddress | null | undefined): string | null
   return parts.length > 0 ? parts.join(", ") : null;
 }
 
-/** The structured half of an address — same parts `formatAddress` prints as one line. */
+/**
+ * The structured half of an address — same parts `formatAddress` prints as
+ * one line, and null under the exact same condition `formatAddress` returns
+ * null for (every part blank/absent). This matters because the real loaders
+ * (`nestAddress`/`addressFromColumns`, `partnerAddressJson`) always hand back
+ * an object — `{}` / all-null-fields when there is no address on file, never
+ * JS `null` — so without this check `postal`/`delivery` would never collapse
+ * to `null` for real "no address" data even though `address` (the string)
+ * does, leaving a consumer no reliable way to test "is there an address".
+ */
 function postalOf(address: PostalAddress | null | undefined): ManifestParty["postal"] {
-  return address
-    ? {
-        line1: address.line1 ?? null,
-        line2: address.line2 ?? null,
-        city: address.city ?? null,
-        region: address.region ?? null,
-        postalCode: address.postalCode ?? null,
-        country: address.country ?? null,
-      }
-    : null;
+  if (formatAddress(address) === null) return null;
+  return {
+    line1: address?.line1 ?? null,
+    line2: address?.line2 ?? null,
+    city: address?.city ?? null,
+    region: address?.region ?? null,
+    postalCode: address?.postalCode ?? null,
+    country: address?.country ?? null,
+  };
 }
 
 const party = (name: string | null, address: PostalAddress | null): ManifestParty | null =>

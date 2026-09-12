@@ -171,6 +171,27 @@ describe("buildManifest — fields BorderConnect needs", () => {
     expect(m.shipments[0]?.delivery).toBeNull();
   });
 
+  it("delivery is null when the loader hands back an all-blank address object, not JS null", () => {
+    // This is what nestAddress/addressFromColumns actually return when no
+    // delivery address is on file — an object with every part blank/absent,
+    // never a JS `null` itself (see packages/domain/src/registry.ts
+    // addressFromColumns, which omits every blank part rather than nulling it).
+    const src = makeSource();
+    src.shipments[0]!.deliveryAddress = {};
+    const m = buildManifest(src);
+    expect(m.shipments[0]?.delivery).toBeNull();
+  });
+
+  it("shipper/consignee postal is null when the loader hands back an all-blank address object", () => {
+    // partnerAddressJson can likewise return {} / all-blank for a partner
+    // with no address columns set — same footgun as deliveryAddress.
+    const src = makeSource();
+    src.shipments[0]!.shipperAddress = {};
+    const m = buildManifest(src);
+    expect(m.shipments[0]?.shipper?.address).toBeNull();
+    expect(m.shipments[0]?.shipper?.postal).toBeNull();
+  });
+
   it("carries commodity packagingType and weightUnit", () => {
     const m = buildManifest(makeSource());
     const c = m.shipments[0]!.commodities[0]!;
