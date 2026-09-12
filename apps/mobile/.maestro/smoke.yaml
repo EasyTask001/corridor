@@ -1,0 +1,80 @@
+# Golden-path smoke test for the driver app (ISSUE-009).
+#
+# WRITTEN WITHOUT ACCESS TO A DEVICE OR EMULATOR — nothing here has been run.
+# Treat it as a starting point, not a working test: the first person who runs
+# it should expect to fix element selectors and timing before it goes green,
+# then delete this warning.
+#
+# Prerequisites:
+#   - Maestro CLI installed (https://maestro.mobi — curl -Ls "https://get.maestro.mobi" | bash)
+#   - A dev-client or standalone build of this app installed on the device/
+#     emulator (`eas build --profile development` or a local prebuild).
+#     Maestro drives an installed app by its bundle id, not Metro directly, so
+#     plain Expo Go is not enough here.
+#   - The Next.js API and a seeded local database running (see the main
+#     README's "Quick start"), and apps/mobile/.env.local pointed at them.
+#   - A seeded Driver-Portal login: driver@pathfinder.demo / corridor-demo.
+#   - A photo already present in the device/emulator's media library, so
+#     "Choose from library" has something to pick (Maestro's `addMedia:`
+#     command can seed one before this flow runs).
+#
+# Run: maestro test .maestro/smoke.yaml
+appId: com.corridor.driver
+---
+- launchApp:
+    clearState: true
+
+# --- Sign in ---
+- assertVisible: "Welcome back"
+- tapOn:
+    id: "Email address"
+- inputText: "driver@pathfinder.demo"
+- tapOn:
+    id: "Password"
+- inputText: "corridor-demo"
+- tapOn: "Sign in"
+- assertNotVisible: "Welcome back"
+
+# --- Assigned loads board ---
+# Requires the seed to have assigned at least one movement to this driver.
+- assertVisible: "Corridor"
+- tapOn:
+    text: "Open movement .*"
+    index: 0
+
+# --- Movement detail ---
+- assertVisible: "Paperwork"
+
+# --- Document capture ---
+- tapOn: "Photograph a document"
+- assertVisible: "Document type"
+- tapOn: "Choose from library"
+- tapOn:
+    text: ".*"
+    index: 0 # first photo in the picker
+- assertVisible:
+    text: "Upload"
+    enabled: true
+- tapOn: "Upload"
+- assertVisible:
+    text: "Uploaded\\."
+    timeout: 15000
+- tapOn: "Done"
+
+# --- Proof of delivery ---
+- tapOn: "Capture proof of delivery"
+- assertVisible: "Consignee signature"
+- swipe:
+    start: "30%, 45%"
+    end: "70%, 55%"
+- tapOn: "Upload signature"
+- assertVisible:
+    text: "Signature stored|Signature uploaded"
+    timeout: 15000
+- tapOn: "Done"
+
+# --- Sign out (leaves the device clean for the next run) ---
+- scrollUntilVisible:
+    element: "Sign out"
+- tapOn: "Sign out"
+- assertVisible: "Welcome back"

@@ -36,6 +36,22 @@ pnpm --filter @corridor/mobile lint
 pnpm --filter @corridor/mobile test
 ```
 
+**None of the above touches a real device or emulator**, so camera capture, the
+signature pad's PNG upload, SecureStore session persistence, and Expo push
+registration have never actually run outside a unit-test mock (ISSUE-009).
+`.maestro/smoke.yaml` is a starting point for closing that gap — it was
+written without access to a device and has never been run, so expect to fix
+selectors before it passes:
+
+```bash
+pnpm --filter @corridor/mobile test:e2e   # needs Maestro + a dev-client build; see the flow file's own header
+```
+
+Until an automated device run exists, walk the app by hand at least once
+before trusting a change that touches capture, POD, auth persistence, or
+push: sign in, open an assigned load, photograph a document, capture a
+signature, sign out.
+
 ## Screens
 
 | Route                                    | What it does                                                                |
