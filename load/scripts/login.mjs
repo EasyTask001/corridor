@@ -146,18 +146,21 @@ async function signIn(email) {
   return body;
 }
 
-/** The caller's own active membership, read through PostgREST under their RLS. */
+/**
+ * The caller's own active membership. Migration 0032 removed `public` from
+ * PostgREST's exposed schemas entirely (only `api`'s RPC wrappers remain, and
+ * `organization_members` has none — it was never meant for direct REST
+ * access), so a raw `/rest/v1/organization_members` call 404s. `organization.me`
+ * is the same session-bootstrap tRPC procedure the web app itself calls, so
+ * this asks the server under test rather than the database directly.
+ */
 async function activeOrgId(accessToken) {
-  const url = new URL(`${SUPABASE_URL}/rest/v1/organization_members`);
-  url.searchParams.set("select", "organization_id");
-  url.searchParams.set("status", "eq.active");
-  url.searchParams.set("limit", "1");
-  const res = await fetch(url, {
-    headers: { apikey: ANON_KEY, authorization: `Bearer ${accessToken}` },
+  const res = await fetch(`${BASE_URL}/api/trpc/organization.me`, {
+    headers: { authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) return null;
-  const rows = await res.json().catch(() => []);
-  return rows[0]?.organization_id ?? null;
+  const body = await res.json().catch(() => null);
+  return body?.result?.data?.json?.activeOrganizationId ?? null;
 }
 
 const sessions = [];

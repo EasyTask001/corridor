@@ -78,6 +78,12 @@ export const options = {
       maxDuration: "10m",
     },
   },
+  // k6 kills teardown() after 60s by default, well inside DRAIN_TIMEOUT_S
+  // (300s) — the drain-polling loop below lives entirely in teardown(), so
+  // without this override k6 silently truncates it and every drain metric
+  // reports zero samples, which the drained/queue_drain_seconds thresholds
+  // then pass vacuously instead of measuring anything.
+  teardownTimeout: `${DRAIN_TIMEOUT_S + 30}s`,
   thresholds: {
     checks: ["rate>0.99"],
     rate_limited: ["rate<0.01"],

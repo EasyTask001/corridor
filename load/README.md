@@ -129,3 +129,63 @@ run that hit the limiter says so rather than quietly reporting bad latency.
 `bulk-upload.js` also needs a worker: `/api/jobs/process` (Vercel Cron in
 production) or the request-tail worker in `apps/web/src/lib/jobs.ts`, which runs
 locally on every tRPC POST.
+
+## Baseline (2026-09-12, first real run — ISSUE-010)
+
+These three scripts existed since 2026-09-07 but had never actually been run.
+Running them for the first time surfaced two real bugs in the load-testing
+tooling itself, fixed alongside this baseline:
+
+- `scripts/login.mjs` queried `organization_members` directly via
+  `/rest/v1/...`. Migration `0032` removed `public` from PostgREST's exposed
+  schemas entirely, so this 404'd and every session silently came back with no
+  active org. Fixed to ask `organization.me` — the same tRPC procedure the web
+  app itself calls to bootstrap a session — instead of the database directly.
+- `k6/bulk-upload.js`'s drain check lives entirely in `teardown()`, polling for
+  up to `DRAIN_TIMEOUT_S` (300s). k6 kills `teardown()` after **60s** by
+  default, and the script never overrode `options.teardownTimeout` — so every
+  run before this one silently truncated the drain measurement to whatever
+  happened in the first minute, and the `queue_drained`/`queue_drain_seconds`
+  thresholds "passed" vacuously (zero samples, not zero problems). Fixed by
+  setting `teardownTimeout` to `DRAIN_TIMEOUT_S + 30s`.
+
+Run against a local build (`pnpm --filter web build && pnpm --filter web
+start`, `CORRIDOR_RATELIMIT_MULTIPLIER=200`, no Upstash), local Supabase,
+default `pnpm db:seed` data:
+
+| Script | Bar | Result |
+| --- | --- | --- |
+| `movements-list.js` | p95 < 500ms (both metrics) | ✅ `movement_list_duration` p95 = **144ms**, `movement_board_duration` p95 = **95ms**, 0% rate-limited |
+| `realtime-fanout.js` | p95 < 500ms; every channel subscribed | ✅ `realtime_token_duration` p95 = **93ms**, 100% sockets opened, 100% channels subscribed |
+| `bulk-upload.js` | 100 uploads drain within 5 minutes | ⚠️ **91/100** drained in 300s, 0% extraction failures, 0% rate-limited |
+
+The first two scripts pass comfortably with headroom to spare. `bulk-upload.js`
+narrowly misses its own bar. This needed two attempts to measure honestly:
+
+- A first attempt against a database with backlog left over from an earlier
+  interrupted run measured only 6/100 — an artifact of old undrained jobs
+  competing for the same per-organization concurrency slot
+  (`claim_jobs(p_org_cap default 2)`), not a real capacity number. Discard any
+  reading taken without a clean `pnpm exec supabase db reset && pnpm db:seed`
+  immediately before the run.
+- The clean run above also ran a script polling `/api/jobs/process` once a
+  minute for the run's duration, standing in for the Vercel Cron safety net
+  that exists in production but not in a bare local dev server — without it,
+  extraction only advances as a side effect of incoming HTTP traffic
+  (`drainDueJobs()` in `apps/web/src/lib/jobs.ts`), which the k6 script's own
+  request traffic provides unevenly. Reproduce with:
+  ```sh
+  CRON_SECRET=<something> pnpm --filter web start   # in addition to CORRIDOR_RATELIMIT_MULTIPLIER
+  while sleep 60; do curl -s localhost:3000/api/jobs/process -H "authorization: Bearer <something>"; done &
+  ```
+
+The 9 undrained documents were still `processing`, not `failed` — direct
+inspection of `background_jobs` during the run showed individual
+`document.extract` jobs completing in ~4s on average, consistent with the
+org's 2-concurrent-extraction cap being the throttle, not an error. A slightly
+longer window would very likely clear the rest; this wasn't re-verified to
+avoid burning more real OpenAI API calls on the same measurement. Whether a
+100-document single-tenant burst missing its bar by a small margin is worth
+raising `p_org_cap` for bulk-import scenarios, or whether 5 minutes was
+always an optimistic bar for the default cap, is a product call — not made
+here.
