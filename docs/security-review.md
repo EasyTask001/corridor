@@ -2,11 +2,16 @@
 
 Reviewed at `117531d` (gap-closure Tasks 1–8 landed), against the §10 checklist
 in the build plan; §9b and finding C1 were added by the whole-branch review that
-followed Task 11 and fixed in `eb72589`. Every claim below is a file reference or a query you can
-re-run; nothing here is asserted from memory.
+followed Task 11 and fixed in `eb72589`. Refreshed 2026-09-11 after the
+`docs/AUDIT-2026-09-11.md` remediation branch merged (migrations through
+`0045`) and issues #3–#5 closed the gaps it found in this doc's own claims
+(§6, §8, §9, F4 below) — those sections and finding were re-verified directly
+against `pg_proc`/`has_function_privilege` rather than carried forward. Every
+claim below is a file reference or a query you can re-run; nothing here is
+asserted from memory.
 
 Scope: the Next.js app (`apps/web`), the tRPC API (`packages/api`), the database
-and its policies (`supabase/migrations/0001`–`0017`). Out of scope: the Expo app
+and its policies (`supabase/migrations/0001`–`0045`). Out of scope: the Expo app
 (`apps/mobile`), and the mock customs gateways, which never see a real
 credential.
 
@@ -188,8 +193,8 @@ Supabase Vault, one secret per `(organization, provider)`:
   by IP (`sso:ip:<ip>`), which is what stops domain enumeration.
 - Upstash when configured, an in-process sliding window otherwise; the fallback
   multiplies the ceilings by 10 outside production only (`rateLimitMultiplier()`).
-- Fails **open** on a Redis error — a deliberate availability trade-off, noted in
-  Findings.
+- Falls back to the in-process sliding window on a Redis error, rather than
+  failing open (see F2 — resolved).
 
 Covered by `packages/api/src/ratelimit.test.ts`.
 
@@ -222,8 +227,8 @@ reachable from a browser bundle:
 | Site                                                      | Why                                                                                                                                                                  |
 | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `apps/web/src/app/api/webhooks/supabase-auth/route.ts:97` | Provisioning a profile for a user who has no session yet.                                                                                                            |
-| `packages/api/src/services/customs.ts:85`                 | Reading the vault secret (`read_integration_secret` is service-role only).                                                                                           |
-| `packages/api/src/services/documents.ts:27`               | Downloading the uploaded object for extraction, in a job with no caller.                                                                                             |
+| `packages/api/src/services/customs.ts:98`                 | Reading the vault secret (`read_integration_secret` is service-role only).                                                                                           |
+| `packages/api/src/services/documents.ts:28`               | Downloading the uploaded object for extraction, in a job with no caller.                                                                                             |
 | `packages/api/src/services/pdf.ts:53`                     | Storing a generated PDF/CSV (migration 0024); the object path is scoped to the caller's own organization, gated by the tRPC permission check, not the bucket policy. |
 | `packages/integrations/src/sso.ts:52`                     | SAML provider administration via the Auth admin API.                                                                                                                 |
 | `packages/db/scripts/seed.ts:21`                          | The seed script — developer tooling, not shipped.                                                                                                                    |
@@ -237,7 +242,13 @@ passes `organizationId: ctx.orgId` to `processDueJobs`, which forwards it as
 `claim_jobs(…, p_organization_id)` (0041) so only that organization's rows are
 claimed, and the procedure returns counts only — never a job's `result` payload.
 The remaining call sites are `packages/api/src/services/audit.ts` (audit rows for
-actorless events), `packages/api/src/router/billing.ts`, and — since migration
+actorless events), `packages/api/src/router/billing.ts` (Stripe webhook's
+subscription mirror, no session), `packages/api/src/services/usage.ts`
+`reportPendingUsage` (queue-wide Stripe usage metering, batched across every
+organization by a cron job, not a caller), `packages/api/src/services/notifications.ts`
+`notifyUser` (every caller resolves the recipient from an org-scoped row it
+already read under RLS before calling in, and must not be inside its own
+transaction — see the function's own doc comment), and — since migration
 0023 — the customs webhook (`api/webhooks/customs` → `applyInboundCustomsMessage`,
 which resolves the gateway's reference number to one organization through
 `customs_submissions` before touching anything, and is idempotent per `eventId`).
@@ -257,8 +268,14 @@ status/port/entry timestamps. The route is additionally IP-rate-limited
 ## 9. SECURITY DEFINER functions pin `search_path`
 
 Every application-defined SECURITY DEFINER function in `public` has
-`search_path=public` in `proconfig` — the mutable-search-path escalation is
-closed. Full list, from `pg_proc`:
+`search_path=""` (empty) in `proconfig` — the mutable-search-path escalation is
+closed, and every object reference inside them is schema-qualified so an empty
+path costs nothing. This tightened from the original `search_path=public` via
+migration `0032` (API hardening) and `0039` (lint fixes for the last
+stragglers); `packages/db/scripts/lint-migrations.ts` now statically enforces
+`set search_path = ''` on every SECURITY DEFINER function in a migration
+numbered `0032` or later, so this cannot silently regress (see Finding F4,
+resolved). Full list, from `pg_proc`:
 
 `accept_invitation`, `claim_jobs`, `create_organization_with_owner`,
 `current_user_permissions`, `delete_integration_secret`, `handle_new_auth_user`,
@@ -334,9 +351,14 @@ derive everything from `auth.uid()` and are the check rather than a bypass of it
   asserts that mutating procedures write an audit row, so the trail cannot rot
   silently as routers grow.
 - **Per-org job concurrency cap.** `claim_jobs(p_org_cap default 2)`, currently
-  defined in `supabase/migrations/0041_claim_jobs_org_scope.sql` (cap since
-  0011, leases since 0033), with `FOR UPDATE SKIP LOCKED` leasing, so one
-  tenant's AI burst cannot starve the queue.
+  defined in `supabase/migrations/0045_claim_jobs_org_cap_fix.sql` (cap since
+  0011, leases since 0033, org-scoped claiming since 0041), with
+  `FOR UPDATE SKIP LOCKED` leasing, so one tenant's AI burst cannot starve the
+  queue. 0045 closed a correctness bug (not a tenant-isolation gap — the cap
+  only ever under-enforced within one tenant's own batch, never crossed a
+  tenant boundary) where the cap was checked once per batch instead of per
+  claimed row, letting a single call claim an organization's entire backlog;
+  see `packages/db/src/jobs.integration.test.ts`'s contention and cap tests.
 - **Uploads never pass through a function.** `documents.getUploadUrl` mints a
   signed upload URL with the **caller's** session, so Storage RLS applies to the
   upload itself (`packages/api/src/router/documents.ts:69`).
@@ -398,12 +420,11 @@ runs with `NODE_ENV=development` over HTTPS, the session cookie would be sent in
 the clear on any downgrade. Consider keying it on the request protocol or an
 explicit env flag.
 
-**F4 — `search_path` is pinned to `public`, not `''` (informational).** Pinning
-closes the escalation. Supabase's own advisor prefers an empty `search_path` with
-fully-qualified names, which additionally removes the dependency on `public`
-being trustworthy. All 22 functions already fully-qualify their references, so
-this would be a mechanical change — but it needs a new migration per function and
-buys little given `public` is not writable by `authenticated`.
+**F4 — `search_path` is pinned to `public`, not `''` (informational). RESOLVED
+in `0032`/`0039`.** Every SECURITY DEFINER function in `public` now sets
+`search_path=""` and fully-qualifies its object references — verified directly
+against `pg_proc.proconfig` for all 24 (§9) — and `lint-migrations.ts` enforces
+it statically for every migration from `0032` onward, so it cannot regress.
 
 **F5 — the anon key is echoed into `load/.sessions.json` (informational).** The
 load-test session file holds real access tokens for demo users. It is git-ignored
