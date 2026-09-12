@@ -148,6 +148,35 @@ export function connectBorderConnectSocket(
 
   const log = (message: string) => onLog?.(message);
 
+  /**
+   * `onMessages` runs the caller's DB write (`index.ts`'s
+   * `withServiceRole(db, tx => storeInboundMessages(tx, msgs))`), which can
+   * genuinely reject — pool exhaustion, a constraint violation, a network
+   * blip to Postgres. Calling it directly as `void onMessages(messages)`
+   * would leave that rejection unhandled, and Node's default
+   * `--unhandled-rejections=throw` terminates the whole process on an
+   * unhandled rejection — turning one bad batch into this app's own crash,
+   * exactly the kind of transient failure the socket's reconnect/backoff
+   * logic exists to survive.
+   *
+   * `onMessages` is still invoked synchronously here (so a caller that
+   * calls back into this module synchronously, or a test asserting an
+   * immediate call, sees exactly the same timing as before) — only the
+   * *rejection* of whatever it returns is handled asynchronously. A
+   * synchronous throw is caught directly.
+   */
+  function safeOnMessages(messages: Record<string, unknown>[]): void {
+    const onFailure = (err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      log(`onMessages failed for a batch of ${messages.length} message(s), dropping: ${message}`);
+    };
+    try {
+      Promise.resolve(onMessages(messages)).catch(onFailure);
+    } catch (err) {
+      onFailure(err);
+    }
+  }
+
   function clearAuthTimer(): void {
     if (authTimer) {
       clearTimeout(authTimer);
@@ -232,7 +261,7 @@ export function connectBorderConnectSocket(
       }
 
       const messages = toMessageArray(parsed);
-      if (messages.length > 0) void onMessages(messages);
+      if (messages.length > 0) safeOnMessages(messages);
     });
 
     socket.on("close", () => {

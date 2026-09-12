@@ -238,4 +238,60 @@ describe("connectBorderConnectSocket", () => {
     vi.advanceTimersByTime(10 * 60_000);
     expect(sockets.length).toBe(1);
   });
+
+  it("does not crash (no unhandled rejection) when onMessages rejects, and keeps delivering later frames", async () => {
+    // Proves the real failure mode this guards against: Node's default
+    // `--unhandled-rejections=throw` terminates the process on an unhandled
+    // rejection. If `onMessages`'s rejection here were ever left unhandled,
+    // this listener would fire and the process would be one bad DB write
+    // away from crashing — exactly the transient failure a socket
+    // reconnect/backoff is supposed to survive, not fall over on.
+    const unhandledRejections = vi.fn();
+    process.on("unhandledRejection", unhandledRejections);
+
+    try {
+      const onLog = vi.fn();
+      const onMessages = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("db write failed"))
+        .mockResolvedValueOnce(undefined);
+
+      connectBorderConnectSocket({
+        suffix: "EasyTask",
+        apiKey: "secret-key",
+        onMessages,
+        wsFactory,
+        onLog,
+      });
+      const socket = sockets[0]!;
+      socket.emit("open");
+      socket.emit("message", JSON.stringify(connectedAck()));
+
+      const firstFrame = { data: "ACE_RESPONSE", tripStatus: "AAD" };
+      socket.emit("message", firstFrame);
+
+      // Flush the microtask queue so the rejected promise's internal
+      // `.catch` handler actually runs (fake timers don't affect
+      // microtasks, only setTimeout/setInterval).
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(onMessages).toHaveBeenCalledTimes(1);
+      expect(onMessages).toHaveBeenNthCalledWith(1, [firstFrame]);
+      expect(onLog).toHaveBeenCalledWith(expect.stringContaining("onMessages failed"));
+      expect(unhandledRejections).not.toHaveBeenCalled();
+
+      // The listener keeps operating after the failed batch — a later
+      // frame is still delivered normally, not dropped or stuck.
+      const secondFrame = { data: "RNS_SHIPMENT", cargoControlNumber: "1" };
+      socket.emit("message", secondFrame);
+      await Promise.resolve();
+
+      expect(onMessages).toHaveBeenCalledTimes(2);
+      expect(onMessages).toHaveBeenNthCalledWith(2, [secondFrame]);
+      expect(unhandledRejections).not.toHaveBeenCalled();
+    } finally {
+      process.off("unhandledRejection", unhandledRejections);
+    }
+  });
 });
