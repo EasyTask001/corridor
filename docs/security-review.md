@@ -236,7 +236,30 @@ reachable from a browser bundle:
 The RLS-bypassing **database** path is `withServiceRole()` (`packages/db/src/rls.ts:56`),
 whose contract is that callers must filter by `organization_id` themselves. Its
 call sites are the job worker and cron routes (`api/jobs/process`,
-`api/jobs/expiry-scan`, `api/jobs/notices-sync`) and `packages/api/src/services/jobs.ts`.
+`api/jobs/expiry-scan`, `api/jobs/notices-sync`, and — since the BorderConnect
+adapter — `api/jobs/borderconnect-drain`) and `packages/api/src/services/jobs.ts`.
+
+`api/jobs/borderconnect-drain` (cron, every minute) enqueues and immediately runs
+`customs.borderconnect_drain`: `services/borderconnect.ts`'s `drainBorderConnectInbox`
+calls `withServiceRole` to store every message BorderConnect's shared `GET /api/receive`
+queue returns into `customs_inbox` (queue-wide, no `organization_id` yet), then
+`processInboxRow` opens one `withServiceRole` transaction **per row** (never one for the
+whole batch, so a bad row can't roll back the others) to route it by `companyKey →
+organizations.border_connect_company_key` and apply it. A second, standalone process,
+`apps/borderconnect-listener` (a persistent WebSocket client, not deployed/wired into
+any cron in this repo yet — see its README), opens its own service-role Postgres
+connection the same way and calls the same `storeInboundMessages` for every frame it
+receives, so the "queue-wide until routed" contract is identical from either entry point.
+
+RNS messages are the one BorderConnect exception to "route by companyKey": `RNS_SHIPMENT`
+carries no `companyKey` at all (CBSA's release-notification format has no per-carrier field),
+so `findShipmentsForRns` (`services/borderconnect.ts`) resolves them by `cargo control
+number → shipments.control_number` searched **across every organization**, not scoped to
+one tenant — the one cross-org lookup this adapter performs. Since `control_number` is
+unique only per organization, a collision is narrowed by keeping only candidates whose
+movement is ACI and still `sent`/`accepted`/`held`; the message is applied only when
+**exactly one** candidate survives — 0 or >1 is stamped `unroutable` (`"unknown CCN"` /
+`"ambiguous CCN (<n> candidates)"`) and never applied to the wrong tenant's shipment.
 The one service-role claim a signed-in user can trigger, `integrations.jobs.runNow`,
 passes `organizationId: ctx.orgId` to `processDueJobs`, which forwards it as
 `claim_jobs(…, p_organization_id)` (0041) so only that organization's rows are

@@ -214,8 +214,23 @@ ambiguities. See `docs/superpowers/plans/2026-09-12-borderconnect-service-provid
 relevant here:
 
 1. **`GET /api/receive` envelope** is still unconfirmed against a live account
-   — `normaliseReceiveBody` (`transport.ts`) defensively handles four shapes
-   until a smoke script (a later task) settles it.
+   — `normaliseReceiveBody` (`transport.ts`) defensively handles four shapes.
+   `scripts/borderconnect-smoke.ts` (Task 16) exists and is ready to settle
+   this (loads `.env.local`, builds a minimal ACE manifest, files it with
+   `autoSend: false`, polls `GET receive` five times printing the raw body
+   next to `normaliseReceiveBody(body)`), but **it has not been run against
+   the live account yet**: `.env.local` in this worktree (and in the main
+   checkout) has `BORDERCONNECT_API_KEY` and the account's WebSocket URL
+   (from which `BORDERCONNECT_API_URL_SUFFIX=EasyTask` is confidently
+   derived — see the plan's Task 16 entry) but no
+   `BORDERCONNECT_TEST_COMPANY_KEY` value anywhere in the repo, its git
+   history, or any doc. The smoke script correctly refuses to run without
+   it (verified — see the Task 16 report) rather than guess one and send a
+   real request under a fabricated tenant identity. **This risk remains
+   open**: someone with access to the BorderConnect Service Provider
+   account/dashboard needs to supply the real test `companyKey`, add it to
+   `.env.local` as `BORDERCONNECT_TEST_COMPANY_KEY`, and re-run
+   `pnpm --filter @corridor/integrations smoke:borderconnect`.
 2. **ACI amendments**: this client's `amend()` sends `operation: UPDATE,
    autoSend: true` for both regimes — for ACE that's confirmed, but ACI may
    require `ACI_SEND_REQUEST { type: "AMEND", tripAmendmentReasonCode }`

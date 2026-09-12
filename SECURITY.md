@@ -72,6 +72,7 @@ Everything below is a claim you can check against the file it names, or a query 
 | Supabase Auth webhook secret                        | deployment env                                            | the webhook handler only                                                                                                       |
 | Resend / Twilio / Expo push credentials             | deployment env                                            | server only (`@corridor/integrations`); unset = logged mock send                                                               |
 | Customs gateway base URL + API key + webhook secret | deployment env (fallback) or **Supabase Vault** (per-org) | server only (`@corridor/integrations`); unset = fixture replay, no live transmit                                               |
+| BorderConnect API URL suffix + API key              | deployment env (account-wide, one Service Provider account for every tenant) | server only (`@corridor/integrations`, `apps/borderconnect-listener`); unset = fixture replay. `BORDERCONNECT_TEST_COMPANY_KEY` is read only by `packages/integrations/scripts/borderconnect-smoke.ts`, never by application code. |
 
 Never committed: `.gitignore` ignores `.env` and `.env.*`, with `!.env.example` as the single
 tracked exception — and that file holds names, never values.
@@ -110,6 +111,12 @@ tracked exception — and that file holds names, never values.
 | Stripe          | `stripe.webhooks.constructEvent` with `STRIPE_WEBHOOK_SECRET`                                                                                 |
 | Supabase Auth   | Standard Webhooks HMAC-SHA256 with `SUPABASE_AUTH_WEBHOOK_SECRET`                                                                             |
 | Customs gateway | HMAC-SHA256 over the raw body, hex in `X-Corridor-Signature`, with `CUSTOMS_GATEWAY_WEBHOOK_SECRET`. Unset = every delivery refused with 401. |
+
+BorderConnect has no inbound webhook to verify: it never pushes to Corridor. `customs.
+borderconnect_drain` (`/api/jobs/borderconnect-drain`, cron every minute) and the standalone
+`apps/borderconnect-listener` WebSocket process both pull from BorderConnect's own shared inbox
+using the account's `Api-Key`, so there is nothing for an attacker to forge a signature against —
+see review §8 for how each writes to `customs_inbox` under `withServiceRole`.
 
 Cron routes (`/api/jobs/process`, `/api/jobs/expiry-scan`, `/api/jobs/notices-sync`) fail closed through
 `cronAuthFailure()`: an unset `CRON_SECRET` is a 503, a wrong one a 401 compared with

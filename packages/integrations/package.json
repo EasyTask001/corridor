@@ -11,7 +11,8 @@
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "smoke:borderconnect": "tsx scripts/borderconnect-smoke.ts"
   },
   "dependencies": {
     "@corridor/domain": "workspace:*",
@@ -23,6 +24,7 @@
     "@corridor/config": "workspace:*",
     "@types/node": "^22.18.0",
     "eslint": "^9.35.0",
+    "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "vitest": "^5.0.0"
   }

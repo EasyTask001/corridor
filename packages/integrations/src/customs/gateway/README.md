@@ -49,3 +49,15 @@ with the filing's control numbers and port, and entry numbers come from
 `CUSTOMS_GATEWAY_WEBHOOK_SECRET`, hex in `X-Corridor-Signature`
 (`inbound.ts`). The reference number resolves to the movement through
 `customs_submissions`; `eventId` makes delivery idempotent.
+
+## The other live mode: BorderConnect
+
+`../borderconnect/` is a third `CustomsClient` mode, `border_connect` — a
+different provider with a materially different shape: one shared Service
+Provider account (not per-org base URL/API key), a poll-driven shared inbox
+(not a signed inbound webhook), and message-oriented `POST /api/send` /
+`GET /api/receive` (not one REST endpoint per operation). See
+`../borderconnect/README.md` for its transport, mapping and inbound-parsing
+conventions — they intentionally do not reuse this package's `transport.ts`/
+`mapping.ts`, since BorderConnect's wire protocol doesn't fit this gateway's
+shape.
