@@ -38,6 +38,7 @@ import {
   loadOrganization,
   lockMovement,
   markShipmentsSent,
+  recordCustomsEvents,
   requireMovement,
   validationFor,
   type Actor,
@@ -690,6 +691,16 @@ export async function applyStatusMessage(
         });
         changed = true;
       }
+    }
+  } else if (status.events.length > 0 || status.shipments.length > 0) {
+    // No decision (accepted/rejected/released/held) rides with this message —
+    // e.g. an ACE_RESPONSE naming only one shipment's entry number, or a
+    // purely informational ACI_NOTICE — but it still carries events/outcomes
+    // worth recording. Only for a movement that is actually in flight with
+    // customs; a movement that has already reached a decision or is still a
+    // local draft has no business absorbing gateway events.
+    if (["sent", "accepted", "held"].includes(current.status)) {
+      await recordCustomsEvents(tx, actor, current, status.events, status.shipments);
     }
   }
 

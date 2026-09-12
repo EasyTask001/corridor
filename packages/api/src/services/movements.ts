@@ -111,27 +111,24 @@ const SHIPMENT_STAMP: Partial<
 };
 
 /**
- * Fan a customs decision out to the shipments riding the movement (0022):
- * every gateway message becomes a `customs_event` timeline row (linked to its
- * shipment when it names one), entry numbers land on the shipment, and each
- * shipment's status follows the decision as far as its own state machine
- * allows. Shipments the gateway did not mention still cascade.
+ * Record the provider-agnostic, decision-independent part of a customs
+ * message: every event becomes a `customs_event` timeline row (linked to its
+ * shipment when it names one, and fed to the PARS RNS feed when it carries
+ * CBSA's release fields (0027)), and any shipment the message names an entry
+ * number for gets that entry number written — with no bearing on, and no
+ * dependency on, a movement-level decision. This is the part of
+ * `applyShipmentOutcomes` a decision-free message (an inbound event/outcome
+ * with no accepted/rejected/released/held verdict) still needs.
  */
-async function applyShipmentOutcomes(
+export async function recordCustomsEvents(
   tx: Tx,
   actor: Actor,
   m: typeof movements.$inferSelect,
-  decision: "accepted" | "rejected" | "released" | "held",
   events: CustomsEventMessage[],
   outcomes: CustomsShipmentMessage[],
-) {
+): Promise<void> {
   const attached = await tx
-    .select({
-      id: shipments.id,
-      controlNumber: shipments.controlNumber,
-      status: shipments.status,
-      entryNumber: shipments.entryNumber,
-    })
+    .select({ id: shipments.id, controlNumber: shipments.controlNumber })
     .from(shipments)
     .where(eq(shipments.movementId, m.id));
   const byControl = new Map(attached.map((s) => [s.controlNumber, s]));
@@ -185,7 +182,49 @@ async function applyShipmentOutcomes(
   }
 
   const mentioned = new Map(outcomes.map((o) => [o.controlNumber, o]));
+  for (const s of attached) {
+    const o = mentioned.get(s.controlNumber);
+    if (!o?.entryNumber) continue;
+    await tx
+      .update(shipments)
+      .set({
+        entryNumber: o.entryNumber,
+        entryPortId: (await portIdFor(o.entryPortCode)) ?? undefined,
+      })
+      .where(eq(shipments.id, s.id));
+  }
+}
+
+/**
+ * Fan a customs decision out to the shipments riding the movement (0022):
+ * every gateway message becomes a `customs_event` timeline row (linked to its
+ * shipment when it names one), entry numbers land on the shipment, and each
+ * shipment's status follows the decision as far as its own state machine
+ * allows. Shipments the gateway did not mention still cascade.
+ */
+async function applyShipmentOutcomes(
+  tx: Tx,
+  actor: Actor,
+  m: typeof movements.$inferSelect,
+  decision: "accepted" | "rejected" | "released" | "held",
+  events: CustomsEventMessage[],
+  outcomes: CustomsShipmentMessage[],
+) {
+  const attached = await tx
+    .select({
+      id: shipments.id,
+      controlNumber: shipments.controlNumber,
+      status: shipments.status,
+      entryNumber: shipments.entryNumber,
+    })
+    .from(shipments)
+    .where(eq(shipments.movementId, m.id));
+
   const hadAllEntries = attached.length > 0 && attached.every((s) => !!s.entryNumber);
+
+  await recordCustomsEvents(tx, actor, m, events, outcomes);
+
+  const mentioned = new Map(outcomes.map((o) => [o.controlNumber, o]));
   let entries = 0;
   for (const s of attached) {
     const o = mentioned.get(s.controlNumber);
@@ -204,10 +243,6 @@ async function applyShipmentOutcomes(
       set.status = next;
       const stamp = SHIPMENT_STAMP[next];
       if (stamp) set[stamp] = new Date();
-    }
-    if (o?.entryNumber) {
-      set.entryNumber = o.entryNumber;
-      set.entryPortId = (await portIdFor(o.entryPortCode)) ?? undefined;
     }
     if (o?.entryNumber || s.entryNumber) entries += 1;
     if (Object.keys(set).length > 0)

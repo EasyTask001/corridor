@@ -69,13 +69,13 @@ import { applyStatusMessage, customsClientFor, transmitMovement } from "./custom
 const MOVEMENT_ID = "44444444-4444-4444-8444-444444444444";
 const SHIPMENT_ID = "12121212-1212-4212-8212-121212121212";
 
-function gatewayRows(status: string): Record<string, Row[]> {
+function gatewayRows(status: string, regime: "ACE" | "ACI" = "ACE"): Record<string, Row[]> {
   return {
     movements: [
       {
         id: MOVEMENT_ID,
         organizationId: TEST_ORG_ID,
-        regime: "ACE",
+        regime,
         movementNumber: "ACE-26-00042",
         status,
         customsReferenceNumber: "ACE-FX00001",
@@ -180,6 +180,96 @@ describe("applyStatusMessage", () => {
       shipments: [],
     });
     expect(r).toMatchObject({ changed: true, status: "cancelled", terminal: true });
+  });
+
+  it("an events-only message (no decision) records the event and the shipment's entry number without changing movement status", async () => {
+    const db = createFakeDb({ rows: gatewayRows("held") });
+    const m = db.table("movements")[0] as never;
+    const eventsOnly: CustomsStatusMessage = {
+      referenceNumber: "ACE-FX00001",
+      status: "held",
+      decision: null,
+      message: null,
+      events: [
+        {
+          code: "entry_on_file",
+          label: "Entry on file",
+          occurredAt: "2026-09-06T12:00:00.000Z",
+          shipmentControlNumber: "PFTRPAPS0001",
+          entryNumber: "30099999999",
+          entryPortCode: "3801",
+        },
+      ],
+      shipments: [
+        {
+          controlNumber: "PFTRPAPS0001",
+          status: "accepted",
+          entryNumber: "30099999999",
+          entryPortCode: "3801",
+        },
+      ],
+      raw: {},
+    };
+    const r = await applyStatusMessage(db.tx, { orgId: TEST_ORG_ID, userId: null }, m, eventsOnly);
+    expect(r).toEqual({ changed: false, status: "held", terminal: false });
+    expect(db.table("movementEvents").filter((e) => e.eventType === "status_change")).toHaveLength(
+      0,
+    );
+    expect(db.table("movementEvents").filter((e) => e.eventType === "customs_event")).toHaveLength(
+      1,
+    );
+    expect(db.table("shipments")[0]).toMatchObject({
+      status: "accepted",
+      entryNumber: "30099999999",
+    });
+    // Even though nothing "decided" (changed: false), the status is not
+    // "pending" so the filing's own status still gets stamped.
+    expect(db.table("customsSubmissions")[0]?.status).toBe("held");
+  });
+
+  it("an RNS-flagged ACI event still lands in pars_rns_events through the events-only path", async () => {
+    const db = createFakeDb({ rows: gatewayRows("accepted", "ACI") });
+    const m = db.table("movements")[0] as never;
+    const rnsOnly: CustomsStatusMessage = {
+      referenceNumber: "ACE-FX00001",
+      status: "accepted",
+      decision: null,
+      message: null,
+      events: [
+        {
+          code: "released",
+          label: "RNS release",
+          occurredAt: "2026-09-06T12:00:05.000Z",
+          shipmentControlNumber: "PFTRPAPS0001",
+          raw: {
+            rns: true,
+            releaseCode: "R1",
+            releasedAt: "2026-09-06T12:00:05.000Z",
+            officeCode: "0470",
+            sublocationCode: "01",
+            transactionNumber: "TX-1",
+            containerNumber: "CN-1",
+          },
+        },
+      ],
+      shipments: [],
+      raw: {},
+    };
+    const r = await applyStatusMessage(db.tx, { orgId: TEST_ORG_ID, userId: null }, m, rnsOnly);
+    expect(r).toEqual({ changed: false, status: "accepted", terminal: false });
+    expect(db.table("movementEvents").filter((e) => e.eventType === "status_change")).toHaveLength(
+      0,
+    );
+    const rns = db.table("parsRnsEvents");
+    expect(rns).toHaveLength(1);
+    expect(rns[0]).toMatchObject({
+      parsNumber: "PFTRPAPS0001",
+      releaseCode: "R1",
+      officeCode: "0470",
+      sublocationCode: "01",
+      transactionNumber: "TX-1",
+      containerNumber: "CN-1",
+    });
   });
 });
 
