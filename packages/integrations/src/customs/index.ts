@@ -26,6 +26,7 @@ export {
 export {
   createBorderConnectCustomsClient,
   createFixtureBorderConnectTransport,
+  FIXTURE_BORDERCONNECT_TENANT_KEY,
   type BorderConnectClientOptions,
 } from "./borderconnect/client";
 export { toAceTrip } from "./borderconnect/ace";
@@ -37,7 +38,11 @@ export {
   type BorderConnectTransport,
 } from "./borderconnect/transport";
 export { parseInbound, inboundKeys, type BorderConnectInbound } from "./borderconnect/inbound";
-export { isAciReleaseCode, BC_ACI_RELEASE_CODES } from "./borderconnect/code-lists";
+export {
+  isAciReleaseCode,
+  ACI_RELEASING_RELEASE_CODES,
+  BC_ACI_RELEASE_CODES,
+} from "./borderconnect/code-lists";
 
 export const providerForRegime = (regime: Regime): "cbp_ace" | "cbsa_aci" =>
   regime === "ACE" ? "cbp_ace" : "cbsa_aci";

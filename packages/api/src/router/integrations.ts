@@ -1,13 +1,13 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, desc, eq, schema, sql } from "@corridor/db";
+import { and, desc, eq, schema, sql, withServiceRole } from "@corridor/db";
 import { uuid } from "@corridor/domain";
 import { getBorderWait, lookupHsCode, searchTariff } from "@corridor/integrations";
 import { permissionProcedure, router } from "../trpc";
 import { isSafeGatewayBaseUrl } from "@corridor/integrations";
 import { writeAudit } from "../services/audit";
 import { customsClientFor } from "../services/customs";
-import { processDueJobs } from "../services/jobs";
+import { enqueueJob, processDueJobs } from "../services/jobs";
 
 const { integrationConfigs, integrationEvents, backgroundJobs, movements } = schema;
 
@@ -209,15 +209,30 @@ export const integrationsRouter = router({
    * fixture / mock) — except in `border_connect` mode, where there is no
    * synchronous ping to make (BorderConnect answers through the shared
    * inbox, not a request/response round trip): this drains it instead, the
-   * same job `customs.borderconnect_drain` runs every minute. Messages are
-   * stored before they are interpreted (services/borderconnect.ts), so
-   * clicking this is always safe — nothing is discarded, worst case it just
-   * runs the routing a minute early.
+   * same job `customs.borderconnect_drain` runs every minute.
+   *
+   * The drain is NOT called directly here. BorderConnect's inbox is one queue
+   * shared by every tenant, and `processInboxRow` writes `customs_event` and
+   * `pars_rns_events` rows that no compare-and-swap dedupes — so a click
+   * racing the cron (or a second click) could double-log another tenant's
+   * message and burn the shared BorderConnect rate limit for everyone. This
+   * goes through exactly the mechanism the cron route uses
+   * (`apps/web/src/app/api/jobs/borderconnect-drain/route.ts`): enqueue
+   * `customs.borderconnect_drain` under a per-minute idempotency key, then let
+   * `claim_jobs`'s lock decide who actually runs it. A click in the same
+   * minute as the cron's own enqueue finds the job already claimed and reports
+   * that rather than draining a second time.
+   *
+   * Unlike `jobs.runNow` below, the `processDueJobs` call is deliberately NOT
+   * scoped to `ctx.orgId`: the drain job is queue-wide (`organization_id` is
+   * null — it has no tenant until each message is routed by `companyKey`), so
+   * an org-scoped claim could never pick it up. Only this job's own counts are
+   * reported back; another tenant's job result is never returned.
    *
    * Two-transaction shape, like `jobs.runNow` above: read the config in one
-   * `ctx.rls`, drain on `ctx.db` with no RLS transaction open (`withServiceRole`
-   * must never nest inside one, packages/db/src/rls.ts), then audit in a
-   * second `ctx.rls`.
+   * `ctx.rls`, enqueue/run on `ctx.db` with no RLS transaction open
+   * (`withServiceRole` must never nest inside one, packages/db/src/rls.ts),
+   * then audit in a second `ctx.rls`.
    */
   testCustoms: permissionProcedure("integrations.manage")
     .input(z.object({ provider: z.enum(["cbp_ace", "cbsa_aci"]) }))
@@ -246,18 +261,36 @@ export const integrationsRouter = router({
       let result: { ok: boolean; mode: string; live: boolean; detail: unknown; error?: string };
       if (prepared.deferred) {
         // No RLS transaction is open here — the ctx.rls above already
-        // committed — so drainBorderConnectInbox is free to open its own
-        // withServiceRole transactions.
-        const { drainBorderConnectInbox, borderConnectEnv } = await import(
-          "../services/borderconnect"
-        );
+        // committed — so the enqueue and the job worker are free to open their
+        // own withServiceRole transactions.
+        const { borderConnectEnv } = await import("../services/borderconnect");
         try {
-          const drain = await drainBorderConnectInbox(ctx.db);
+          // `background_jobs_insert` refuses this job type from any session
+          // (migration 0047), so the enqueue itself must be service-role.
+          const job = await withServiceRole(ctx.db, (tx) =>
+            enqueueJob(tx, {
+              orgId: null,
+              jobType: "customs.borderconnect_drain",
+              payload: {},
+              idempotencyKey: `bc-drain:${new Date().toISOString().slice(0, 16)}`,
+              maxAttempts: 2,
+            }),
+          );
+          const run = await processDueJobs(ctx.db, {
+            limit: 5,
+            worker: `manual-bc-${ctx.session.user.id.slice(0, 8)}`,
+          });
+          // Only this job's counts — never another tenant's job result.
+          const drain = run.results.find((r) => r.id === job.id);
+          const counts = drain?.result as { received?: number; stored?: number } | undefined;
           result = {
-            ok: true,
+            ok: drain ? drain.ok : true,
             mode: "border_connect",
             live: borderConnectEnv().live,
-            detail: { received: drain.received, stored: drain.stored },
+            detail: drain
+              ? { jobId: job.id, received: counts?.received ?? 0, stored: counts?.stored ?? 0 }
+              : { jobId: job.id, alreadyRunning: true },
+            ...(drain?.error ? { error: drain.error } : {}),
           };
         } catch (e) {
           result = {

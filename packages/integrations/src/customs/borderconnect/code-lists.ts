@@ -208,6 +208,22 @@ export function mapDriverDocumentType(type: DriverDocumentType): string | undefi
   return DRIVER_DOCUMENT_TYPE_MAP[type];
 }
 
+/**
+ * The documents that survive the mapping above — i.e. exactly the ones
+ * `travelDocuments()` (`ace.ts`) will actually put on the wire.
+ *
+ * Shared with `validate.ts` on purpose: counting raw `documents.length` there
+ * would pass a passenger carrying only an unmapped type (a PR card, say) and
+ * then ship `travelDocuments: []`, an empty array where the real API expects
+ * at least one document. The validator and the mapper must agree on what
+ * "has a document" means, so both ask this one function.
+ */
+export function mappedDriverDocuments<T extends { type: DriverDocumentType }>(
+  documents: readonly T[],
+): T[] {
+  return documents.filter((d) => mapDriverDocumentType(d.type) !== undefined);
+}
+
 // ---------------------------------------------------------------------------
 // Source: https://borderconnect.com/data/us/ace/packaging-unit.json
 // ---------------------------------------------------------------------------
@@ -563,8 +579,17 @@ export const BC_ACI_RELEASE_CODES = [
  * Every other code (`1`, `5`, `9`, `14`, `23`, `24`, `34`) is either
  * acknowledgement, a hold, an error, or still pending — none of them mean
  * the goods are clear to move.
+ *
+ * Exported (not just `isAciReleaseCode`) because two consumers need the codes
+ * themselves rather than a predicate: `latestRnsByShipment` filters
+ * `pars_rns_events` rows by `release_code`, and `movement.list`'s
+ * `readyToCross` SQL inlines them into its `not exists` subquery — both in
+ * `packages/api`, which must agree with this list exactly or a shipment CBSA
+ * only flagged for examination reads as "released".
  */
-const RELEASING_ACI_CODES: ReadonlySet<string> = new Set(["4", "8"]);
+export const ACI_RELEASING_RELEASE_CODES = ["4", "8"] as const;
+
+const RELEASING_ACI_CODES: ReadonlySet<string> = new Set(ACI_RELEASING_RELEASE_CODES);
 
 /** Does this CBSA RNS release code mean customs released the goods? */
 export function isAciReleaseCode(releaseCode: string | null | undefined): boolean {

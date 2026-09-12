@@ -78,8 +78,9 @@ the section headings are the build phases, not versions.
   (`api/jobs/borderconnect-drain`) into movement status/RNS/system-alert updates, a standalone
   WebSocket listener (`apps/borderconnect-listener`, hosting deferred), a ready-to-cross readiness
   panel, and `packages/integrations/scripts/borderconnect-smoke.ts` — a live smoke test against
-  the real BorderConnect account (`autoSend: false`, never reaches CBP) that settles what
-  `GET /api/receive` actually returns.
+  the real BorderConnect account (`autoSend: false`, never reaches CBP) designed to settle what
+  `GET /api/receive` actually returns, not yet run against a real account (it needs a test
+  `companyKey` nobody has supplied — see the BorderConnect README's "Open risks").
 
 ### Changed
 

@@ -33,6 +33,7 @@ import { CUSTOMS_EVENT_LABELS } from "@corridor/domain";
 import {
   createBorderConnectHttpTransport,
   createFixtureBorderConnectTransport,
+  FIXTURE_BORDERCONNECT_TENANT_KEY,
   inboundKeys,
   isAciReleaseCode,
   parseInbound,
@@ -41,7 +42,7 @@ import {
   type CarrierNotice,
 } from "@corridor/integrations";
 import { applyStatusMessage, logIntegrationEvent } from "./customs";
-import { lockMovement, recordCustomsEvents, requireMovement, stampShipmentStatus } from "./movements";
+import { lockMovement, recordCustomsEvents, stampShipmentStatus } from "./movements";
 import { recordCarrierNotices } from "./notices";
 
 const { customsInbox, customsSubmissions, movements, organizations, parsRnsEvents, shipments } =
@@ -69,10 +70,12 @@ function resolveTransport(opts?: { transport?: BorderConnectTransport }): Border
   }
   // No live credentials and nothing injected: the same in-process fixture
   // queue `customsClientFor`'s border_connect client falls back to, drained
-  // under a fixed "system" tenant key so `pnpm dev` end-to-end (transmit →
-  // fixture queue → drain → accepted) has something to pull from without a
-  // real BorderConnect account.
-  return createFixtureBorderConnectTransport("system", () => new Date());
+  // under the one shared tenant key both sides agree on
+  // (`FIXTURE_BORDERCONNECT_TENANT_KEY`, never the org id — the real
+  // BorderConnect inbox is deployment-wide too) so `pnpm dev` end-to-end
+  // (transmit → fixture queue → drain → accepted) has something to pull from
+  // without a real BorderConnect account.
+  return createFixtureBorderConnectTransport(FIXTURE_BORDERCONNECT_TENANT_KEY, () => new Date());
 }
 
 /**
@@ -237,13 +240,14 @@ async function findSubmissionForCustomsStatus(
  * only the PARS cargo control number — and `shipments.control_number` is
  * unique only per organization
  * (`shipments_organization_id_control_number_key`), so this must search
- * across every org rather than assume one. If the CCN happens to collide
- * across two different orgs' shipments (their own carrier codes/references
- * would have to coincide, extremely unlikely but not schema-impossible),
- * narrowing to the ACI movements still `sent`/`accepted`/`held` resolves it
- * in the realistic case — a shipment whose movement is done (`released`,
- * `rejected`, `cancelled`, `arrived`) or has none yet is not a plausible
- * target for a fresh release notice. Only when exactly one candidate
+ * across every org rather than assume one. Every candidate is then narrowed
+ * to the ACI movements still `sent`/`accepted`/`held` — a shipment whose
+ * movement is ACE (RNS is CBSA's system; an ACE shipment can never be
+ * RNS-released), is done (`released`, `rejected`, `cancelled`, `arrived`) or
+ * has none yet is not a plausible target for a fresh release notice. That
+ * narrowing runs even for a single match, not just to break a tie: a lone
+ * global CCN hit on the wrong regime or a finished movement must be
+ * unroutable, never silently applied. Only when exactly one candidate
  * remains is the message routed at all.
  */
 async function findShipmentsForRns(tx: RlsTransaction, cargoControlNumber: string) {
@@ -257,8 +261,11 @@ async function findShipmentsForRns(tx: RlsTransaction, cargoControlNumber: strin
     .from(shipments)
     .where(eq(shipments.controlNumber, cargoControlNumber));
 
-  if (candidates.length <= 1) return candidates;
-
+  // Applied unconditionally, not only to break a tie: a single global match is
+  // still the wrong target when it belongs to an ACE movement (RNS is CBSA's
+  // system — an ACE shipment can never be RNS-released) or to a movement that
+  // is done (`cancelled`/`arrived`/`released`/`rejected`) or has none at all.
+  // Short-circuiting on `candidates.length <= 1` would route those anyway.
   const movementIds = [...new Set(candidates.map((c) => c.movementId).filter((id): id is string => !!id))];
   const eligible = movementIds.length
     ? await tx
@@ -297,12 +304,29 @@ type ProcessOutcome = {
 export async function processInboxRow(db: DatabaseClient, rowId: number): Promise<ProcessOutcome> {
   try {
     return await withServiceRole(db, async (tx): Promise<ProcessOutcome> => {
+      // `for update skip locked`, held for the life of this transaction: the
+      // cron drain and a Settings "Check inbox" click can overlap, and nothing
+      // downstream dedupes a second `customs_event` / `pars_rns_events` write
+      // (`applyTransition`'s compare-and-swap only blocks a duplicate *status*
+      // change). Whoever gets the lock processes the row; the loser skips it
+      // rather than blocking, and finds it `processed_at`-stamped next drain.
       const [row] = await tx
         .select()
         .from(customsInbox)
         .where(eq(customsInbox.id, rowId))
+        .for("update", { skipLocked: true })
         .limit(1);
-      if (!row) throw new Error(`customs_inbox row ${rowId} not found`);
+      if (!row) {
+        // `skip locked` returns nothing for both "gone" and "someone else has
+        // it" — tell them apart before treating this as an error.
+        const [unlocked] = await tx
+          .select({ id: customsInbox.id })
+          .from(customsInbox)
+          .where(eq(customsInbox.id, rowId))
+          .limit(1);
+        if (unlocked) return { outcome: "ignored", detail: "locked by another worker" };
+        throw new Error(`customs_inbox row ${rowId} not found`);
+      }
       if (row.processedAt) return { outcome: "ignored", detail: "already processed" };
 
       const parsed = parseInbound(row.payload);
@@ -453,7 +477,11 @@ export async function processInboxRow(db: DatabaseClient, rowId: number): Promis
           });
           return { outcome: "unroutable", detail: "submission has no movement" };
         }
-        const m = await requireMovement(tx, org.id, submission.movementId);
+        // `lockMovement`, not `requireMovement`: this branch applies a status
+        // change, exactly like the `customs_status` branch below — both take
+        // the movement's row lock so two workers can never interleave a
+        // read-modify-write on the same movement.
+        const m = await lockMovement(tx, org.id, submission.movementId);
         await applyStatusMessage(tx, { orgId: org.id, userId: null }, m, {
           referenceNumber: submission.referenceNumber ?? parsed.tripNumber ?? "",
           status: "rejected",
@@ -541,12 +569,23 @@ export async function processInboxRow(db: DatabaseClient, rowId: number): Promis
   }
 }
 
+/**
+ * Every write to a `customs_inbox` row goes through here, and
+ * `processing_error` is cleared by default: a row that failed once (leaving
+ * `attempt=1: …` behind) and then succeeded on a retry must not keep showing
+ * the stale failure text in the Settings inbox list. A caller that genuinely
+ * has an error to record passes `processingError` itself and overrides the
+ * default — including the retry bookkeeping in `processInboxRow`'s catch.
+ */
 async function markRow(
   tx: RlsTransaction,
   rowId: number,
   patch: Partial<typeof customsInbox.$inferInsert>,
 ): Promise<void> {
-  await tx.update(customsInbox).set(patch).where(eq(customsInbox.id, rowId));
+  await tx
+    .update(customsInbox)
+    .set({ processingError: null, ...patch })
+    .where(eq(customsInbox.id, rowId));
 }
 
 /**

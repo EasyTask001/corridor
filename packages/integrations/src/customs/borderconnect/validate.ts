@@ -12,6 +12,7 @@ import {
   ACE_SHIPMENT_TYPE_MAP,
   findAcePackagingUnit,
   findAciPackagingUnit,
+  mappedDriverDocuments,
   mapTrailerType,
 } from "./code-lists";
 
@@ -55,6 +56,20 @@ export function validateForBorderConnect(m: ManifestPayload): string[] {
   }
 
   if (m.regime === "ACE") {
+    // `dateOfBirth`/`citizenshipCountry` are mandatory on an ACE driver, same
+    // as on a passenger. Without this, `buildDriver` (ace.ts) happily emits
+    // `dateOfBirth: null, citizenshipCountry: null` for an incomplete driver
+    // record — a silently incomplete filing, which is exactly what this
+    // adapter refuses to do: throw loudly, never ship a mismapped field.
+    drivers.forEach((d, i) => {
+      const missing: string[] = [];
+      if (!d.dateOfBirth) missing.push("dateOfBirth");
+      if (!d.citizenship) missing.push("citizenshipCountry");
+      if (missing.length > 0) {
+        problems.push(`drivers[${i}]: missing ${missing.join(", ")}`);
+      }
+    });
+
     m.crew
       .filter((c) => c.role === "passenger")
       .forEach((p, i) => {
@@ -62,7 +77,12 @@ export function validateForBorderConnect(m: ManifestPayload): string[] {
         if (p.gender !== "M" && p.gender !== "F") missing.push("gender");
         if (!p.dateOfBirth) missing.push("dateOfBirth");
         if (!p.citizenship) missing.push("citizenshipCountry");
-        if (p.documents.length === 0) missing.push("travelDocuments");
+        // Counted after the mapper's own filter, not `p.documents.length`: a
+        // passenger carrying only a type BorderConnect has no confirmed code
+        // for (`permanent_resident_card`, `us_alien_registration`, `fast` —
+        // see DRIVER_DOCUMENT_TYPE_MAP) would otherwise pass here and ship an
+        // empty `travelDocuments` array.
+        if (mappedDriverDocuments(p.documents).length === 0) missing.push("travelDocuments");
         if (missing.length > 0) {
           problems.push(`passengers[${i}]: missing ${missing.join(", ")}`);
         }

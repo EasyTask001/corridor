@@ -43,9 +43,30 @@ export interface BorderConnectClientOptions {
   /** Injected in tests; otherwise derived from apiUrlSuffix/apiKey or the fixture queue. */
   transport?: BorderConnectTransport;
   now?: () => Date;
-  /** Owner of the fixture queue (the organization id in production); never sent live. */
+  /**
+   * Per-tenant fixture partition every other client mode uses (the
+   * organization id in production); never sent live. BorderConnect is the one
+   * mode that does NOT partition its fixture queue by it — see
+   * `FIXTURE_BORDERCONNECT_TENANT_KEY` — but the field stays on the options so
+   * `createCustomsClient` can pass the same shape to all three modes.
+   */
   tenantKey: string;
 }
+
+/**
+ * The single fixture-queue partition every BorderConnect client shares.
+ *
+ * BorderConnect's real model is one shared Service Provider inbox for the
+ * whole deployment — `GET /api/receive` is not per-org, messages are told
+ * apart by the `companyKey` inside them — so the fixture queue must be shared
+ * too. Keying it per organization would split the offline round trip in half:
+ * an org-scoped client (`customsClientFor` passes `tenantKey: orgId`) would
+ * enqueue its ack under the org's id while the drain
+ * (`resolveTransport`, packages/api/src/services/borderconnect.ts), which has
+ * no organization at all, reads this fixed key — so transmit → drain could
+ * never connect in fixture mode.
+ */
+export const FIXTURE_BORDERCONNECT_TENANT_KEY = "system";
 
 const METHOD_NOT_SUPPORTED = (method: string): CustomsTransportError =>
   new CustomsTransportError(
@@ -145,7 +166,7 @@ export function createBorderConnectCustomsClient(
     opts.transport ??
     (live
       ? createBorderConnectHttpTransport({ apiUrlSuffix: opts.apiUrlSuffix!, apiKey: opts.apiKey! })
-      : createFixtureBorderConnectTransport(opts.tenantKey, now));
+      : createFixtureBorderConnectTransport(FIXTURE_BORDERCONNECT_TENANT_KEY, now));
 
   /** A live client cannot file without a real companyKey; the fixture queue
    * doesn't care whose key it is, so it gets a harmless placeholder. */

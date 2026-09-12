@@ -1,7 +1,15 @@
 /**
- * `movement.list`'s `readyToCross` SQL summary (Task 14), specifically the
- * review fix scoping the ACI branch's `pars_rns_events` check to PARS
- * shipments only. A non-PARS shipment never receives an RNS message (they're
+ * `movement.list`'s `readyToCross` SQL summary (Task 14): the review fix
+ * scoping the ACI branch's `pars_rns_events` check to PARS shipments only,
+ * and the release-code gate on that same subquery.
+ *
+ * The release-code gate matters most: `pars_rns_events` is an audit log of
+ * every RNS message, so a shipment CBSA flagged for examination (code `5`) or
+ * is still processing (`24`/`34`) has a row exactly like a released one
+ * (code `4`/`8`). Treating "a row exists" as "released" would badge that
+ * movement ready to cross and send a driver to the border on a false signal.
+ *
+ * A non-PARS shipment never receives an RNS message (they're
  * matched by PARS/cargo-control number), so requiring one from every
  * attached shipment — PARS or not — would leave a real mixed movement stuck
  * at "pending" forever, even once the domain's own `crossingReadiness()`
@@ -17,6 +25,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Session } from "@corridor/auth";
 import { createDb, eq, schema, withServiceRole } from "@corridor/db";
 import type { Context } from "../context";
+import { latestRnsByShipment } from "../services/movements";
 import { createCallerFactory } from "../trpc";
 import { movementRouter } from "./movement";
 
@@ -30,9 +39,13 @@ const { organizations, movements, shipments, parsRnsEvents } = schema;
 const createCaller = createCallerFactory(movementRouter);
 
 const movementNumber = `ACI-RTC-${Date.now()}`;
+const examMovementNumber = `ACI-RTC-EXAM-${Date.now()}`;
 let orgId: string;
 let movementId: string;
+let examMovementId: string;
 let nonParsShipmentId: string;
+let parsShipmentId: string;
+let examShipmentId: string;
 
 beforeAll(async () => {
   // A fresh, disposable org — not a shared seed org — because this fixture
@@ -82,19 +95,63 @@ beforeAll(async () => {
     ])
     .returning({ id: shipments.id });
   nonParsShipmentId = nonParsShipment!.id;
+  parsShipmentId = parsShipment!.id;
 
   // Only the PARS shipment gets an RNS message — the non-PARS one never
-  // will, in production or here.
+  // will, in production or here. Code "4" ("Goods Released") is a real
+  // release: anything else (see BC_ACI_RELEASE_CODES) must not count.
   await db.insert(parsRnsEvents).values({
     organizationId: orgId,
     shipmentId: parsShipment!.id,
     parsNumber: `PARS-${ts}`,
-    releaseCode: "0",
+    releaseCode: "4",
     releasedAt: new Date(),
   });
 
   for (const status of ["sent", "accepted", "released"] as const) {
     await db.update(movements).set({ status }).where(eq(movements.id, movementId));
+  }
+
+  // A second movement whose one PARS shipment has an RNS row that is NOT a
+  // release: code "5", "Goods required for examination - referred". The drain
+  // writes the audit row but deliberately leaves the shipment un-released, so
+  // the badge must read `pending`, never `ready`.
+  const [examMovement] = await db
+    .insert(movements)
+    .values({
+      organizationId: orgId,
+      regime: "ACI",
+      movementNumber: examMovementNumber,
+      status: "draft",
+    })
+    .returning({ id: movements.id });
+  examMovementId = examMovement!.id;
+
+  const [examShipment] = await db
+    .insert(shipments)
+    .values({
+      organizationId: orgId,
+      movementId: examMovementId,
+      regime: "ACI",
+      cargoType: "regular",
+      carrierCode: "7ELU",
+      controlReference: `PARS${ts}3`,
+      isPars: true,
+      status: "accepted",
+    })
+    .returning({ id: shipments.id });
+  examShipmentId = examShipment!.id;
+
+  await db.insert(parsRnsEvents).values({
+    organizationId: orgId,
+    shipmentId: examShipmentId,
+    parsNumber: `PARS-${ts}-EXAM`,
+    releaseCode: "5",
+    releasedAt: new Date(),
+  });
+
+  for (const status of ["sent", "accepted"] as const) {
+    await db.update(movements).set({ status }).where(eq(movements.id, examMovementId));
   }
 });
 
@@ -156,5 +213,61 @@ describe("movement.list readyToCross — ACI PARS scoping (review fix)", () => {
       .from(parsRnsEvents)
       .where(eq(parsRnsEvents.shipmentId, nonParsShipmentId));
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe("movement.list readyToCross — RNS release-code gate", () => {
+  it("is pending, not ready, when the PARS shipment's only RNS row is a non-releasing code", async () => {
+    const caller = callerFor();
+    const result = await caller.list({
+      search: examMovementNumber,
+      searchColumn: "movementNumber",
+      limit: 200,
+    });
+    const row = result.rows.find((r) => r.id === examMovementId);
+    expect(row).toBeDefined();
+    // Before the release-code gate this read "ready": the subquery only asked
+    // whether a pars_rns_events row existed, and an examination referral
+    // writes one.
+    expect(row?.readyToCross).toBe("pending");
+  });
+});
+
+/**
+ * The same gate one layer down, where `movement.get`'s readiness panel reads
+ * it: `latestRnsByShipment` feeds `crossingReadiness()`'s `rnsReleasedAt`, and
+ * `rnsReleaseCheck` (packages/domain/src/readiness.ts) treats any non-null
+ * value as "customs released this shipment".
+ */
+describe("latestRnsByShipment — release-code filter", () => {
+  it("reports a release date only for a shipment whose RNS row is a releasing code", async () => {
+    const latest = await withServiceRole(db, (tx) =>
+      latestRnsByShipment(tx, [parsShipmentId, examShipmentId]),
+    );
+    expect(latest.get(parsShipmentId)).toBeInstanceOf(Date);
+    // Code "5" is an examination referral, not a release — before the filter
+    // this returned its `released_at` and the panel showed "RNS released: ok".
+    expect(latest.get(examShipmentId)).toBeUndefined();
+  });
+
+  it("keeps the release when a later non-releasing message arrives afterwards", async () => {
+    // CBSA can send a follow-up (e.g. "24 — Awaiting CBSA Processing") after a
+    // release; the drain's own `shipments.status = released` stamp is
+    // monotonic, so the latest *releasing* row is what counts, not the latest
+    // row overall.
+    const before = await withServiceRole(db, (tx) =>
+      latestRnsByShipment(tx, [parsShipmentId]),
+    );
+    await db.insert(parsRnsEvents).values({
+      organizationId: orgId,
+      shipmentId: parsShipmentId,
+      parsNumber: `PARS-LATER-${Date.now()}`,
+      releaseCode: "24",
+      releasedAt: new Date(Date.now() + 60_000),
+    });
+    const after = await withServiceRole(db, (tx) =>
+      latestRnsByShipment(tx, [parsShipmentId]),
+    );
+    expect(after.get(parsShipmentId)?.getTime()).toBe(before.get(parsShipmentId)?.getTime());
   });
 });

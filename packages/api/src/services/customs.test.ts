@@ -557,6 +557,10 @@ describe("transmitMovement (border_connect mode)", () => {
           licenseJurisdiction: "ON",
           licenseExpiry: isoDay(400),
           citizenship: "CA",
+          // Mandatory on an ACE driver — `validateForBorderConnect` 422s a
+          // driver missing it (a null would otherwise ship as
+          // `dateOfBirth: null` on the wire).
+          dateOfBirth: "1985-03-14",
           hazmatEndorsement: false,
         },
       ],

@@ -22,10 +22,24 @@
  *   3. `tripNumber` always contains the literal string `SMOKE` plus today's
  *      date, so the filing is unmistakably a test artifact inside
  *      BorderConnect's own system, never a real crossing.
+ *   4. `GET /api/receive` is NOT called unless `--drain-shared-queue` is
+ *      passed. BorderConnect's receive endpoint is pop-on-read with no
+ *      replay, and the queue is shared by every tenant filing through this
+ *      Service Provider account — polling it here would permanently destroy
+ *      real acks, decisions, RNS releases and notices that nothing else will
+ *      ever see again. Without the flag the script sends and stops, which is
+ *      still a complete outbound smoke test.
+ *      Only pass `--drain-shared-queue` against an account no tenant is
+ *      filing through, or while the drain job / listener is stopped and you
+ *      accept losing whatever is in the queue. The script cannot store what
+ *      it reads into `customs_inbox` itself: `storeInboundMessages` lives in
+ *      `@corridor/api`, which already depends on this package, so importing
+ *      it here would be a dependency cycle.
  *
  * Usage:
  *   source .env.local && pnpm --filter @corridor/integrations smoke:borderconnect
  *   source .env.local && pnpm --filter @corridor/integrations smoke:borderconnect -- --cleanup
+ *   source .env.local && pnpm --filter @corridor/integrations smoke:borderconnect -- --drain-shared-queue
  */
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -223,6 +237,25 @@ function smokeTripNumber(scac: string): string {
 }
 
 /**
+ * Rail #4: `GET /api/receive` pops the shared Service Provider queue and
+ * BorderConnect keeps no copy — anything this script prints is gone for the
+ * real inbox drain (`customs.borderconnect_drain`) and the WebSocket listener
+ * forever. So the receive half is opt-in per run, and saying no is loud but
+ * not fatal: the send half already exercised the outbound path.
+ */
+function receiveAllowed(): boolean {
+  if (process.argv.includes("--drain-shared-queue")) return true;
+  console.warn(
+    "\n[smoke] SKIPPING GET /api/receive — it pops the shared BorderConnect queue " +
+      "with no replay, so polling it would permanently destroy every tenant's " +
+      "pending acks, decisions, RNS releases and notices.\n" +
+      "[smoke] Pass --drain-shared-queue to poll anyway (only against an account " +
+      "no tenant is filing through, or with the drain job and listener stopped).",
+  );
+  return false;
+}
+
+/**
  * A raw `GET /api/receive/{suffix}` call, deliberately bypassing
  * `createBorderConnectHttpTransport`'s `receive()` (which already
  * normalises) — this script's whole point is to see the envelope *before*
@@ -288,12 +321,14 @@ async function main(): Promise<void> {
     return;
   }
 
-  for (let i = 1; i <= 5; i++) {
-    console.log(`\n[smoke] poll ${i}/5 — GET /api/receive/${apiUrlSuffix}`);
-    const rawBody = await rawReceive(apiUrlSuffix, apiKey);
-    console.log("[smoke] raw body:", JSON.stringify(rawBody, null, 2));
-    console.log("[smoke] normaliseReceiveBody(body):", JSON.stringify(normaliseReceiveBody(rawBody), null, 2));
-    if (i < 5) await sleep(5000);
+  if (receiveAllowed()) {
+    for (let i = 1; i <= 5; i++) {
+      console.log(`\n[smoke] poll ${i}/5 — GET /api/receive/${apiUrlSuffix}`);
+      const rawBody = await rawReceive(apiUrlSuffix, apiKey);
+      console.log("[smoke] raw body:", JSON.stringify(rawBody, null, 2));
+      console.log("[smoke] normaliseReceiveBody(body):", JSON.stringify(normaliseReceiveBody(rawBody), null, 2));
+      if (i < 5) await sleep(5000);
+    }
   }
 
   if (cleanup) {

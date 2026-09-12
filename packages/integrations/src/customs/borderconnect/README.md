@@ -230,7 +230,13 @@ relevant here:
    open**: someone with access to the BorderConnect Service Provider
    account/dashboard needs to supply the real test `companyKey`, add it to
    `.env.local` as `BORDERCONNECT_TEST_COMPANY_KEY`, and re-run
-   `pnpm --filter @corridor/integrations smoke:borderconnect`.
+   `pnpm --filter @corridor/integrations smoke:borderconnect`. Note that
+   settling the envelope specifically needs the receive half, which is now
+   behind an explicit `--drain-shared-queue` flag (safety rail #4 in the
+   script's header): `GET /api/receive` is pop-on-read with no replay, so
+   polling a live account with real tenants filing through it would destroy
+   their pending messages. Run it only against an account nobody is filing
+   through, or with the drain job and the listener stopped.
 2. **ACI amendments**: this client's `amend()` sends `operation: UPDATE,
    autoSend: true` for both regimes — for ACE that's confirmed, but ACI may
    require `ACI_SEND_REQUEST { type: "AMEND", tripAmendmentReasonCode }`

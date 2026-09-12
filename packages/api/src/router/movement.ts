@@ -37,7 +37,7 @@ import {
   router,
   type OrgContext,
 } from "../trpc";
-import { simulateCustomsEvents } from "@corridor/integrations";
+import { ACI_RELEASING_RELEASE_CODES, simulateCustomsEvents } from "@corridor/integrations";
 import { cancelAtCustoms, transmitAmendment, transmitMovement } from "../services/customs";
 import { enqueueJob } from "../services/jobs";
 import {
@@ -203,9 +203,14 @@ export const movementRouter = router({
                * `rejected` are always `blocked`; `accepted`/`released` are
                * `ready` when every attached shipment already clears the
                * regime's own gate — ACE: has an entry number; ACI: has a
-               * `pars_rns_events` row (PARS shipments only — a non-PARS
-               * shipment never gets one, mirroring `rnsReleaseCheck`'s own
-               * `isPars` filter in readiness.ts) — and `pending` otherwise;
+               * `pars_rns_events` row **whose release code actually means
+               * "released"** (`ACI_RELEASING_RELEASE_CODES`, inlined below —
+               * the table logs every RNS message, including code `5`
+               * "Examination Required" and `24`/`34` "Awaiting CBSA
+               * Processing", so "a row exists" is not "customs released it";
+               * PARS shipments only — a non-PARS shipment never gets one,
+               * mirroring `rnsReleaseCheck`'s own `isPars` filter in
+               * readiness.ts) — and `pending` otherwise;
                * any other status (draft/sent/arrived/cancelled) is `null`
                * (no readiness opinion). A movement with zero shipments (or,
                * for ACI, zero PARS shipments) has no shipment failing either
@@ -232,7 +237,12 @@ export const movementRouter = router({
                           where s.movement_id = ${movements.id}
                             and s.is_pars
                             and not exists (
-                              select 1 from public.pars_rns_events e where e.shipment_id = s.id
+                              select 1 from public.pars_rns_events e
+                              where e.shipment_id = s.id
+                                and e.release_code in (${sql.join(
+                                  ACI_RELEASING_RELEASE_CODES.map((c) => sql`${c}`),
+                                  sql`, `,
+                                )})
                             )
                         ) then 'ready' else 'pending' end
                     end

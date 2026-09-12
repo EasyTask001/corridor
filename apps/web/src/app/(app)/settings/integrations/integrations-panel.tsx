@@ -61,9 +61,18 @@ function formatTestResult(r: {
 }): string {
   if (!r.ok) return `Failed: ${r.error ?? "no response"}`;
   if (r.mode === "border_connect") {
-    // No synchronous ping in this mode — the button drains the shared inbox
-    // instead, so "connected" would be misleading; report what actually moved.
-    const detail = r.detail as { received?: number; stored?: number } | null;
+    // No synchronous ping in this mode — the button queues the shared inbox
+    // drain instead, so "connected" would be misleading; report what actually
+    // moved. `alreadyRunning` is the healthy race with the every-minute cron:
+    // the job was enqueued but another worker holds its claim.
+    const detail = r.detail as {
+      received?: number;
+      stored?: number;
+      alreadyRunning?: boolean;
+    } | null;
+    if (detail?.alreadyRunning) {
+      return `Inbox drain already running (${r.live ? "live" : "fixture"} · queued, another worker holds it)`;
+    }
     return `Inbox drained (${r.live ? "live" : "fixture"} · received ${detail?.received ?? 0} · stored ${detail?.stored ?? 0})`;
   }
   return `Connected (${r.mode}${r.live ? ", live" : ", fixture replay"}, ${r.durationMs} ms)`;

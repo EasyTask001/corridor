@@ -6,7 +6,11 @@
  */
 import { TRPCError } from "@trpc/server";
 import { and, asc, desc, eq, inArray, schema, type RlsTransaction } from "@corridor/db";
-import type { CustomsEventMessage, CustomsShipmentMessage } from "@corridor/integrations";
+import {
+  isAciReleaseCode,
+  type CustomsEventMessage,
+  type CustomsShipmentMessage,
+} from "@corridor/integrations";
 import { platesFor, trailersForMovement } from "./equipment";
 import { shipmentsForMovement } from "./shipments";
 import {
@@ -640,14 +644,28 @@ export function validationFor(full: FullMovement) {
 }
 
 /**
- * The most recent CBSA RNS release per shipment (0027), keyed by shipment id
- * — `movement.get` folds this into `crossingReadiness`'s `rnsReleasedAt`
- * input. Reduced in application code, not SQL: the fake transaction the
- * router unit tests run against ignores `where`/`orderBy` (it is a shape
- * fake, not a database — see `packages/api/src/test/mock-context.ts`), so a
- * `distinct on` / `order by … limit 1` would silently return the wrong row
- * there even though it's correct against real Postgres. Filtering and
- * reducing here works identically against both.
+ * The most recent CBSA RNS **release** per shipment (0027), keyed by shipment
+ * id — `movement.get` folds this into `crossingReadiness`'s `rnsReleasedAt`
+ * input, and `rnsReleaseCheck` (packages/domain/src/readiness.ts) reads a
+ * non-null value as "customs released this shipment".
+ *
+ * `pars_rns_events` is an audit log of *every* RNS message, releasing or not
+ * (`processInboxRow`, services/borderconnect.ts) — a code `5` "Examination
+ * Required" or `24`/`34` "Awaiting CBSA Processing" writes a row exactly like
+ * a code `4` does. So rows are filtered to the releasing codes
+ * (`isAciReleaseCode`) before the max is taken: a shipment CBSA has only
+ * flagged for examination must never read as ready to cross. The drain's own
+ * `shipments.status = "released"` stamp is monotonic (a later non-releasing
+ * message never un-releases a shipment), so this matches it by taking the
+ * latest *releasing* row rather than requiring the latest row overall to be
+ * one.
+ *
+ * Reduced in application code, not SQL: the fake transaction the router unit
+ * tests run against ignores `where`/`orderBy` (it is a shape fake, not a
+ * database — see `packages/api/src/test/mock-context.ts`), so a `distinct on`
+ * / `order by … limit 1` would silently return the wrong row there even
+ * though it's correct against real Postgres. Filtering and reducing here
+ * works identically against both.
  */
 export async function latestRnsByShipment(
   tx: Tx,
@@ -659,6 +677,7 @@ export async function latestRnsByShipment(
   const rows = await tx
     .select({
       shipmentId: parsRnsEvents.shipmentId,
+      releaseCode: parsRnsEvents.releaseCode,
       releasedAt: parsRnsEvents.releasedAt,
       receivedAt: parsRnsEvents.receivedAt,
     })
@@ -666,6 +685,7 @@ export async function latestRnsByShipment(
     .where(inArray(parsRnsEvents.shipmentId, shipmentIds));
   for (const row of rows) {
     if (!row.shipmentId || !wanted.has(row.shipmentId)) continue;
+    if (!isAciReleaseCode(row.releaseCode)) continue;
     // A release message always carries `releasedAt`; fall back to when we
     // received it only for a hand-seeded/malformed row with neither.
     const at = row.releasedAt ?? row.receivedAt;

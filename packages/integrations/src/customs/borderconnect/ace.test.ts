@@ -369,6 +369,64 @@ describe("toAceTrip — 422 validation", () => {
     }
   });
 
+  it("a driver missing dateOfBirth 422s naming the field", () => {
+    // Without this rule `buildDriver` shipped `dateOfBirth: null` on the wire —
+    // a silently incomplete ACE filing, which is exactly what this adapter is
+    // built never to do.
+    const src = makeSource();
+    src.crew[0]!.dateOfBirth = null;
+    const m = buildManifest(src);
+    try {
+      toAceTrip(m, opts);
+      throw new Error("expected toAceTrip to throw");
+    } catch (e) {
+      expect((e as CustomsTransportError).statusCode).toBe(422);
+      expect((e as CustomsTransportError).message).toContain("drivers[0]: missing dateOfBirth");
+    }
+  });
+
+  it("a driver missing dateOfBirth and citizenship names both, in the same single throw", () => {
+    const src = makeSource();
+    src.crew[0]!.dateOfBirth = null;
+    src.crew[0]!.citizenship = null;
+    const m = buildManifest(src);
+    try {
+      toAceTrip(m, opts);
+      throw new Error("expected toAceTrip to throw");
+    } catch (e) {
+      expect((e as CustomsTransportError).message).toContain(
+        "drivers[0]: missing dateOfBirth, citizenshipCountry",
+      );
+    }
+  });
+
+  it("a passenger carrying only an unmapped document type 422s rather than shipping travelDocuments: []", () => {
+    // `permanent_resident_card` is deliberately absent from
+    // DRIVER_DOCUMENT_TYPE_MAP (two BorderConnect PR-card codes, nothing to
+    // disambiguate), so `travelDocuments()` drops it. Counting raw
+    // `documents.length` here passed this passenger and sent an empty array.
+    const src = makeSource();
+    src.crew[1]!.documents = [
+      {
+        documentType: "permanent_resident_card",
+        documentNumber: "PR123",
+        issuingCountry: "US",
+        issuingState: null,
+        expiresOn: "2030-01-01",
+      },
+    ];
+    const m = buildManifest(src);
+    try {
+      toAceTrip(m, opts);
+      throw new Error("expected toAceTrip to throw");
+    } catch (e) {
+      expect((e as CustomsTransportError).statusCode).toBe(422);
+      expect((e as CustomsTransportError).message).toContain(
+        "passengers[0]: missing travelDocuments",
+      );
+    }
+  });
+
   it("a passenger with gender X is also missing gender (BorderConnect only accepts M/F)", () => {
     const src = makeSource();
     src.crew[1]!.gender = "X";

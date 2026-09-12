@@ -12,7 +12,13 @@
 import type { ManifestParty, ManifestPayload, ManifestPlate } from "../types";
 import { CustomsTransportError } from "../types";
 import { bcDateTime, tripNumberFor, type OutboundOptions } from "./format";
-import { ACE_SHIPMENT_TYPE_MAP, findAcePackagingUnit, mapDriverDocumentType, mapTrailerType } from "./code-lists";
+import {
+  ACE_SHIPMENT_TYPE_MAP,
+  findAcePackagingUnit,
+  mapDriverDocumentType,
+  mappedDriverDocuments,
+  mapTrailerType,
+} from "./code-lists";
 import { validateForBorderConnect } from "./validate";
 
 const FAST_CARD_NUMBER = /^4270[0-9]{8}0[12]$/;
@@ -60,7 +66,10 @@ export function buildTravelDocument(
 function travelDocuments(
   documents: ManifestPayload["crew"][number]["documents"],
 ): Array<Record<string, unknown>> {
-  return documents
+  // `mappedDriverDocuments` is the same filter `validate.ts` counts against,
+  // so "the validator said this person has a document" and "the wire carries
+  // one" can never disagree.
+  return mappedDriverDocuments(documents)
     .map(buildTravelDocument)
     .filter((d): d is Record<string, unknown> => d !== undefined);
 }
