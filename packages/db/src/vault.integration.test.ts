@@ -121,7 +121,7 @@ const credentialsRefFor = (orgId: string) =>
  * string: a merge round-trips through jsonb, which normalises key order.
  */
 async function readSecret(orgId: string): Promise<Record<string, unknown> | null> {
-  const { data, error } = await admin().rpc("read_integration_secret", {
+  const { data, error } = await admin().schema("api").rpc("read_integration_secret", {
     p_org: orgId,
     p_provider: PROVIDER,
   });
@@ -196,7 +196,7 @@ describe("integration credentials in Supabase Vault", () => {
   });
 
   it("the service role reads the plaintext back", async () => {
-    const { data, error } = await admin().rpc("read_integration_secret", {
+    const { data, error } = await admin().schema("api").rpc("read_integration_secret", {
       p_org: ownerA.orgId,
       p_provider: PROVIDER,
     });
@@ -249,7 +249,7 @@ describe("integration credentials in Supabase Vault", () => {
 
     // org B's own credentials are a separate secret; reading B never yields A's
     await storeAs(ownerB, ownerB.orgId, SECRET_B);
-    const client = admin();
+    const client = admin().schema("api");
     const [a, b] = await Promise.all([
       client.rpc("read_integration_secret", { p_org: ownerA.orgId, p_provider: PROVIDER }),
       client.rpc("read_integration_secret", { p_org: ownerB.orgId, p_provider: PROVIDER }),
@@ -272,7 +272,7 @@ describe("integration credentials in Supabase Vault", () => {
     expect(clear).toMatch(/not authorized for organization/i);
 
     // the secret survived both attempts
-    const { data } = await admin().rpc("read_integration_secret", {
+    const { data } = await admin().schema("api").rpc("read_integration_secret", {
       p_org: ownerA.orgId,
       p_provider: PROVIDER,
     });
@@ -294,7 +294,7 @@ describe("integration credentials in Supabase Vault", () => {
     );
     expect(remaining.length).toBe(0);
 
-    const { data } = await admin().rpc("read_integration_secret", {
+    const { data } = await admin().schema("api").rpc("read_integration_secret", {
       p_org: ownerA.orgId,
       p_provider: PROVIDER,
     });
@@ -330,7 +330,7 @@ describe("integration credentials in Supabase Vault", () => {
     // the merge is defensive: a secret that predates the JSON contract (or a
     // non-object payload) must not make every later rotation raise.
     await storeAs(ownerA, ownerA.orgId, "legacy-opaque-token");
-    const { data: opaque } = await admin().rpc("read_integration_secret", {
+    const { data: opaque } = await admin().schema("api").rpc("read_integration_secret", {
       p_org: ownerA.orgId,
       p_provider: PROVIDER,
     });
