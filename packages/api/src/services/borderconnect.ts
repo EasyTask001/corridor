@@ -71,10 +71,35 @@ function resolveTransport(opts?: { transport?: BorderConnectTransport }): Border
 }
 
 /**
+ * Deterministic JSON serialization: object keys are sorted recursively (at
+ * every nesting level), array element order is preserved. Plain
+ * `JSON.stringify` serializes object keys in insertion order, so two
+ * logically identical messages that happen to arrive with differently
+ * ordered keys (an HTTP retry re-serialized by BorderConnect, an
+ * intermediate proxy, a different JSON encoder on their end) would hash
+ * differently and silently evade dedup — this is the canonical form
+ * `storeInboundMessages` hashes instead, so key order can never matter.
+ */
+export function canonicalStringify(value: unknown): string {
+  if (value === undefined) return "null";
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => (item === undefined ? "null" : canonicalStringify(item))).join(",")}]`;
+  }
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj)
+    .filter((k) => obj[k] !== undefined)
+    .sort();
+  const body = keys.map((k) => `${JSON.stringify(k)}:${canonicalStringify(obj[k])}`).join(",");
+  return `{${body}}`;
+}
+
+/**
  * Store every message the queue handed back BEFORE any of it is
- * interpreted. Dedup key is `sha256(JSON.stringify(message))` — the same
- * message re-delivered by an HTTP retry or an overlapping poll hashes
- * identically and `payload_sha256`'s unique constraint no-ops the insert.
+ * interpreted. Dedup key is `sha256(canonicalStringify(message))` — the same
+ * message re-delivered by an HTTP retry or an overlapping poll (even with its
+ * object keys re-ordered along the way) hashes identically and
+ * `payload_sha256`'s unique constraint no-ops the insert.
  */
 export async function storeInboundMessages(
   tx: RlsTransaction,
@@ -84,7 +109,7 @@ export async function storeInboundMessages(
   let duplicates = 0;
   for (const msg of messages) {
     const keys = inboundKeys(msg);
-    const payloadSha256 = createHash("sha256").update(JSON.stringify(msg)).digest("hex");
+    const payloadSha256 = createHash("sha256").update(canonicalStringify(msg)).digest("hex");
     const inserted = await tx
       .insert(customsInbox)
       .values({

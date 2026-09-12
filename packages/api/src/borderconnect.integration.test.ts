@@ -10,7 +10,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, eq, inArray, schema, withServiceRole } from "@corridor/db";
 import type { BorderConnectTransport } from "@corridor/integrations";
-import { drainBorderConnectInbox } from "./services/borderconnect";
+import { drainBorderConnectInbox, storeInboundMessages } from "./services/borderconnect";
 
 const DB_URL =
   process.env.DIRECT_DATABASE_URL ?? "postgresql://postgres:postgres@127.0.0.1:55322/postgres";
@@ -302,6 +302,40 @@ describe("drainBorderConnectInbox", () => {
     // --- A second, empty drain is a no-op ---
     const second = await drainBorderConnectInbox(db, { transport: fakeTransport([]) });
     expect(second).toMatchObject({ received: 0, stored: 0, duplicates: 0, errors: 0, processed: {} });
+  });
+});
+
+describe("storeInboundMessages dedup", () => {
+  it("dedupes two messages with identical content but different key insertion order", async () => {
+    // Real BorderConnect retries / an intermediate proxy could re-serialize a
+    // message with its keys in a different order — the hash must not care.
+    const marker = `dedup-key-order-${Date.now()}`;
+    const left = {
+      data: "API_RESPONSE",
+      companyKey: marker,
+      status: "OK",
+      meta: { sendId: "s1", tripNumber: "t1" },
+    };
+    const right = {
+      meta: { tripNumber: "t1", sendId: "s1" },
+      status: "OK",
+      companyKey: marker,
+      data: "API_RESPONSE",
+    };
+
+    try {
+      const result = await withServiceRole(db, (tx) => storeInboundMessages(tx, [left, right]));
+      expect(result).toEqual({ stored: 1, duplicates: 1 });
+
+      const rows = await withServiceRole(db, (tx) =>
+        tx.select().from(customsInbox).where(eq(customsInbox.companyKey, marker)),
+      );
+      expect(rows).toHaveLength(1);
+    } finally {
+      await withServiceRole(db, (tx) =>
+        tx.delete(customsInbox).where(eq(customsInbox.companyKey, marker)),
+      );
+    }
   });
 });
 
