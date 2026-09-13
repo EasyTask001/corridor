@@ -14,6 +14,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --project unit --passWithNoTests",
     "test:integration": "vitest run --project integration",
+    "avaal:extract": "tsx scripts/avaal-ui-extract.ts",
+    "avaal:import": "tsx scripts/avaal-import.ts",
     "seed": "pnpm run ports:import && tsx scripts/seed.ts",
     "seed:generate": "tsx scripts/generate-seed-sql.ts",
     "ports:import": "tsx scripts/import-ports.ts",

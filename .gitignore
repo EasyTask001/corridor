@@ -98,3 +98,4 @@ Desktop.ini
 .superpowers/
 .worktrees/
 validator_logs
+.local/avaal-import/
