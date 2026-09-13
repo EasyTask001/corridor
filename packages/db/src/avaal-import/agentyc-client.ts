@@ -187,8 +187,9 @@ class StdioAgentycClient implements AgentycClient {
 const injectedTransport = (transport: Duplex): Transport => ({
   readable: transport,
   writable: transport,
-  close: async () => {
+  close: () => {
     transport.destroy();
+    return Promise.resolve();
   },
 });
 

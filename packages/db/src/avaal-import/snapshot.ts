@@ -181,11 +181,11 @@ const validateCategory = (
 
   return {
     route,
-    displayedTotal: displayedTotal as number | null,
+    displayedTotal,
     finalPageReached: true,
     pagesVisited,
     records,
-    warnings: [...value.warnings] as string[],
+    warnings: [...value.warnings],
   };
 };
 
