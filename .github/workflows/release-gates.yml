@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: production-gates
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -56,7 +56,7 @@ jobs:
     needs: extraction
     environment: production-gates
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Download signed device evidence
         env:
           EVIDENCE_URL: ${{ secrets.CORRIDOR_MOBILE_QA_EVIDENCE_URL }}
