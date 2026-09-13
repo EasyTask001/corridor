@@ -37,6 +37,7 @@ import {
   fromLocalInput,
   stepForIssue,
   toLocalInput,
+  type Capabilities,
   type Movement,
   type Options,
   type StepKey,
@@ -45,7 +46,6 @@ import {
 
 type Outputs = inferRouterOutputs<AppRouter>;
 type Suggestion = NonNullable<Outputs["movement"]["suggestions"]["generate"]>;
-type Capabilities = Outputs["integrations"]["customsCapabilities"];
 
 const PANEL: Record<StepKey, () => React.ReactNode> = {
   trip: TripStep,
@@ -212,6 +212,7 @@ export function MovementWorkspace({
         movement: m,
         validation,
         options,
+        capabilities,
         permissions,
         editable,
         refresh,
@@ -335,6 +336,12 @@ export function MovementWorkspace({
           {m.status === "accepted" && permissions.amend && !capabilities.amend && (
             <p role="status" className="text-sm text-status-warning">
               {capabilities.reasons.amend}
+            </p>
+          )}
+
+          {m.trailers.length > 1 && !capabilities.multiTrailer && (
+            <p role="status" className="text-sm text-status-warning">
+              {capabilities.reasons.multiTrailer}
             </p>
           )}
 

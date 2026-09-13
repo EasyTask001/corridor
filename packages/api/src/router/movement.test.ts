@@ -673,6 +673,78 @@ describe("movement.amend capabilities", () => {
   });
 });
 
+describe("movement.validate — multi-trailer capability (0051)", () => {
+  const SECOND_SLOT_ID = "14141414-1414-4414-8414-141414141414";
+  const SECOND_TRAILER_ID = "15151515-1515-4515-8515-151515151515";
+
+  function withDoubleAndLoadedOn(): Record<string, Row[]> {
+    const rows = transmittableRows();
+    rows.integrationConfigs![0]!.mode = "border_connect";
+    rows.integrationConfigs![0]!.environment = "production";
+    rows.organizations![0]!.borderConnectCompanyKey = "c-company";
+    rows.movementTrailers = [
+      ...rows.movementTrailers!,
+      {
+        id: SECOND_SLOT_ID,
+        organizationId: TEST_ORG_ID,
+        movementId: MOVEMENT_ID,
+        trailerId: SECOND_TRAILER_ID,
+        position: 2,
+        unitNumber: "TR-502",
+        trailerType: "TF",
+        status: "active",
+        plateNumber: "TRL5022",
+        plateJurisdiction: "ON",
+        registrationExpiry: isoDay(180),
+      },
+    ];
+    // An explicit choice keeps the domain check (movement-validation.ts)
+    // clean, so provider preflight — where the capability gate lives — runs.
+    rows.shipments = [
+      { ...rows.shipments![0]!, loadedOnType: "TRAILER", loadedOnMovementTrailerId: SLOT_ID },
+    ];
+    return rows;
+  }
+
+  it("blocks transmit in production until BORDERCONNECT_MULTI_TRAILER_ENABLED is set", async () => {
+    delete process.env.BORDERCONNECT_MULTI_TRAILER_ENABLED;
+    process.env.BORDERCONNECT_API_URL_SUFFIX = "service-provider";
+    process.env.BORDERCONNECT_API_KEY = "secret";
+    const { caller: api } = caller({ permissions: DISPATCHER, rows: withDoubleAndLoadedOn() });
+
+    const result = await api.validate({ id: MOVEMENT_ID });
+
+    expect(result.canTransmit).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "customs_multi_trailer_unsupported",
+          severity: "blocking",
+          step: "trailer",
+          message: expect.stringContaining("BORDERCONNECT_MULTI_TRAILER_ENABLED"),
+        }),
+      ]),
+    );
+    delete process.env.BORDERCONNECT_API_URL_SUFFIX;
+    delete process.env.BORDERCONNECT_API_KEY;
+  });
+
+  it("allows a double once the flag is set", async () => {
+    process.env.BORDERCONNECT_API_URL_SUFFIX = "service-provider";
+    process.env.BORDERCONNECT_API_KEY = "secret";
+    process.env.BORDERCONNECT_MULTI_TRAILER_ENABLED = "true";
+    const { caller: api } = caller({ permissions: DISPATCHER, rows: withDoubleAndLoadedOn() });
+
+    const result = await api.validate({ id: MOVEMENT_ID });
+
+    expect(result.issues.map((i) => i.code)).not.toContain("customs_multi_trailer_unsupported");
+
+    delete process.env.BORDERCONNECT_API_URL_SUFFIX;
+    delete process.env.BORDERCONNECT_API_KEY;
+    delete process.env.BORDERCONNECT_MULTI_TRAILER_ENABLED;
+  });
+});
+
 describe("movement.validate provider capabilities", () => {
   it("reports unsupported BorderConnect hazmat before transmission", async () => {
     const rows = transmittableRows();

@@ -406,6 +406,7 @@ describe("customs capabilities", () => {
       cancel: true,
       status: true,
       inBond: true,
+      multiTrailer: true,
     });
     expect(gateway.capabilities).toMatchObject({
       transmit: true,
@@ -413,6 +414,7 @@ describe("customs capabilities", () => {
       cancel: true,
       status: true,
       inBond: true,
+      multiTrailer: true,
     });
     expect(unconfiguredProduction.capabilities).toMatchObject({
       transmit: false,
@@ -420,6 +422,7 @@ describe("customs capabilities", () => {
       cancel: false,
       status: false,
       inBond: false,
+      multiTrailer: false,
     });
   });
 });

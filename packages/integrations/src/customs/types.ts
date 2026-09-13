@@ -231,7 +231,13 @@ export interface CustomsCancelAck {
 
 export type CustomsClientMode = "mock" | "gateway" | "border_connect";
 
-export type CustomsCapabilityName = "transmit" | "amend" | "cancel" | "status" | "inBond";
+export type CustomsCapabilityName =
+  | "transmit"
+  | "amend"
+  | "cancel"
+  | "status"
+  | "inBond"
+  | "multiTrailer";
 
 export interface CustomsCapabilities {
   transmit: boolean;
@@ -239,6 +245,8 @@ export interface CustomsCapabilities {
   cancel: boolean;
   status: boolean;
   inBond: boolean;
+  /** Filing a manifest with more than one trailer attached (0051's loadedOn). */
+  multiTrailer: boolean;
   reasons: Partial<Record<CustomsCapabilityName, string>>;
 }
 

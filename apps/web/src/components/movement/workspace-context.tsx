@@ -19,6 +19,7 @@ export type MovementShipment = Movement["shipments"][number];
 export type Commodity = MovementShipment["commodities"][number];
 export type Validation = Outputs["movement"]["validate"];
 export type Options = Outputs["movement"]["options"];
+export type Capabilities = Outputs["integrations"]["customsCapabilities"];
 
 export const STEPS = [
   { key: "trip", label: "Trip" },
@@ -39,6 +40,7 @@ export interface WorkspaceValue {
   movement: Movement;
   validation: Validation;
   options: Options;
+  capabilities: Capabilities;
   permissions: { write: boolean; transmit: boolean; cancel: boolean; amend: boolean };
   /** Movement is in an editable status AND the caller may write. */
   editable: boolean;

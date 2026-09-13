@@ -52,6 +52,8 @@ export interface BorderConnectClientOptions {
   tenantKey: string;
   /** Explicit post-validation feature gate; false by default. */
   aciAmendEnabled?: boolean;
+  /** Explicit post-validation feature gate; false by default (0051). */
+  multiTrailerEnabled?: boolean;
 }
 
 /**
@@ -212,6 +214,7 @@ export function createBorderConnectCustomsClient(
     apiKey: opts.apiKey,
     companyKey: opts.companyKey,
     aciAmendEnabled: opts.aciAmendEnabled,
+    multiTrailerEnabled: opts.multiTrailerEnabled,
   });
   const transport: BorderConnectTransport =
     opts.transport ??

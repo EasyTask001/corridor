@@ -10,7 +10,7 @@ import { Field } from "../field";
 import { useMovementMutations, useWorkspace } from "../workspace-context";
 
 export function TrailersStep() {
-  const { movement: m, options, editable } = useWorkspace();
+  const { movement: m, options, editable, capabilities } = useWorkspace();
   const { addTrailer, removeTrailer, reorderTrailers } = useMovementMutations();
   const [adding, setAdding] = useState("");
 
@@ -112,6 +112,13 @@ export function TrailersStep() {
           </tbody>
         </table>
       </div>
+
+      {m.trailers.length > 1 && !capabilities.multiTrailer && (
+        <p role="status" className="text-sm text-status-warning">
+          {capabilities.reasons.multiTrailer} Set which unit each shipment is loaded on in
+          Shipments so it is ready the moment this is enabled.
+        </p>
+      )}
 
       {editable && (
         <div className="panel flex items-end gap-3 p-4">

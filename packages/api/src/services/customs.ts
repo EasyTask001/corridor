@@ -69,12 +69,14 @@ function unavailableCapabilities(reason: string): CustomsCapabilities {
     cancel: false,
     status: false,
     inBond: false,
+    multiTrailer: false,
     reasons: {
       transmit: reason,
       amend: reason,
       cancel: reason,
       status: reason,
       inBond: reason,
+      multiTrailer: reason,
     },
   };
 }
@@ -294,6 +296,7 @@ export async function customsClientFor(tx: RlsTransaction, orgId: string, regime
       tenantKey: orgId,
       webhookSecret: process.env.CUSTOMS_GATEWAY_WEBHOOK_SECRET ?? null,
       aciAmendEnabled: process.env.BORDERCONNECT_ACI_AMEND_ENABLED === "true",
+      multiTrailerEnabled: process.env.BORDERCONNECT_MULTI_TRAILER_ENABLED === "true",
       ...inputs,
     }),
     config: cfg ?? null,
@@ -336,6 +339,7 @@ export async function customsCapabilitiesFor(
       apiKey: process.env.BORDERCONNECT_API_KEY ?? null,
       companyKey: org?.companyKey ?? null,
       aciAmendEnabled: process.env.BORDERCONNECT_ACI_AMEND_ENABLED === "true",
+      multiTrailerEnabled: process.env.BORDERCONNECT_MULTI_TRAILER_ENABLED === "true",
     });
   }
 
@@ -374,6 +378,16 @@ export async function customsPreflightIssues(
         severity: "blocking",
         message: capabilities.reasons.transmit ?? "Customs transmission is not supported",
         step: "trip",
+      },
+    ];
+  }
+  if (!capabilities.multiTrailer && full.trailers.length > 1) {
+    return [
+      {
+        code: "customs_multi_trailer_unsupported",
+        severity: "blocking",
+        message: capabilities.reasons.multiTrailer ?? "Multi-trailer filing is not supported",
+        step: "trailer",
       },
     ];
   }

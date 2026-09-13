@@ -262,3 +262,11 @@ relevant here:
 4. Hazmat `emergencyContact` and in-bond `irsNumber`/`fda` are still not
    captured anywhere in the outbound mapping (`validate.ts` 422s those
    shipments) — unaffected by this task, carried forward as-is.
+5. **Multi-trailer `loadedOn` (0051)**: the field is implemented and unit
+   tested against the manuals, but has never been sent to the live account.
+   The production capability is disabled by default
+   (`BORDERCONNECT_MULTI_TRAILER_ENABLED=false`) whenever more than one
+   trailer is attached; a single trailer or bobtail manifest is unaffected
+   and has always been byte-identical (no `loadedOn` key is emitted unless a
+   filer explicitly chooses a unit). Keep the flag off until a live
+   BorderConnect round trip with a double confirms the field is accepted.
