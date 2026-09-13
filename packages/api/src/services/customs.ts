@@ -70,6 +70,7 @@ function unavailableCapabilities(reason: string): CustomsCapabilities {
     status: false,
     inBond: false,
     multiTrailer: false,
+    emptyTrip: false,
     reasons: {
       transmit: reason,
       amend: reason,
@@ -77,6 +78,7 @@ function unavailableCapabilities(reason: string): CustomsCapabilities {
       status: reason,
       inBond: reason,
       multiTrailer: reason,
+      emptyTrip: reason,
     },
   };
 }
@@ -297,6 +299,7 @@ export async function customsClientFor(tx: RlsTransaction, orgId: string, regime
       webhookSecret: process.env.CUSTOMS_GATEWAY_WEBHOOK_SECRET ?? null,
       aciAmendEnabled: process.env.BORDERCONNECT_ACI_AMEND_ENABLED === "true",
       multiTrailerEnabled: process.env.BORDERCONNECT_MULTI_TRAILER_ENABLED === "true",
+      emptyTripEnabled: process.env.BORDERCONNECT_EMPTY_TRIP_ENABLED === "true",
       ...inputs,
     }),
     config: cfg ?? null,
@@ -340,6 +343,7 @@ export async function customsCapabilitiesFor(
       companyKey: org?.companyKey ?? null,
       aciAmendEnabled: process.env.BORDERCONNECT_ACI_AMEND_ENABLED === "true",
       multiTrailerEnabled: process.env.BORDERCONNECT_MULTI_TRAILER_ENABLED === "true",
+      emptyTripEnabled: process.env.BORDERCONNECT_EMPTY_TRIP_ENABLED === "true",
     });
   }
 
@@ -388,6 +392,16 @@ export async function customsPreflightIssues(
         severity: "blocking",
         message: capabilities.reasons.multiTrailer ?? "Multi-trailer filing is not supported",
         step: "trailer",
+      },
+    ];
+  }
+  if (!capabilities.emptyTrip && full.isEmpty) {
+    return [
+      {
+        code: "customs_empty_trip_unsupported",
+        severity: "blocking",
+        message: capabilities.reasons.emptyTrip ?? "Empty-trip filing is not supported",
+        step: "trip",
       },
     ];
   }

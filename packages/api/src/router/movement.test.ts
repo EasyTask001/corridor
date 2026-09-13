@@ -745,6 +745,56 @@ describe("movement.validate — multi-trailer capability (0051)", () => {
   });
 });
 
+describe("movement.validate — empty-trip capability", () => {
+  function withEmptyTrip(): Record<string, Row[]> {
+    const rows = transmittableRows(movementRow({ isEmpty: true }));
+    rows.integrationConfigs![0]!.mode = "border_connect";
+    rows.integrationConfigs![0]!.environment = "production";
+    rows.organizations![0]!.borderConnectCompanyKey = "c-company";
+    rows.shipments = [];
+    rows.commodities = [];
+    return rows;
+  }
+
+  it("blocks transmit in production until BORDERCONNECT_EMPTY_TRIP_ENABLED is set", async () => {
+    delete process.env.BORDERCONNECT_EMPTY_TRIP_ENABLED;
+    process.env.BORDERCONNECT_API_URL_SUFFIX = "service-provider";
+    process.env.BORDERCONNECT_API_KEY = "secret";
+    const { caller: api } = caller({ permissions: DISPATCHER, rows: withEmptyTrip() });
+
+    const result = await api.validate({ id: MOVEMENT_ID });
+
+    expect(result.canTransmit).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "customs_empty_trip_unsupported",
+          severity: "blocking",
+          step: "trip",
+          message: expect.stringContaining("BORDERCONNECT_EMPTY_TRIP_ENABLED"),
+        }),
+      ]),
+    );
+    delete process.env.BORDERCONNECT_API_URL_SUFFIX;
+    delete process.env.BORDERCONNECT_API_KEY;
+  });
+
+  it("allows an empty trip once the flag is set", async () => {
+    process.env.BORDERCONNECT_API_URL_SUFFIX = "service-provider";
+    process.env.BORDERCONNECT_API_KEY = "secret";
+    process.env.BORDERCONNECT_EMPTY_TRIP_ENABLED = "true";
+    const { caller: api } = caller({ permissions: DISPATCHER, rows: withEmptyTrip() });
+
+    const result = await api.validate({ id: MOVEMENT_ID });
+
+    expect(result.issues.map((i) => i.code)).not.toContain("customs_empty_trip_unsupported");
+
+    delete process.env.BORDERCONNECT_API_URL_SUFFIX;
+    delete process.env.BORDERCONNECT_API_KEY;
+    delete process.env.BORDERCONNECT_EMPTY_TRIP_ENABLED;
+  });
+});
+
 describe("movement.validate provider capabilities", () => {
   it("reports unsupported BorderConnect hazmat before transmission", async () => {
     const rows = transmittableRows();

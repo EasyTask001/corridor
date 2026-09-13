@@ -110,6 +110,10 @@ stops polling and leaves the batch on disk for replay after recovery.
 
 ## Feature truth and GA gates
 
+See `docs/operations/supported-filing-matrix.md` for the full scenario-by-
+scenario table (generated from `filing-matrix.test.ts`, the executable
+source of truth). Summary:
+
 - Keep `BORDERCONNECT_ACI_AMEND_ENABLED=false` until a written provider
   sequence and a successful CBSA amendment round trip are attached to the
   release record.
@@ -117,6 +121,11 @@ stops polling and leaves the batch on disk for replay after recovery.
   round trip with more than one trailer attached validates the `loadedOn`
   field (0051). A single trailer or bobtail movement is unaffected — the
   capability only gates a manifest with two or more trailers hitched.
+- Keep `BORDERCONNECT_EMPTY_TRIP_ENABLED=false` until a live BorderConnect
+  round trip with a declared-empty trip ("Empty Trailer" / "Empty Trip") is
+  validated — neither the ACE nor ACI manual documents an explicit empty
+  indicator field, so this is the one filing shape whose wire behaviour is
+  entirely unverified live.
 - QP In-Bond is tracking-only. Special filings that the capability/preflight
   matrix blocks remain unavailable.
 - Tariff and border-wait values remain synthetic experimental data and never

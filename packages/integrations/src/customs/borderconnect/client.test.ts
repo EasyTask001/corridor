@@ -383,6 +383,7 @@ describe("createBorderConnectCustomsClient — capabilities", () => {
       status: false,
       inBond: false,
       multiTrailer: false,
+      emptyTrip: false,
       reasons: {
         amend:
           "ACI amendment is disabled until a live CBSA round trip is validated (BORDERCONNECT_ACI_AMEND_ENABLED)",
@@ -390,8 +391,34 @@ describe("createBorderConnectCustomsClient — capabilities", () => {
         inBond: "QP In-Bond customs messaging coming soon; tracking only.",
         multiTrailer:
           "Multi-trailer filing (loadedOn) is disabled until a live BorderConnect round trip is validated (BORDERCONNECT_MULTI_TRAILER_ENABLED)",
+        emptyTrip:
+          "Empty-trip filing is disabled until a live BorderConnect round trip is validated (BORDERCONNECT_EMPTY_TRIP_ENABLED)",
       },
     });
+  });
+
+  it("enables emptyTrip with the env flag or outside production", () => {
+    const flagged = createBorderConnectCustomsClient({
+      provider: "cbsa_aci",
+      environment: "production",
+      apiUrlSuffix: "service-provider",
+      apiKey: "secret",
+      companyKey: "CK1",
+      tenantKey: "t1",
+      emptyTripEnabled: true,
+    });
+    expect(flagged.capabilities.emptyTrip).toBe(true);
+    expect(flagged.capabilities.reasons.emptyTrip).toBeUndefined();
+
+    const sandbox = createBorderConnectCustomsClient({
+      provider: "cbsa_aci",
+      environment: "sandbox",
+      apiUrlSuffix: "service-provider",
+      apiKey: "secret",
+      companyKey: "CK1",
+      tenantKey: "t1",
+    });
+    expect(sandbox.capabilities.emptyTrip).toBe(true);
   });
 
   it("enables multiTrailer with the env flag or outside production", () => {

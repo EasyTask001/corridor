@@ -13,7 +13,12 @@ Under Settings → Integrations each regime runs in **mock** mode (a determinist
 
 ## Amendments and cancellations
 
-An accepted manifest can be amended (re-transmitted with the differences and, for ACI, a CBSA reason code) or cancelled. A rejected one becomes editable.
+An accepted ACE manifest can be amended (re-transmitted with the differences) or cancelled. ACE cancellation and ACI cancellation are both available once your BorderConnect company key is configured. **ACI amendment is not available in production yet** — it stays off until a live CBSA amendment round trip is validated, and no CBSA reason code is transmitted today even in modes where amendment is enabled. A rejected manifest becomes editable.
+
+Multiple trailers and a declared-empty trip are similarly held behind a
+production flag until a live BorderConnect round trip validates them; see
+`docs/operations/supported-filing-matrix.md` for the full list of what is
+supported, gated, or refused today.
 
 ## Carrier notices
 

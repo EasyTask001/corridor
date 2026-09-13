@@ -98,6 +98,7 @@ export function ShipmentForm({
   const consignees = bySide("consignee", initial?.consigneeId);
   const brokers = partners.filter((p) => p.type === "broker" || p.type === "both");
 
+  const [shipmentType, setShipmentType] = useState(initial?.shipmentType ?? "regular_bill");
   const [entryPortId, setEntryPortId] = useState(initial?.entryPortId ?? null);
   const [inBondPortId, setInBondPortId] = useState(initial?.inBondDestinationPortId ?? null);
   const [destinationPortId, setDestinationPortId] = useState(initial?.destinationPortId ?? null);
@@ -121,7 +122,7 @@ export function ShipmentForm({
             .trim()
             .toUpperCase(),
           ...(regime === "ACE"
-            ? { shipmentType: String(fd.get("shipmentType")) as AceShipmentType }
+            ? { shipmentType }
             : { cargoType: String(fd.get("cargoType")) as AciCargoType }),
           isPars: fd.get("isPars") === "on",
           shipperId: str(fd.get("shipperId")),
@@ -168,8 +169,9 @@ export function ShipmentForm({
           <select
             id="shipmentType"
             name="shipmentType"
-            defaultValue={initial?.shipmentType ?? "regular_bill"}
+            value={shipmentType}
             disabled={disabled}
+            onChange={(e) => setShipmentType(e.target.value as AceShipmentType)}
             className="input capitalize"
           >
             {ACE_SHIPMENT_TYPES.map((t) => (
@@ -178,6 +180,13 @@ export function ShipmentForm({
               </option>
             ))}
           </select>
+          {shipmentType === "in_bond" && (
+            <p className="mt-1 text-xs text-status-warning">
+              Not yet filable through BorderConnect — the manifest will be refused at pre-flight
+              until IRS number/FDA capture is implemented. Tracking-only via the In-Bond monitor
+              works today.
+            </p>
+          )}
         </Field>
       ) : (
         <Field label="Cargo type" htmlFor="cargoType">

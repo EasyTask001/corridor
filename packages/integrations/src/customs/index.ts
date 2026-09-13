@@ -74,6 +74,8 @@ export function createCustomsClient(input: {
   aciAmendEnabled?: boolean;
   /** Disabled until a live BorderConnect round trip validates loadedOn (0051). */
   multiTrailerEnabled?: boolean;
+  /** Disabled until a live BorderConnect round trip validates an empty-trip filing. */
+  emptyTripEnabled?: boolean;
   /** Owner of the fixture state (the organization id in production); never sent to a live gateway. */
   tenantKey: string;
 }): CustomsClient {
@@ -98,6 +100,7 @@ export function createCustomsClient(input: {
       companyKey: input.companyKey ?? null,
       aciAmendEnabled: input.aciAmendEnabled,
       multiTrailerEnabled: input.multiTrailerEnabled,
+      emptyTripEnabled: input.emptyTripEnabled,
       tenantKey: input.tenantKey,
     });
   }

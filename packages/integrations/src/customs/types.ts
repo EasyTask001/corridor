@@ -237,7 +237,8 @@ export type CustomsCapabilityName =
   | "cancel"
   | "status"
   | "inBond"
-  | "multiTrailer";
+  | "multiTrailer"
+  | "emptyTrip";
 
 export interface CustomsCapabilities {
   transmit: boolean;
@@ -247,6 +248,8 @@ export interface CustomsCapabilities {
   inBond: boolean;
   /** Filing a manifest with more than one trailer attached (0051's loadedOn). */
   multiTrailer: boolean;
+  /** Filing a trip with no shipments ("Empty Trailer" / "Empty Trip"). */
+  emptyTrip: boolean;
   reasons: Partial<Record<CustomsCapabilityName, string>>;
 }
 

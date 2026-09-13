@@ -37,6 +37,12 @@ export function HazmatFields({
       {entries.length === 0 && (
         <p className="text-sm text-fg-secondary">No dangerous goods declared on this line.</p>
       )}
+      {entries.length > 0 && (
+        <p className="text-sm text-status-warning">
+          Recorded for your records, but not yet filable through BorderConnect — the manifest will
+          be refused at pre-flight while any dangerous goods are declared on an ACE shipment.
+        </p>
+      )}
       {entries.map((e, i) => (
         <div key={i} className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Field label={`UN code ${i + 1}`} htmlFor={`unCode-${i}`}>
