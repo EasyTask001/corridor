@@ -70,6 +70,22 @@ The OTLP exporter emits these low-cardinality instruments:
 Metric attributes never include organization, movement, shipment, document,
 person, or provider routing identifiers.
 
+## Content Security Policy rollout
+
+Every response carries a per-request nonce-based CSP (`apps/web/src/proxy.ts`,
+`apps/web/src/lib/csp.ts`), shipped as `Content-Security-Policy-Report-Only`
+by default so nothing breaks silently. `script-src` is `'self'
+'nonce-<random>' 'strict-dynamic'`; `style-src` keeps `'unsafe-inline'`
+because nonces do not cover React's inline `style={{}}` attribute, only
+`<style>` tags. Run report-only for one full pilot week, review delivered
+CSP reports (via `CSP_REPORT_URI`, when configured) or the browser console
+across a full pilot walkthrough, then set `CSP_ENFORCE=true` to switch the
+header to the enforced `Content-Security-Policy` name. `apps/web/src/proxy.test.ts`
+and `apps/web/src/lib/csp.test.ts` cover the header logic; there is no
+automated substitute for a live console check across login, dashboard, the
+movement wizard, copilot, and documents before flipping the flag in
+production.
+
 ## Sentry alert rules
 
 Create one issue alert per table row in the production Sentry project. Filter

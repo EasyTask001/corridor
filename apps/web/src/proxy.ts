@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { authCookieOptions, persistSessionFrom } from "@corridor/auth";
 import { appCookieOptions } from "@/lib/cookies";
+import { buildCspHeader, cspHeaderName, generateNonce } from "@/lib/csp";
 
 const PUBLIC_PATHS = [
   "/login",
@@ -19,12 +20,29 @@ function isPublic(pathname: string) {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
+function withCsp(response: NextResponse, headerName: string, csp: string): NextResponse {
+  response.headers.set(headerName, csp);
+  return response;
+}
+
 /**
  * Refreshes the Supabase session cookie on every request (so Server Components
  * never see a stale token) and gates non-public routes. Cookies are httpOnly +
  * secure + sameSite=lax — the direct fix for the legacy JWT-in-hidden-input bug.
+ *
+ * Also generates a per-request CSP nonce. Setting it on the request's own
+ * `Content-Security-Policy` header (not just the response) is what lets Next.js
+ * extract it during rendering and attach it to its own framework/page scripts;
+ * `x-nonce` is our own channel for the inline theme-init script in layout.tsx.
+ * Nonces only work with dynamic rendering — see the Next.js CSP guide.
  */
 export async function proxy(request: NextRequest) {
+  const nonce = generateNonce();
+  const csp = buildCspHeader(nonce);
+  const headerName = cspHeaderName();
+  request.headers.set("x-nonce", nonce);
+  request.headers.set(headerName, csp);
+
   let response = NextResponse.next({ request });
   const persist = persistSessionFrom(request.cookies);
 
@@ -61,17 +79,17 @@ export async function proxy(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname);
-    return NextResponse.redirect(url);
+    return withCsp(NextResponse.redirect(url), headerName, csp);
   }
 
   if (user && (pathname === "/login" || pathname === "/signup")) {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     url.search = "";
-    return NextResponse.redirect(url);
+    return withCsp(NextResponse.redirect(url), headerName, csp);
   }
 
-  return response;
+  return withCsp(response, headerName, csp);
 }
 
 export const config = {
