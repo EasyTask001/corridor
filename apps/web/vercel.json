@@ -7,19 +7,19 @@
     },
     {
       "path": "/api/jobs/process",
-      "schedule": "* * * * *"
+      "schedule": "0 7 * * *"
     },
     {
       "path": "/api/jobs/notices-sync",
-      "schedule": "0 * * * *"
+      "schedule": "0 8 * * *"
     },
     {
       "path": "/api/jobs/borderconnect-drain",
-      "schedule": "* * * * *"
+      "schedule": "0 9 * * *"
     },
     {
       "path": "/api/jobs/customs-watchdog",
-      "schedule": "* * * * *"
+      "schedule": "0 10 * * *"
     }
   ]
 }
