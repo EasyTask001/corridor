@@ -253,7 +253,7 @@ export function MovementWorkspace({
                         · FAST {borderWait.data.lanes.fast} min
                       </span>
                     )}
-                    <span className="ml-2 text-xs text-status-warning">
+                    <span className="ml-2 text-xs text-status-warn">
                       {borderWait.data.disclaimer}
                     </span>
                   </>
@@ -334,13 +334,13 @@ export function MovementWorkspace({
           </header>
 
           {m.status === "accepted" && permissions.amend && !capabilities.amend && (
-            <p role="status" className="text-sm text-status-warning">
+            <p role="status" className="text-sm text-status-warn">
               {capabilities.reasons.amend}
             </p>
           )}
 
           {m.trailers.length > 1 && !capabilities.multiTrailer && (
-            <p role="status" className="text-sm text-status-warning">
+            <p role="status" className="text-sm text-status-warn">
               {capabilities.reasons.multiTrailer}
             </p>
           )}

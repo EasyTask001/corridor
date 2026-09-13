@@ -38,7 +38,7 @@ export function HazmatFields({
         <p className="text-sm text-fg-secondary">No dangerous goods declared on this line.</p>
       )}
       {entries.length > 0 && (
-        <p className="text-sm text-status-warning">
+        <p className="text-sm text-status-warn">
           Recorded for your records, but not yet filable through BorderConnect — the manifest will
           be refused at pre-flight while any dangerous goods are declared on an ACE shipment.
         </p>

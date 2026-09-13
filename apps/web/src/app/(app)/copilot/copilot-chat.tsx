@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import { Alert } from "@corridor/ui";
@@ -115,7 +116,11 @@ export function CopilotChat({
       <Alert variant="info" className="mb-3">
         Corridor Copilot gives operational guidance from paraphrased, dated regulatory summaries
         and your organization&apos;s own notes. It is not legal or customs-broker advice — verify
-        anything border-critical against the linked primary source or your broker.
+        anything border-critical against the linked primary source or your broker. See the{" "}
+        <Link href="/legal/ai-disclaimer" className="underline hover:no-underline">
+          AI disclaimer
+        </Link>
+        .
       </Alert>
 
       {!regulationsIngested && (

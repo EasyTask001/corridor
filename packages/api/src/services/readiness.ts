@@ -62,6 +62,10 @@ const REQUIRED_PRODUCTION_ENV = [
   "CRON_SECRET",
   "READINESS_SECRET",
   "SENTRY_DSN",
+  "NEXT_PUBLIC_LEGAL_ENTITY_NAME",
+  "NEXT_PUBLIC_LEGAL_JURISDICTION",
+  "NEXT_PUBLIC_PRIVACY_EMAIL",
+  "NEXT_PUBLIC_SECURITY_EMAIL",
 ] as const;
 
 function ageMs(value: Date | null, now: Date): number | null {
@@ -269,4 +273,4 @@ export async function collectReadiness(
   return evaluateReadiness(snapshot, { env, now: opts.now });
 }
 
-export { JOB_STALE_MS };
+export { JOB_STALE_MS, REQUIRED_PRODUCTION_ENV };

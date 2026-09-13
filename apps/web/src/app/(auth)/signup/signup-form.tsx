@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import Link from "next/link";
 import { signUp } from "../actions";
 
 export function SignupForm({ next }: { next: string }) {
@@ -47,6 +48,17 @@ export function SignupForm({ next }: { next: string }) {
         </p>
       )}
       {state?.message && <p className="text-sm text-status-ok">{state.message}</p>}
+      <p className="text-xs text-fg-secondary">
+        By creating an account you agree to the{" "}
+        <Link href="/legal/terms" className="underline hover:text-fg-primary">
+          Terms
+        </Link>{" "}
+        and{" "}
+        <Link href="/legal/privacy" className="underline hover:text-fg-primary">
+          Privacy Policy
+        </Link>
+        .
+      </p>
       <button type="submit" disabled={pending} className="btn-primary w-full">
         {pending ? "Creating…" : "Create account"}
       </button>

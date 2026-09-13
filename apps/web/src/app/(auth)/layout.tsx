@@ -31,7 +31,17 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
             before the truck reaches the booth.
           </p>
         </div>
-        <p className="relative text-xs text-ink-400">Built for cross-border carriers.</p>
+        <div className="relative flex items-center justify-between text-xs text-ink-400">
+          <p>Built for cross-border carriers.</p>
+          <p className="flex gap-3">
+            <Link href="/legal/terms" className="hover:text-white hover:underline">
+              Terms
+            </Link>
+            <Link href="/legal/privacy" className="hover:text-white hover:underline">
+              Privacy
+            </Link>
+          </p>
+        </div>
       </aside>
       <main className="flex items-center justify-center p-4 sm:p-8">
         <div className="w-full max-w-md">
@@ -45,6 +55,14 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
             Corridor
           </Link>
           <div className="panel p-6 sm:p-8">{children}</div>
+          <p className="mt-6 flex justify-center gap-4 text-xs text-fg-secondary">
+            <Link href="/legal/terms" className="hover:text-fg-primary hover:underline">
+              Terms
+            </Link>
+            <Link href="/legal/privacy" className="hover:text-fg-primary hover:underline">
+              Privacy
+            </Link>
+          </p>
         </div>
       </main>
     </div>

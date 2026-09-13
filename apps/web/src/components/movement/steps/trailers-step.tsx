@@ -114,7 +114,7 @@ export function TrailersStep() {
       </div>
 
       {m.trailers.length > 1 && !capabilities.multiTrailer && (
-        <p role="status" className="text-sm text-status-warning">
+        <p role="status" className="text-sm text-status-warn">
           {capabilities.reasons.multiTrailer} Set which unit each shipment is loaded on in
           Shipments so it is ready the moment this is enabled.
         </p>

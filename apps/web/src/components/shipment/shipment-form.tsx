@@ -181,7 +181,7 @@ export function ShipmentForm({
             ))}
           </select>
           {shipmentType === "in_bond" && (
-            <p className="mt-1 text-xs text-status-warning">
+            <p className="mt-1 text-xs text-status-warn">
               Not yet filable through BorderConnect — the manifest will be refused at pre-flight
               until IRS number/FDA capture is implemented. Tracking-only via the In-Bond monitor
               works today.

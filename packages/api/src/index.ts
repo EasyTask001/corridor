@@ -17,7 +17,12 @@ export { invalidatePermissionCache } from "./infra/permission-cache";
 export { scanOrganization } from "./services/compliance";
 export { applyInboundCustomsMessage, pollCustomsStatus } from "./services/customs";
 export { storeInboundMessages } from "./services/borderconnect";
-export { collectReadiness, evaluateReadiness, type ReadinessResult } from "./services/readiness";
+export {
+  collectReadiness,
+  evaluateReadiness,
+  REQUIRED_PRODUCTION_ENV,
+  type ReadinessResult,
+} from "./services/readiness";
 export {
   collectCustomsWatchdog,
   buildWatchdogConditions,

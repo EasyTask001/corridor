@@ -14,6 +14,8 @@ const PUBLIC_PATHS = [
   // Password recovery (Task 13): the reset page needs the recovery session from the e-mail link.
   "/forgot-password",
   "/reset-password",
+  "/legal",
+  "/.well-known",
 ];
 
 function isPublic(pathname: string) {

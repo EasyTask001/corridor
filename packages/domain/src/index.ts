@@ -22,3 +22,4 @@ export * from "./notification";
 export * from "./predictive";
 export * from "./reporting";
 export * from "./sso";
+export * from "./retention";

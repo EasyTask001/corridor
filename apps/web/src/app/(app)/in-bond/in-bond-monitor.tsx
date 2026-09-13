@@ -234,7 +234,7 @@ function RecordRow({
                   </button>
                 </>
               ) : (
-                <span className="max-w-64 text-left text-status-warning">
+                <span className="max-w-64 text-left text-status-warn">
                   {capability.reasons.inBond}
                 </span>
               )}

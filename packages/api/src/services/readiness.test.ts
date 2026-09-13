@@ -29,6 +29,10 @@ const productionEnv = {
   CRON_SECRET: "configured",
   READINESS_SECRET: "configured",
   SENTRY_DSN: "configured",
+  NEXT_PUBLIC_LEGAL_ENTITY_NAME: "configured",
+  NEXT_PUBLIC_LEGAL_JURISDICTION: "configured",
+  NEXT_PUBLIC_PRIVACY_EMAIL: "configured",
+  NEXT_PUBLIC_SECURITY_EMAIL: "configured",
 };
 
 describe("evaluateReadiness", () => {
@@ -46,6 +50,10 @@ describe("evaluateReadiness", () => {
       "CRON_SECRET",
       "READINESS_SECRET",
       "SENTRY_DSN",
+      "NEXT_PUBLIC_LEGAL_ENTITY_NAME",
+      "NEXT_PUBLIC_LEGAL_JURISDICTION",
+      "NEXT_PUBLIC_PRIVACY_EMAIL",
+      "NEXT_PUBLIC_SECURITY_EMAIL",
       "BORDERCONNECT_API_URL_SUFFIX",
       "BORDERCONNECT_API_KEY",
       "BORDERCONNECT_SPOOL_DIR",

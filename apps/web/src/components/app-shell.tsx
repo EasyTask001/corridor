@@ -22,6 +22,7 @@ import {
   Package,
   Plug,
   Route,
+  Scale,
   ScrollText,
   Settings as SettingsIcon,
   ShieldCheck,
@@ -101,6 +102,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { href: "/resources", label: "Resources", icon: BookOpen },
       { href: "/help", label: "Help centre", icon: HelpCircle },
+      { href: "/legal/terms", label: "Legal", icon: Scale },
     ],
   },
 ];
