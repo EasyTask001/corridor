@@ -27,6 +27,7 @@ export {
   createBorderConnectCustomsClient,
   createFixtureBorderConnectTransport,
   FIXTURE_BORDERCONNECT_TENANT_KEY,
+  isBorderConnectLive,
   type BorderConnectClientOptions,
 } from "./borderconnect/client";
 export { toAceTrip } from "./borderconnect/ace";

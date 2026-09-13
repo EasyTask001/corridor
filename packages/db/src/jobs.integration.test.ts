@@ -408,6 +408,90 @@ describe("background_jobs queue", () => {
     }
   });
 
+  it("p_job_id claims only that job even when other due jobs are pending (0048)", async () => {
+    const runAt = new Date(Date.now() - 2 * 3600_000);
+    const [target, other] = await withServiceRole(db, (tx) =>
+      tx
+        .insert(backgroundJobs)
+        .values([
+          { organizationId: null, jobType: "customs.borderconnect_drain", runAt },
+          { organizationId: null, jobType: "noop.test", runAt },
+        ])
+        .returning({ id: backgroundJobs.id }),
+    );
+    try {
+      const claimed = await withServiceRole(db, (tx) =>
+        tx.execute<{ id: number }>(
+          sql`select id from public.claim_jobs(5, 'job-id-scoped', 2, 600, null, ${target!.id}::bigint)`,
+        ),
+      );
+      expect(claimed.map((r) => Number(r.id))).toEqual([target!.id]);
+      const [otherRow] = await withServiceRole(db, (tx) =>
+        tx
+          .select({ status: backgroundJobs.status, lockedBy: backgroundJobs.lockedBy })
+          .from(backgroundJobs)
+          .where(eq(backgroundJobs.id, other!.id)),
+      );
+      expect(otherRow).toMatchObject({ status: "pending", lockedBy: null });
+    } finally {
+      await withServiceRole(db, (tx) =>
+        tx.delete(backgroundJobs).where(inArray(backgroundJobs.id, [target!.id, other!.id])),
+      );
+    }
+  });
+
+  it("p_job_id also scopes the stale-claim retirement, leaving other exhausted jobs running (0048)", async () => {
+    const [org] = await db
+      .insert(organizations)
+      .values({ name: `Job Id Scope Retire ${Date.now()}` })
+      .returning({ id: organizations.id });
+    try {
+      const [target, other] = await withServiceRole(db, (tx) =>
+        tx
+          .insert(backgroundJobs)
+          .values([
+            {
+              organizationId: org!.id,
+              jobType: "noop.test",
+              status: "running" as const,
+              attempts: 3,
+              maxAttempts: 3,
+              lockedBy: "dead-worker",
+              lockedAt: new Date(Date.now() - 60 * 60_000),
+              leaseExpiresAt: new Date(Date.now() - 50 * 60_000),
+            },
+            {
+              organizationId: org!.id,
+              jobType: "noop.test",
+              status: "running" as const,
+              attempts: 3,
+              maxAttempts: 3,
+              lockedBy: "dead-worker",
+              lockedAt: new Date(Date.now() - 60 * 60_000),
+              leaseExpiresAt: new Date(Date.now() - 50 * 60_000),
+            },
+          ])
+          .returning({ id: backgroundJobs.id }),
+      );
+      await withServiceRole(db, (tx) =>
+        tx.execute(
+          sql`select * from public.claim_jobs(5, 'job-id-reaper', 5, 600, null, ${target!.id}::bigint)`,
+        ),
+      );
+      const rows = await withServiceRole(db, (tx) =>
+        tx
+          .select({ id: backgroundJobs.id, status: backgroundJobs.status })
+          .from(backgroundJobs)
+          .where(inArray(backgroundJobs.id, [target!.id, other!.id])),
+      );
+      expect(rows.find((r) => r.id === target!.id)).toMatchObject({ status: "failed" });
+      // p_job_id must not widen the stale-claim sweep to other rows.
+      expect(rows.find((r) => r.id === other!.id)).toMatchObject({ status: "running" });
+    } finally {
+      await db.delete(organizations).where(eq(organizations.id, org!.id));
+    }
+  });
+
   it("reclaims a job whose worker died, but not one still inside its lease", async () => {
     // Own org so the per-org cap arithmetic cannot be perturbed by seeded jobs.
     const [org] = await db

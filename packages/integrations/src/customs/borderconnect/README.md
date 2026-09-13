@@ -125,15 +125,32 @@ resolves to it.
 | `apiKey` | `BORDERCONNECT_API_KEY` | Same account-wide key. |
 | `companyKey` | `organizations.border_connect_company_key` | Per-tenant — BorderConnect's way of telling one carrier's messages apart on a shared account. |
 | `tenantKey` | the organization id | Never sent over the wire; scopes the fixture queue only. |
+| `environment` | `integration_configs.environment` (per org, Settings → Organization) | Gates `live` — see below. |
 
-`live = !!(apiUrlSuffix && apiKey)`. With both set, `transmit`/`amend`/`cancel`
-go over `createBorderConnectHttpTransport` (`transport.ts`); with either
-missing, they replay `createFixtureBorderConnectTransport` instead — every
-test in `client.test.ts` runs with **no credentials**, per the repo-wide rule
-that every external service degrades to a deterministic mock/fixture when its
-env var is unset. A caller may also inject its own `transport` (what every
-test above the fixture-replay-specific ones does), which always wins over
-both.
+`live = isBorderConnectLive({ environment, apiUrlSuffix, apiKey })`, i.e.
+`environment === "production"` **and** both env vars set. The account-wide
+`apiUrlSuffix`/`apiKey` are deployment-wide, but `environment` is per-org, so
+an org left at the sandbox default never goes live no matter what the
+deployment's env vars say — a sandbox org must never file a real ACE/ACI trip
+with CBP/CBSA just because some other org's BorderConnect account is
+configured. With `live` true, `transmit`/`amend`/`cancel` go over
+`createBorderConnectHttpTransport` (`transport.ts`); otherwise they replay
+`createFixtureBorderConnectTransport` instead — every test in `client.test.ts`
+runs with **no credentials**, per the repo-wide rule that every external
+service degrades to a deterministic mock/fixture when its env var is unset. A
+caller may also inject its own `transport` (what every test above the
+fixture-replay-specific ones does), which always wins over both.
+
+Known limitation: `customs.borderconnect_drain`'s transport
+(`services/borderconnect.ts` `resolveTransport`) has no per-org `environment`
+to check — the drain reads the shared, deployment-wide BorderConnect inbox —
+so it goes live purely off the env vars. On a deployment with those set, a
+sandbox org's transmit still enqueues into the in-process fixture queue, but
+the live drain never polls it; that org's filing is stuck until it goes to
+`production`. This only matters for a deployment that mixes sandbox and
+production orgs while BorderConnect env vars are configured (e.g. `pnpm dev`
+against a real account) — not a correctness or tenant-isolation issue, since
+nothing is misfiled, just not drained.
 
 A **live** client refuses to `transmit`/`amend`/`cancel` with `companyKey:
 null` (a 422 `CustomsTransportError` — there is no tenant to attribute the

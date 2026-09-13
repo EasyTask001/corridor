@@ -242,78 +242,46 @@ function parseAceResponse(d: Record<string, unknown>): BorderConnectInbound {
     };
   }
 
+  // The remaining shapes are not mutually exclusive on the wire (a message
+  // can carry `processingResponse` and `shipmentStatusList` together), so
+  // they accumulate into one status instead of early-returning on the first
+  // match — otherwise whichever shape is checked first silently drops the
+  // other's events/decision. Precedence when more than one implies a
+  // decision: tripStatus's own decision, then a held shipment code, then a
+  // plain `processingResponse` acceptance.
+  const events: CustomsEventMessage[] = [];
+  const shipments: CustomsShipmentMessage[] = [];
+  let decision: CustomsDecision | null = null;
+
   if (d.processingResponse !== undefined) {
-    const event = makeEvent("accepted", when, { raw: obj(d.processingResponse) });
-    return {
-      kind: "customs_status",
-      companyKey,
-      keys: messageKeys(d),
-      status: statusMessage("accepted", "accepted", null, [event], [], tripNumber, d),
-      raw: d,
-    };
+    events.push(makeEvent("accepted", when, { raw: obj(d.processingResponse) }));
+    decision = "accepted";
   }
 
   const tripStatus = str(d.tripStatus);
   if (tripStatus === "AAD" || tripStatus === "19") {
-    const event = makeEvent("arrival_recorded", when, { raw: { tripStatus } });
-    return {
-      kind: "customs_status",
-      companyKey,
-      keys: messageKeys(d),
-      status: statusMessage("pending", null, null, [event], [], tripNumber, d),
-      raw: d,
-    };
-  }
-  if (tripStatus === "RTR" || tripStatus === "RCO") {
-    const event = makeEvent("released", when, { raw: { tripStatus } });
-    return {
-      kind: "customs_status",
-      companyKey,
-      keys: messageKeys(d),
-      status: statusMessage("released", "released", null, [event], [], tripNumber, d),
-      raw: d,
-    };
-  }
-  if (tripStatus === "HTR") {
-    const event = makeEvent("held", when, { raw: { tripStatus } });
-    return {
-      kind: "customs_status",
-      companyKey,
-      keys: messageKeys(d),
-      status: statusMessage("held", "held", null, [event], [], tripNumber, d),
-      raw: d,
-    };
+    events.push(makeEvent("arrival_recorded", when, { raw: { tripStatus } }));
+  } else if (tripStatus === "RTR" || tripStatus === "RCO") {
+    events.push(makeEvent("released", when, { raw: { tripStatus } }));
+    decision = "released";
+  } else if (tripStatus === "HTR") {
+    events.push(makeEvent("held", when, { raw: { tripStatus } }));
+    decision = "held";
   }
 
   const shipmentStatusList = arr(d.shipmentStatusList).map(obj);
-  if (shipmentStatusList.length > 0) {
-    const events: CustomsEventMessage[] = [];
-    const shipments: CustomsShipmentMessage[] = [];
-    let held = false;
-    for (const entry of shipmentStatusList) {
-      const parsed = aceShipmentStatusEntry(entry, when);
-      events.push(parsed.event);
-      if (parsed.shipment) shipments.push(parsed.shipment);
-      if (parsed.held) held = true;
-    }
-    return {
-      kind: "customs_status",
-      companyKey,
-      keys: messageKeys(d),
-      status: held
-        ? statusMessage("held", "held", null, events, shipments, tripNumber, d)
-        : statusMessage("pending", null, null, events, shipments, tripNumber, d),
-      raw: d,
-    };
+  for (const entry of shipmentStatusList) {
+    const parsed = aceShipmentStatusEntry(entry, when);
+    events.push(parsed.event);
+    if (parsed.shipment) shipments.push(parsed.shipment);
+    if (parsed.held) decision = "held";
   }
 
-  // ACE_RESPONSE with none of the above shapes recognized — still a
-  // customs_status, just with no events (no honest code to assign).
   return {
     kind: "customs_status",
     companyKey,
     keys: messageKeys(d),
-    status: statusMessage("pending", null, null, [], [], tripNumber, d),
+    status: statusMessage(decision ?? "pending", decision, null, events, shipments, tripNumber, d),
     raw: d,
   };
 }

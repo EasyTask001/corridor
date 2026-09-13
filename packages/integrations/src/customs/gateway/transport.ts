@@ -2,6 +2,7 @@
  * The only vendor-specific file: how bytes reach the certified EDI gateway.
  * Everything above it speaks the provider-neutral contract in mapping.ts.
  */
+import { fetchJson } from "../http";
 import { CustomsTransportError } from "../types";
 
 /** Reject endpoints that could target local or private server infrastructure. */
@@ -34,67 +35,33 @@ export interface HttpTransportOptions {
   fetchImpl?: typeof fetch;
 }
 
-const retryable = (status: number) => status === 429 || status >= 500;
-
 /** Bearer-authenticated JSON over HTTPS, 30 s deadline, typed failures. */
 export function createHttpTransport(opts: HttpTransportOptions): GatewayTransport {
   const base = opts.baseUrl.replace(/\/+$/, "");
-  const doFetch = opts.fetchImpl ?? fetch;
-  const timeout = opts.timeoutMs ?? 30_000;
 
-  async function call(method: "GET" | "POST", path: string, body?: unknown): Promise<unknown> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
-    let res: Response;
-    try {
-      res = await doFetch(`${base}${path}`, {
-        method,
-        headers: {
-          Authorization: `Bearer ${opts.apiKey}`,
-          Accept: "application/json",
-          ...(body !== undefined && { "Content-Type": "application/json" }),
-        },
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: controller.signal,
-      });
-    } catch (e) {
-      const aborted = e instanceof Error && e.name === "AbortError";
-      throw new CustomsTransportError(
-        aborted ? `Customs gateway timed out after ${timeout} ms` : "Customs gateway unreachable",
-        aborted ? 504 : 503,
-        true,
-      );
-    } finally {
-      clearTimeout(timer);
-    }
-    const text = await res.text();
-    const json: unknown = text ? safeJson(text) : null;
-    if (!res.ok) {
-      const detail =
-        json && typeof json === "object" && "message" in json
-          ? String(json.message)
-          : `HTTP ${res.status}`;
-      throw new CustomsTransportError(
-        `Customs gateway: ${detail}`,
-        res.status,
-        retryable(res.status),
-      );
-    }
-    return json;
-  }
+  const call = (method: "GET" | "POST", path: string, body?: unknown) =>
+    fetchJson({
+      url: `${base}${path}`,
+      method,
+      headers: { Authorization: `Bearer ${opts.apiKey}` },
+      body: body as Record<string, unknown> | undefined,
+      timeoutMs: opts.timeoutMs,
+      fetchImpl: opts.fetchImpl,
+      label: "Customs gateway",
+      failureDetail: (res, json) => {
+        if (res.ok) return null;
+        const detail =
+          json && typeof json === "object" && "message" in json
+            ? String(json.message)
+            : `HTTP ${res.status}`;
+        return `Customs gateway: ${detail}`;
+      },
+    });
 
   return {
     post: (path, body) => call("POST", path, body),
     get: (path) => call("GET", path),
   };
-}
-
-function safeJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { raw: text };
-  }
 }
 
 /**

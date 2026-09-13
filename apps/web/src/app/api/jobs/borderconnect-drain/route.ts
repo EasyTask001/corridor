@@ -12,7 +12,9 @@ export const maxDuration = 300;
  * (services/borderconnect.ts). Queued as a `customs.borderconnect_drain` job
  * (queue-wide, no organization — `background_jobs_insert` refuses this job
  * type from any session, migration 0047) so a failed drain is retried by the
- * worker like any other job, then run right away.
+ * worker like any other job, then run right away. `jobId` (0048) claims
+ * exactly this job — an unscoped claim would also execute up to `limit`
+ * other tenants' unrelated due jobs under this cron's worker name.
  */
 export async function GET(req: Request) {
   const denied = cronAuthFailure(req);
@@ -28,6 +30,6 @@ export async function GET(req: Request) {
       maxAttempts: 2,
     }),
   );
-  const result = await processDueJobs(db, { limit: 5, worker: "cron-borderconnect" });
+  const result = await processDueJobs(db, { jobId: job.id, limit: 1, worker: "cron-borderconnect" });
   return Response.json({ ok: true, jobId: job.id, ...result });
 }

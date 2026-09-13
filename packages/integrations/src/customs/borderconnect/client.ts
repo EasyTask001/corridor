@@ -68,6 +68,21 @@ export interface BorderConnectClientOptions {
  */
 export const FIXTURE_BORDERCONNECT_TENANT_KEY = "system";
 
+/**
+ * BorderConnect's deployment-wide credentials are shared by every org, so
+ * `environment` (per-org, Settings → Organization) — not just whether the
+ * deployment happens to have `apiUrlSuffix`/`apiKey` set — must gate live
+ * mode. Otherwise a sandbox org would start filing real ACE/ACI trips the
+ * moment any org's BorderConnect account is configured.
+ */
+export function isBorderConnectLive(opts: {
+  environment?: "sandbox" | "production";
+  apiUrlSuffix: string | null;
+  apiKey: string | null;
+}): boolean {
+  return opts.environment === "production" && !!(opts.apiUrlSuffix && opts.apiKey);
+}
+
 const METHOD_NOT_SUPPORTED = (method: string): CustomsTransportError =>
   new CustomsTransportError(
     `${method} is not supported in border_connect mode — status arrives through the BorderConnect inbox`,
@@ -161,7 +176,7 @@ export function createBorderConnectCustomsClient(
 ): CustomsClient & { readonly live: boolean } {
   const now = opts.now ?? (() => new Date());
   const regime: Regime = opts.provider === "cbp_ace" ? "ACE" : "ACI";
-  const live = !!(opts.apiUrlSuffix && opts.apiKey);
+  const live = isBorderConnectLive(opts);
   const transport: BorderConnectTransport =
     opts.transport ??
     (live

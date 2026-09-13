@@ -267,8 +267,8 @@ Two service-role claims a signed-in user can trigger:
    organization's rows are claimed, and the procedure returns counts only — never
    a job's `result` payload.
 2. `integrations.testCustoms` in `border_connect` mode (the Settings "Check inbox"
-   button, since the BorderConnect adapter). This one is **not** org-scoped, by
-   design: BorderConnect's inbox is one queue for the whole deployment and
+   button, since the BorderConnect adapter). This one is **not org-scoped**:
+   BorderConnect's inbox is one queue for the whole deployment and
    `customs.borderconnect_drain` is enqueued with `organization_id` null (no tenant
    until each message is routed by `companyKey`), so an org-scoped claim could never
    pick it up. It does not call `drainBorderConnectInbox` directly — that would
@@ -278,11 +278,16 @@ Two service-role claims a signed-in user can trigger:
    `api/jobs/borderconnect-drain` exactly: `enqueueJob` under a per-minute
    idempotency key (service-role, because `background_jobs_insert` refuses this job
    type from any session) and then `processDueJobs`, so `claim_jobs`'s lock decides
-   who runs it. `processInboxRow` additionally takes a `for update skip locked` row
-   lock on the `customs_inbox` row it is about to process, so even two workers in the
-   same batch window can never both claim one message. The procedure returns only
-   the drain job's own counts (`received`/`stored`) — a job belonging to another
-   organization is never reported back.
+   who runs it. Both callers pass **`jobId: job.id, limit: 1`** (`p_job_id`, migration
+   0048) — before 0048, an unscoped `processDueJobs({limit: 5})` could claim and
+   execute up to 5 *other* tenants' unrelated due jobs under this click's (or the
+   cron's) worker name, a cross-tenant job-execution finding fixed in 0048.
+   `p_job_id` also scopes 0033's stale-claim retirement, not just the claim itself.
+   `processInboxRow` additionally takes a `for update skip locked` row lock on the
+   `customs_inbox` row it is about to process, so even two workers in the same batch
+   window can never both claim one message. The procedure returns only the drain
+   job's own counts (`received`/`stored`) — a job belonging to another organization
+   is never reported back, and after 0048 can no longer even be claimed by this call.
 
 The remaining call sites are `packages/api/src/services/audit.ts` (audit rows for
 actorless events), `packages/api/src/router/billing.ts` (Stripe webhook's
@@ -363,7 +368,7 @@ and what it checks:
 | `sso_provider_for_email` / `sso_enforced_for_email` | anon (by design) | Unauthenticated by necessity (the login page has no session yet); each returns a single scalar — a provider id or a boolean — and never a row, a member list, or an org id                   | ✅  |
 | `read_integration_secret`                           | service_role     | EXECUTE revoked from `public`, `anon` **and** `authenticated` (0012)                                                                                                                         | ✅  |
 | `push_tokens_for`                                   | service_role     | EXECUTE granted to `service_role` only (0015)                                                                                                                                                | ✅  |
-| `claim_jobs`                                        | service_role     | EXECUTE revoked from `public`/`anon`/`authenticated` (0004, 0011, 0013, 0041); the 0041 signature adds `p_organization_id uuid default null`, which `runNow` always sets to the caller's org | ✅  |
+| `claim_jobs`                                        | service_role     | EXECUTE revoked from `public`/`anon`/`authenticated` (0004, 0011, 0013, 0041, 0048); the 0041 signature adds `p_organization_id uuid default null`, which `runNow` always sets to the caller's org; the 0048 signature adds `p_job_id bigint default null`, which `testCustoms`/the BorderConnect cron always set to their own enqueued job | ✅  |
 
 Re-runnable:
 
@@ -404,8 +409,9 @@ check rather than a bypass of it.
   asserts that mutating procedures write an audit row, so the trail cannot rot
   silently as routers grow.
 - **Per-org job concurrency cap.** `claim_jobs(p_org_cap default 2)`, currently
-  defined in `supabase/migrations/0045_claim_jobs_org_cap_fix.sql` (cap since
-  0011, leases since 0033, org-scoped claiming since 0041), with
+  defined in `supabase/migrations/0048_claim_jobs_job_id.sql` (cap since
+  0011, leases since 0033, org-scoped claiming since 0041, job-id scoped
+  claiming since 0048), with
   `FOR UPDATE SKIP LOCKED` leasing, so one tenant's AI burst cannot starve the
   queue. 0045 closed a correctness bug (not a tenant-isolation gap — the cap
   only ever under-enforced within one tenant's own batch, never crossed a

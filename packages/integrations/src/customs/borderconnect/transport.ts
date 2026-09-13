@@ -5,7 +5,7 @@
  * header (not `Authorization: Bearer`) and `POST /api/send/{suffix}` /
  * `GET /api/receive/{suffix}` instead of a configurable REST path per call.
  */
-import { CustomsTransportError } from "../types";
+import { fetchJson } from "../http";
 
 export interface BorderConnectTransport {
   /** POST /api/send/{suffix}: files one message, returns its ack status. */
@@ -38,8 +38,6 @@ export const BORDERCONNECT_ERROR_CODES = [
 
 const DEFAULT_BASE_URL = "https://borderconnect.com";
 
-const retryable = (status: number) => status === 429 || status >= 500;
-
 /** BorderConnect spells its failure status both ways across message types. */
 const isFailureStatus = (json: unknown): boolean => {
   if (!json || typeof json !== "object" || !("status" in json)) return false;
@@ -59,50 +57,24 @@ export function createBorderConnectHttpTransport(
 ): BorderConnectTransport {
   const base = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
   const suffix = opts.apiUrlSuffix.replace(/^\/+|\/+$/g, "");
-  const doFetch = opts.fetchImpl ?? fetch;
-  const timeout = opts.timeoutMs ?? 30_000;
 
-  async function call(
-    method: "GET" | "POST",
-    kind: "send" | "receive",
-    body?: Record<string, unknown>,
-  ): Promise<unknown> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
-    let res: Response;
-    try {
-      res = await doFetch(`${base}/api/${kind}/${suffix}`, {
-        method,
-        headers: {
-          "Api-Key": opts.apiKey,
-          Accept: "application/json",
-          ...(body !== undefined && { "Content-Type": "application/json" }),
-        },
-        body: body === undefined ? undefined : JSON.stringify(body),
-        signal: controller.signal,
-      });
-    } catch (e) {
-      const aborted = e instanceof Error && e.name === "AbortError";
-      throw new CustomsTransportError(
-        aborted ? `BorderConnect timed out after ${timeout} ms` : "BorderConnect unreachable",
-        aborted ? 504 : 503,
-        true,
-      );
-    } finally {
-      clearTimeout(timer);
-    }
-    const text = await res.text();
-    const json: unknown = text ? safeJson(text) : null;
-    if (!res.ok || isFailureStatus(json)) {
-      const code = extractErrorCode(json) ?? `HTTP ${res.status}`;
-      throw new CustomsTransportError(
-        `BorderConnect: ${code} (${res.status})`,
-        res.status,
-        retryable(res.status),
-      );
-    }
-    return json;
-  }
+  const call = (method: "GET" | "POST", kind: "send" | "receive", body?: Record<string, unknown>) =>
+    fetchJson({
+      url: `${base}/api/${kind}/${suffix}`,
+      method,
+      headers: { "Api-Key": opts.apiKey },
+      body,
+      timeoutMs: opts.timeoutMs,
+      fetchImpl: opts.fetchImpl,
+      label: "BorderConnect",
+      failureDetail: (res, json) => {
+        if (!res.ok || isFailureStatus(json)) {
+          const code = extractErrorCode(json) ?? `HTTP ${res.status}`;
+          return `BorderConnect: ${code} (${res.status})`;
+        }
+        return null;
+      },
+    });
 
   return {
     send: async (message) => {
@@ -115,14 +87,6 @@ export function createBorderConnectHttpTransport(
     },
     receive: async () => normaliseReceiveBody(await call("GET", "receive")),
   };
-}
-
-function safeJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { raw: text };
-  }
 }
 
 /**

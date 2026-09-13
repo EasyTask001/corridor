@@ -555,10 +555,31 @@ describe("createBorderConnectCustomsClient — ping", () => {
 });
 
 describe("createBorderConnectCustomsClient — live mode", () => {
+  it("sandbox environment stays in fixture mode even with apiUrlSuffix/apiKey set", async () => {
+    const { calls } = spyTransport();
+    const c = createBorderConnectCustomsClient({
+      provider: "cbp_ace",
+      environment: "sandbox",
+      apiUrlSuffix: "acme",
+      apiKey: "API-KEY-1",
+      companyKey: "CK-LIVE",
+      tenantKey: "t1",
+      now: fixedNow,
+      // No `transport` override: a live client would call `fetch` (via the
+      // real HTTP transport), so a live-mode bug here would surface as a
+      // network error rather than silently passing.
+    });
+    expect(c.live).toBe(false);
+    const ack = await c.transmit(buildManifest(makeAceSource()));
+    expect(ack.raw).toMatchObject({ live: false });
+    expect(calls).toEqual([]);
+  });
+
   it("sends the configured companyKey", async () => {
     const { calls, transport } = spyTransport();
     const c = createBorderConnectCustomsClient({
       provider: "cbp_ace",
+      environment: "production",
       apiUrlSuffix: "acme",
       apiKey: "API-KEY-1",
       companyKey: "CK-LIVE",
@@ -575,6 +596,7 @@ describe("createBorderConnectCustomsClient — live mode", () => {
     const { transport } = spyTransport();
     const c = createBorderConnectCustomsClient({
       provider: "cbp_ace",
+      environment: "production",
       apiUrlSuffix: "acme",
       apiKey: "API-KEY-1",
       companyKey: null,

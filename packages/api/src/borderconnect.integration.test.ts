@@ -315,6 +315,111 @@ describe("drainBorderConnectInbox", () => {
   });
 });
 
+/**
+ * F3: BorderConnect amendments re-upload under the SAME trip number as the
+ * original filing, so `applyStatusMessage`'s final `customs_submissions`
+ * update must target the one row the message is actually about — never
+ * every row sharing that `(organization_id, reference_number)` pair, or a
+ * rejected amendment corrupts the audit trail for an already-accepted
+ * original filing it has no bearing on.
+ */
+describe("amendment rejection is scoped to its own submission row", () => {
+  let amOrgId: string;
+  let amMovementId: string;
+  let originalSubmissionId: string;
+  let amendmentSubmissionId: string;
+  const amCompanyKey = `c-AM-${Date.now()}`;
+  const amTripNumber = `TRIPAM-${Date.now()}`;
+  const amendSendId = `send-am-${Date.now()}`;
+
+  beforeAll(async () => {
+    const [org] = await db
+      .insert(organizations)
+      .values({ name: `BC Amendment Scope ${Date.now()}`, borderConnectCompanyKey: amCompanyKey })
+      .returning({ id: organizations.id });
+    amOrgId = org!.id;
+
+    const [m] = await db
+      .insert(movements)
+      .values({
+        organizationId: amOrgId,
+        regime: "ACE",
+        movementNumber: `BC-AM-${Date.now()}`,
+        tripNumber: amTripNumber,
+        // "sent" mirrors `transmitAmendment`'s re-transmit state: the
+        // original was already accepted, and filing the amendment moves the
+        // movement back to "sent" while its outcome is pending.
+        status: "sent",
+      })
+      .returning({ id: movements.id });
+    amMovementId = m!.id;
+
+    const [original, amendment] = await db
+      .insert(customsSubmissions)
+      .values([
+        {
+          organizationId: amOrgId,
+          movementId: amMovementId,
+          kind: "original",
+          provider: "cbp_ace",
+          mode: "border_connect",
+          referenceNumber: amTripNumber,
+          correlationId: `send-am-orig-${Date.now()}`,
+          status: "accepted",
+        },
+        {
+          organizationId: amOrgId,
+          movementId: amMovementId,
+          kind: "amendment",
+          provider: "cbp_ace",
+          mode: "border_connect",
+          referenceNumber: amTripNumber,
+          correlationId: amendSendId,
+          status: "sent",
+        },
+      ])
+      .returning({ id: customsSubmissions.id });
+    originalSubmissionId = original!.id;
+    amendmentSubmissionId = amendment!.id;
+  });
+
+  afterAll(async () => {
+    await db.delete(organizations).where(eq(organizations.id, amOrgId));
+  });
+
+  it("a rejected API_RESPONSE for the amendment's sendId stamps only the amendment row", async () => {
+    const apiResponseFailure = {
+      data: "API_RESPONSE",
+      companyKey: amCompanyKey,
+      sendId: amendSendId,
+      tripNumber: amTripNumber,
+      status: "DATA_ERROR",
+      errors: [{ identifier: "shipment-1", note: "missing HS code" }],
+    };
+
+    const result = await drainBorderConnectInbox(db, {
+      transport: fakeTransport([apiResponseFailure]),
+    });
+    expect(result.processed).toMatchObject({ applied: 1 });
+
+    const [original] = await db
+      .select()
+      .from(customsSubmissions)
+      .where(eq(customsSubmissions.id, originalSubmissionId));
+    const [amendment] = await db
+      .select()
+      .from(customsSubmissions)
+      .where(eq(customsSubmissions.id, amendmentSubmissionId));
+    expect(amendment?.status).toBe("rejected");
+    // The bug: before the fix, this update matched on (org, reference_number)
+    // alone and flipped the already-accepted original to "rejected" too.
+    expect(original?.status).toBe("accepted");
+
+    const [movement] = await db.select().from(movements).where(eq(movements.id, amMovementId));
+    expect(movement?.status).toBe("rejected");
+  });
+});
+
 describe("storeInboundMessages dedup", () => {
   it("dedupes two messages with identical content but different key insertion order", async () => {
     // Real BorderConnect retries / an intermediate proxy could re-serialize a

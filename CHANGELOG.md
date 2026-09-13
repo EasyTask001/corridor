@@ -145,6 +145,18 @@ the section headings are the build phases, not versions.
   inboxes. Migration 0017 adds the membership guard (skipped when there is no `auth.uid()`, so
   the service-role worker still works) and revokes `anon`'s EXECUTE. See finding C1 in
   `docs/security-review.md`.
+- **Cross-tenant job execution via `testCustoms`/the BorderConnect cron.** Both enqueue their own
+  `customs.borderconnect_drain` job (queue-wide, `organization_id` null) and then call
+  `processDueJobs` — before migration 0048 this claim was unscoped (`p_organization_id` cannot
+  scope a job with no organization), so one click or cron tick could claim and execute up to
+  `limit` other tenants' unrelated due jobs under that caller's worker name. `claim_jobs` gains
+  `p_job_id` (0048); both callers now pass `jobId: job.id, limit: 1` and can never claim anything
+  but the job they just enqueued. Also fixed in the same pass: a sandbox org going live on
+  BorderConnect the moment the deployment's env vars were configured
+  (`isBorderConnectLive` now also requires `environment === "production"`); a rejected amendment
+  flipping the original, already-accepted filing's status too (`applyStatusMessage` now updates
+  by submission id, not just `(org, reference_number)`); and an ACE release code with no
+  accompanying trip-level decision never advancing the shipment's own status.
 - Cron routes fail closed: `/api/jobs/process` and `/api/jobs/expiry-scan` both go through
   `cronAuthFailure()` — an unset `CRON_SECRET` is a 503, a wrong one a 401 under
   `timingSafeEqual`, and `NODE_ENV` is no longer an authorisation input.

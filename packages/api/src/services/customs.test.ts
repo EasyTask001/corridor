@@ -182,7 +182,7 @@ describe("applyStatusMessage", () => {
     expect(r).toMatchObject({ changed: true, status: "cancelled", terminal: true });
   });
 
-  it("an events-only message (no decision) records the event and the shipment's entry number without changing movement status", async () => {
+  it("an events-only message (no decision) records the event, the entry number, and cascades the shipment's own status without changing movement status", async () => {
     const db = createFakeDb({ rows: gatewayRows("held") });
     const m = db.table("movements")[0] as never;
     const eventsOnly: CustomsStatusMessage = {
@@ -218,13 +218,59 @@ describe("applyStatusMessage", () => {
     expect(db.table("movementEvents").filter((e) => e.eventType === "customs_event")).toHaveLength(
       1,
     );
+    // The shipment's own state machine still cascades on an events-only
+    // message: an `accepted` shipment handed an entry number moves to
+    // `entry_on_file` (accepted → accepted is not itself a legal transition).
     expect(db.table("shipments")[0]).toMatchObject({
-      status: "accepted",
+      status: "entry_on_file",
       entryNumber: "30099999999",
+      entryOnFileAt: expect.any(Date),
     });
     // Even though nothing "decided" (changed: false), the status is not
     // "pending" so the filing's own status still gets stamped.
     expect(db.table("customsSubmissions")[0]?.status).toBe("held");
+  });
+
+  it("an ACE 1C outcome (decision: null, shipment status released) moves the shipment to released", async () => {
+    const db = createFakeDb({ rows: gatewayRows("held") });
+    const m = db.table("movements")[0] as never;
+    const releasedOutcomeOnly: CustomsStatusMessage = {
+      referenceNumber: "ACE-FX00001",
+      status: "pending",
+      decision: null,
+      message: null,
+      events: [
+        {
+          code: "entered_and_released",
+          label: "Entered and released",
+          occurredAt: "2026-09-06T12:00:00.000Z",
+          shipmentControlNumber: "PFTRPAPS0001",
+          entryNumber: "816-1234567-8",
+          entryPortCode: "0901",
+        },
+      ],
+      shipments: [
+        {
+          controlNumber: "PFTRPAPS0001",
+          status: "released",
+          entryNumber: "816-1234567-8",
+          entryPortCode: "0901",
+        },
+      ],
+      raw: {},
+    };
+    const r = await applyStatusMessage(
+      db.tx,
+      { orgId: TEST_ORG_ID, userId: null },
+      m,
+      releasedOutcomeOnly,
+    );
+    expect(r).toEqual({ changed: false, status: "held", terminal: false });
+    expect(db.table("shipments")[0]).toMatchObject({
+      status: "released",
+      entryNumber: "816-1234567-8",
+      releasedAt: expect.any(Date),
+    });
   });
 
   it("an RNS-flagged ACI event still lands in pars_rns_events through the events-only path", async () => {
@@ -401,6 +447,8 @@ describe("customsClientFor (border_connect mode)", () => {
   });
 
   it("in production with mode border_connect and no company key throws PRECONDITION_FAILED", async () => {
+    process.env.BORDERCONNECT_API_URL_SUFFIX = "acme-carrier";
+    process.env.BORDERCONNECT_API_KEY = "bc-secret-key";
     const db = createFakeDb({
       rows: {
         organizations: [{ id: TEST_ORG_ID, borderConnectCompanyKey: null }],
@@ -411,6 +459,20 @@ describe("customsClientFor (border_connect mode)", () => {
     await expect(customsClientFor(db.tx, TEST_ORG_ID, "ACE")).rejects.toMatchObject({
       code: "PRECONDITION_FAILED",
       message: expect.stringContaining("BorderConnect company key is not set"),
+    });
+  });
+
+  it("in production with no BORDERCONNECT_API_URL_SUFFIX/API_KEY configured throws PRECONDITION_FAILED", async () => {
+    const db = createFakeDb({
+      rows: {
+        organizations: [{ id: TEST_ORG_ID, borderConnectCompanyKey: "BC-COMPANY-1" }],
+        integrationConfigs: [bcConfigRow({ environment: "production" })],
+      },
+    });
+
+    await expect(customsClientFor(db.tx, TEST_ORG_ID, "ACE")).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: expect.stringContaining("BorderConnect credentials are not configured"),
     });
   });
 

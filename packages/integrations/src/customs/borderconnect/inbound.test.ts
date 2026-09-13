@@ -142,6 +142,35 @@ describe("parseInbound — ACE_RESPONSE", () => {
     expect(msg.status.events.map((e) => e.code)).toEqual(["preliminary_check_passed"]);
     expect(msg.status.events[0]!.raw).toMatchObject({ code: "01", description: "Preliminary manifest check passed" });
   });
+
+  it("processingResponse + shipmentStatusList 1G in the same message → held, both events kept", () => {
+    const msg = parseInbound({
+      data: "ACE_RESPONSE",
+      tripNumber: TRIP_NUMBER,
+      processingResponse: { status: "OK" },
+      shipmentStatusList: [{ code: "1G", shipmentControlNumber: CCN }],
+    });
+    if (msg.kind !== "customs_status") throw new Error("wrong kind");
+    expect(msg.status.status).toBe("held");
+    expect(msg.status.decision).toBe("held");
+    expect(msg.status.events.map((e) => e.code)).toEqual(["accepted", "held"]);
+  });
+
+  it("processingResponse + shipmentStatusList 1C in the same message → accepted, shipment released", () => {
+    const msg = parseInbound({
+      data: "ACE_RESPONSE",
+      tripNumber: TRIP_NUMBER,
+      processingResponse: { status: "OK" },
+      shipmentStatusList: [{ code: "1C", shipmentControlNumber: CCN, entryNumber: "816-1234567-8" }],
+    });
+    if (msg.kind !== "customs_status") throw new Error("wrong kind");
+    expect(msg.status.status).toBe("accepted");
+    expect(msg.status.decision).toBe("accepted");
+    expect(msg.status.events.map((e) => e.code)).toEqual(["accepted", "entered_and_released"]);
+    expect(msg.status.shipments).toEqual([
+      { controlNumber: CCN, status: "released", entryNumber: "816-1234567-8", entryPortCode: null },
+    ]);
+  });
 });
 
 describe("parseInbound — ACI_RESPONSE", () => {

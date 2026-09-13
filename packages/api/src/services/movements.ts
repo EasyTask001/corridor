@@ -225,6 +225,55 @@ export async function recordCustomsEvents(
   }
 }
 
+type AttachedShipment = { id: string; controlNumber: string; status: ShipmentStatus; entryNumber: string | null };
+
+/**
+ * Move each shipment's own status as far as the message's outcomes (and an
+ * optional movement-wide `fallback` decision) allow, per its own state
+ * machine — shared by `applyShipmentOutcomes` (a movement-wide decision,
+ * `fallback` set) and an events-only message with no decision at all
+ * (`fallback` omitted — a shipment the message doesn't mention stays put).
+ * Returns how many of `attached` now carry an entry number, for the
+ * "all entries on file" notification `applyShipmentOutcomes` fires.
+ */
+export async function cascadeShipmentStatuses(
+  tx: Tx,
+  attached: AttachedShipment[],
+  outcomes: CustomsShipmentMessage[],
+  fallback?: "accepted" | "rejected" | "released" | "held",
+): Promise<number> {
+  const mentioned = new Map(outcomes.map((o) => [o.controlNumber, o]));
+  let entries = 0;
+  for (const s of attached) {
+    const o = mentioned.get(s.controlNumber);
+    const target = o?.status ?? fallback;
+    if (!target) {
+      if (s.entryNumber) entries += 1;
+      continue;
+    }
+    // A shipment the gateway placed on entry first, then released, passes
+    // through entry_on_file so that timestamp is stamped too.
+    const steps: ShipmentStatus[] = [];
+    if (o?.entryNumber && s.status === "accepted" && o.status !== "held")
+      steps.push("entry_on_file");
+    steps.push(target);
+    const set: Partial<typeof shipments.$inferInsert> = {};
+    let current = s.status;
+    for (const step of steps) {
+      const next = cascadedShipmentStatus(current, step);
+      if (!next) continue;
+      current = next;
+      set.status = next;
+      const stamp = SHIPMENT_STAMP[next];
+      if (stamp) set[stamp] = new Date();
+    }
+    if (o?.entryNumber || s.entryNumber) entries += 1;
+    if (Object.keys(set).length > 0)
+      await tx.update(shipments).set(set).where(eq(shipments.id, s.id));
+  }
+  return entries;
+}
+
 /**
  * Fan a customs decision out to the shipments riding the movement (0022):
  * every gateway message becomes a `customs_event` timeline row (linked to its
@@ -254,30 +303,7 @@ async function applyShipmentOutcomes(
 
   await recordCustomsEvents(tx, actor, m, events, outcomes);
 
-  const mentioned = new Map(outcomes.map((o) => [o.controlNumber, o]));
-  let entries = 0;
-  for (const s of attached) {
-    const o = mentioned.get(s.controlNumber);
-    // A shipment the gateway placed on entry first, then released, passes
-    // through entry_on_file so that timestamp is stamped too.
-    const steps: ShipmentStatus[] = [];
-    if (o?.entryNumber && s.status === "accepted" && o.status !== "held")
-      steps.push("entry_on_file");
-    steps.push(o?.status ?? decision);
-    const set: Partial<typeof shipments.$inferInsert> = {};
-    let current = s.status;
-    for (const step of steps) {
-      const next = cascadedShipmentStatus(current, step);
-      if (!next) continue;
-      current = next;
-      set.status = next;
-      const stamp = SHIPMENT_STAMP[next];
-      if (stamp) set[stamp] = new Date();
-    }
-    if (o?.entryNumber || s.entryNumber) entries += 1;
-    if (Object.keys(set).length > 0)
-      await tx.update(shipments).set(set).where(eq(shipments.id, s.id));
-  }
+  const entries = await cascadeShipmentStatuses(tx, attached, outcomes, decision);
   const allEntries = attached.length > 0 && entries === attached.length;
   if (allEntries && !hadAllEntries) {
     const { notifyOrganization } = await import("./notifications");

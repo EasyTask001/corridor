@@ -335,6 +335,37 @@ describe("processDueJobs scoped to one organization (integrations.jobs.runNow)",
       );
     }
   });
+
+  it("jobId claims only that one job, queue-wide (customs.borderconnect_drain's caller)", async () => {
+    const { processDueJobs } = await import("./services/jobs");
+    const worker = `job-id-scope-${Date.now()}`;
+    const runAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const [target, other] = await withServiceRole(db, (tx) =>
+      tx
+        .insert(schema.backgroundJobs)
+        .values([
+          { organizationId: null, jobType: "noop.test", runAt },
+          { organizationId: null, jobType: "noop.test", runAt },
+        ])
+        .returning({ id: schema.backgroundJobs.id }),
+    );
+    try {
+      const result = await processDueJobs(db, { worker, jobId: target!.id, limit: 10 });
+      expect(result.claimed).toBe(1);
+      expect(result.results.map((r) => r.id)).toEqual([target!.id]);
+      const [otherRow] = await withServiceRole(db, (tx) =>
+        tx
+          .select({ status: schema.backgroundJobs.status, lockedBy: schema.backgroundJobs.lockedBy })
+          .from(schema.backgroundJobs)
+          .where(eq(schema.backgroundJobs.id, other!.id)),
+      );
+      expect(otherRow).toMatchObject({ status: "pending", lockedBy: null });
+    } finally {
+      await withServiceRole(db, (tx) =>
+        tx.delete(schema.backgroundJobs).where(inArray(schema.backgroundJobs.id, [target!.id, other!.id])),
+      );
+    }
+  });
 });
 
 describe("applyTransition concurrency guard (ISSUE-028)", () => {

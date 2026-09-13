@@ -321,19 +321,25 @@ function jobLeaseSeconds(): number {
  * Claim and run due jobs. Safe to call concurrently from multiple workers.
  * `organizationId` narrows the claim to one tenant (0041) — the manual
  * `integrations.jobs.runNow` path; the cron and request-tail workers omit it.
+ * `jobId` narrows the claim to one specific job (0048) — for a queue-wide job
+ * type like `customs.borderconnect_drain` (`organizationId` is null on the
+ * row itself, so `organizationId` cannot scope it), the caller enqueues its
+ * own job and then claims exactly that one, never an unrelated tenant's due
+ * job that happens to also be claimable in the same batch.
  */
 export async function processDueJobs(
   db: DatabaseClient,
-  opts: { limit?: number; worker?: string; organizationId?: string } = {},
+  opts: { limit?: number; worker?: string; organizationId?: string; jobId?: number } = {},
 ): Promise<ProcessResult> {
   const limit = opts.limit ?? 10;
   const worker = opts.worker ?? `worker-${process.pid}`;
   const orgCap = jobOrgCap();
   const lease = jobLeaseSeconds();
   const organizationId = opts.organizationId ?? null;
+  const jobId = opts.jobId ?? null;
   const claimed = await withServiceRole(db, (tx) =>
     tx.execute<Job>(
-      sql`select * from public.claim_jobs(${limit}, ${worker}, ${orgCap}, ${lease}, ${organizationId}::uuid)`,
+      sql`select * from public.claim_jobs(${limit}, ${worker}, ${orgCap}, ${lease}, ${organizationId}::uuid, ${jobId}::bigint)`,
     ),
   );
   const out: ProcessResult = { claimed: claimed.length, succeeded: 0, failed: 0, results: [] };

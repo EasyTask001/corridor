@@ -223,11 +223,13 @@ export const integrationsRouter = router({
    * minute as the cron's own enqueue finds the job already claimed and reports
    * that rather than draining a second time.
    *
-   * Unlike `jobs.runNow` below, the `processDueJobs` call is deliberately NOT
-   * scoped to `ctx.orgId`: the drain job is queue-wide (`organization_id` is
-   * null — it has no tenant until each message is routed by `companyKey`), so
-   * an org-scoped claim could never pick it up. Only this job's own counts are
-   * reported back; another tenant's job result is never returned.
+   * The `processDueJobs` call is scoped to the drain job's own id (0048), not
+   * `ctx.orgId`: the drain job is queue-wide (`organization_id` is null — it
+   * has no tenant until each message is routed by `companyKey`), so an
+   * org-scoped claim could never pick it up, and an unscoped claim would
+   * execute up to `limit` other tenants' due jobs under this click's worker
+   * name. `jobId` closes both: this claims exactly the one job just enqueued,
+   * nothing else, ever.
    *
    * Two-transaction shape, like `jobs.runNow` above: read the config in one
    * `ctx.rls`, enqueue/run on `ctx.db` with no RLS transaction open
@@ -241,7 +243,8 @@ export const integrationsRouter = router({
       const started = Date.now();
       const prepared = await ctx.rls(async (tx) => {
         const { client } = await customsClientFor(tx, ctx.orgId, regime);
-        if (client.mode === "border_connect") return { deferred: true as const };
+        if (client.mode === "border_connect")
+          return { deferred: true as const, live: (client as unknown as { live: boolean }).live };
         try {
           return { deferred: false as const, result: await client.ping() };
         } catch (e) {
@@ -263,7 +266,6 @@ export const integrationsRouter = router({
         // No RLS transaction is open here — the ctx.rls above already
         // committed — so the enqueue and the job worker are free to open their
         // own withServiceRole transactions.
-        const { borderConnectEnv } = await import("../services/borderconnect");
         try {
           // `background_jobs_insert` refuses this job type from any session
           // (migration 0047), so the enqueue itself must be service-role.
@@ -277,16 +279,17 @@ export const integrationsRouter = router({
             }),
           );
           const run = await processDueJobs(ctx.db, {
-            limit: 5,
+            jobId: job.id,
+            limit: 1,
             worker: `manual-bc-${ctx.session.user.id.slice(0, 8)}`,
           });
-          // Only this job's counts — never another tenant's job result.
+          // `jobId` guarantees this can only ever be our own job's result.
           const drain = run.results.find((r) => r.id === job.id);
           const counts = drain?.result as { received?: number; stored?: number } | undefined;
           result = {
             ok: drain ? drain.ok : true,
             mode: "border_connect",
-            live: borderConnectEnv().live,
+            live: prepared.live,
             detail: drain
               ? { jobId: job.id, received: counts?.received ?? 0, stored: counts?.stored ?? 0 }
               : { jobId: job.id, alreadyRunning: true },
@@ -296,7 +299,7 @@ export const integrationsRouter = router({
           result = {
             ok: false,
             mode: "border_connect",
-            live: borderConnectEnv().live,
+            live: prepared.live,
             detail: null,
             error: e instanceof Error ? e.message : String(e),
           };

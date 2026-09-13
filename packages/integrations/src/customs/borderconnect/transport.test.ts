@@ -131,6 +131,19 @@ describe("BorderConnect http transport", () => {
     expect(messages).toEqual([{ data: "X" }]);
   });
 
+  it("a non-JSON error body falls back to safeJson's {raw} wrapper, reporting HTTP <status>", async () => {
+    const t = createBorderConnectHttpTransport({
+      apiUrlSuffix: "acme-co",
+      apiKey: "k1",
+      fetchImpl: () =>
+        Promise.resolve(new Response("<html>gateway timeout</html>", { status: 502 })),
+    });
+    const err = await t.send({}).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CustomsTransportError);
+    expect(err).toMatchObject({ statusCode: 502, retryable: true });
+    expect((err as CustomsTransportError).message).toBe("BorderConnect: HTTP 502 (502)");
+  });
+
   it("exposes the documented BorderConnect error codes", () => {
     expect(BORDERCONNECT_ERROR_CODES).toContain("EXPIRED_API_KEY");
     expect(BORDERCONNECT_ERROR_CODES).toContain("TOO_MANY_REQUESTS");

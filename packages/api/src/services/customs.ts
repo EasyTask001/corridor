@@ -34,6 +34,7 @@ import { enqueueJob } from "./jobs";
 import {
   applyCustomsDecision,
   applyTransition,
+  cascadeShipmentStatuses,
   loadFull,
   loadOrganization,
   lockMovement,
@@ -127,6 +128,89 @@ async function credentialsFor(
   );
 }
 
+/** What `createCustomsClient` needs beyond `{regime, mode, environment, settings, tenantKey}`. */
+type ClientModeInputs = {
+  credentials: CustomsCredentials | undefined;
+  apiKey: string | null;
+  baseUrl: string | null;
+  apiUrlSuffix: string | null;
+  companyKey: string | null;
+};
+
+/**
+ * `mock` and `gateway` share everything: the mock gateway in sandbox never
+ * needs (and never decrypts) the org's real credentials; a gateway needs its
+ * API key whatever the environment; a config-less org (never saved Settings)
+ * falls back to the deployment-wide env vars instead of a per-org Vault read.
+ */
+async function resolveVaultBackedInputs(
+  orgId: string,
+  provider: "cbp_ace" | "cbsa_aci",
+  cfg: typeof integrationConfigs.$inferSelect | undefined,
+  mode: "mock" | "gateway",
+  environment: "sandbox" | "production",
+): Promise<ClientModeInputs> {
+  const credentials =
+    (mode === "gateway" || environment === "production") && cfg?.credentialsRef
+      ? await credentialsFor(orgId, provider)
+      : undefined;
+  if (mode === "gateway" && environment === "production" && (!cfg?.baseUrl || !credentials?.apiKey)) {
+    throw new TRPCError({
+      code: "PRECONDITION_FAILED",
+      message: `${provider === "cbp_ace" ? "CBP ACE" : "CBSA ACI"} production gateway credentials are not configured`,
+    });
+  }
+  return {
+    credentials,
+    baseUrl: cfg?.baseUrl ?? process.env.CUSTOMS_GATEWAY_BASE_URL ?? null,
+    // A tenant URL must never receive the deployment-wide fallback secret.
+    apiKey: cfg ? (credentials?.apiKey ?? null) : (process.env.CUSTOMS_GATEWAY_API_KEY ?? null),
+    apiUrlSuffix: null,
+    companyKey: null,
+  };
+}
+
+/**
+ * BorderConnect's Service Provider account is EasyTask's own, from the
+ * deployment-wide env vars — never a per-org Vault secret. The org's company
+ * key is per-organization (Settings → Organization), one-to-one with the org
+ * like scac_code / canadian_carrier_code (0047), read straight off
+ * `organizations`. Both preconditions are gated on `environment ===
+ * "production"` (not on whether the deployment happens to have the env vars
+ * set) — `isBorderConnectLive` in the integrations package uses the same
+ * rule, so a sandbox org never needs either and a production org can never
+ * silently fall back to the fixture queue for a missing one.
+ */
+async function resolveBorderConnectInputs(
+  tx: RlsTransaction,
+  orgId: string,
+  environment: "sandbox" | "production",
+): Promise<ClientModeInputs> {
+  const [org] = await tx
+    .select({ companyKey: organizations.borderConnectCompanyKey })
+    .from(organizations)
+    .where(eq(organizations.id, orgId))
+    .limit(1);
+  const apiUrlSuffix = process.env.BORDERCONNECT_API_URL_SUFFIX ?? null;
+  const apiKey = process.env.BORDERCONNECT_API_KEY ?? null;
+  if (environment === "production") {
+    if (!apiUrlSuffix || !apiKey) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message: "BorderConnect credentials are not configured",
+      });
+    }
+    if (!org?.companyKey) {
+      throw new TRPCError({
+        code: "PRECONDITION_FAILED",
+        message:
+          "BorderConnect company key is not set for this organization (Settings → Organization)",
+      });
+    }
+  }
+  return { credentials: undefined, baseUrl: null, apiKey, apiUrlSuffix, companyKey: org?.companyKey ?? null };
+}
+
 export async function customsClientFor(tx: RlsTransaction, orgId: string, regime: "ACE" | "ACI") {
   const provider = providerForRegime(regime);
   const [cfg] = await tx
@@ -145,66 +229,19 @@ export async function customsClientFor(tx: RlsTransaction, orgId: string, regime
   const settings = (cfg?.settings ?? {}) as CustomsClientSettings;
   const environment = cfg?.environment ?? "sandbox";
   const mode = cfg?.mode ?? "mock";
-  // BorderConnect's Service Provider company key is per-organization
-  // (Settings → Organization), one-to-one with the org like scac_code /
-  // canadian_carrier_code (0047) — read straight off `organizations`, never
-  // through the Vault the `gateway` mode uses below.
-  const [org] =
+  const inputs =
     mode === "border_connect"
-      ? await tx
-          .select({ companyKey: organizations.borderConnectCompanyKey })
-          .from(organizations)
-          .where(eq(organizations.id, orgId))
-          .limit(1)
-      : [];
-  if (mode === "border_connect" && environment === "production" && !org?.companyKey) {
-    throw new TRPCError({
-      code: "PRECONDITION_FAILED",
-      message:
-        "BorderConnect company key is not set for this organization (Settings → Organization)",
-    });
-  }
-  // The mock gateway in sandbox never needs (and never decrypts) the org's
-  // real credentials; a gateway needs its API key whatever the environment.
-  // BorderConnect's key is EasyTask's own, from the deployment-wide env vars
-  // below — never a per-org Vault secret — so the read is skipped entirely.
-  const credentials =
-    mode !== "border_connect" &&
-    (mode === "gateway" || environment === "production") &&
-    cfg?.credentialsRef
-      ? await credentialsFor(orgId, provider)
-      : undefined;
-  if (
-    mode === "gateway" &&
-    environment === "production" &&
-    (!cfg?.baseUrl || !credentials?.apiKey)
-  ) {
-    throw new TRPCError({
-      code: "PRECONDITION_FAILED",
-      message: `${provider === "cbp_ace" ? "CBP ACE" : "CBSA ACI"} production gateway credentials are not configured`,
-    });
-  }
+      ? await resolveBorderConnectInputs(tx, orgId, environment)
+      : await resolveVaultBackedInputs(orgId, provider, cfg, mode, environment);
   return {
     client: createCustomsClient({
       regime,
       mode,
       environment,
       settings,
-      credentials,
-      baseUrl: cfg?.baseUrl ?? process.env.CUSTOMS_GATEWAY_BASE_URL ?? null,
-      // A tenant URL must never receive the deployment-wide fallback secret.
-      apiKey:
-        mode === "border_connect"
-          ? (process.env.BORDERCONNECT_API_KEY ?? null)
-          : cfg
-            ? (credentials?.apiKey ?? null)
-            : (process.env.CUSTOMS_GATEWAY_API_KEY ?? null),
-      webhookSecret: process.env.CUSTOMS_GATEWAY_WEBHOOK_SECRET ?? null,
       tenantKey: orgId,
-      // BorderConnect-only: the per-company API URL suffix (deployment-wide)
-      // and the org's Service Provider company key (per-org, read above).
-      apiUrlSuffix: process.env.BORDERCONNECT_API_URL_SUFFIX ?? null,
-      companyKey: org?.companyKey ?? null,
+      webhookSecret: process.env.CUSTOMS_GATEWAY_WEBHOOK_SECRET ?? null,
+      ...inputs,
     }),
     config: cfg ?? null,
   };
@@ -656,6 +693,17 @@ export async function applyStatusMessage(
   actor: Actor,
   m: MovementRow,
   status: CustomsStatusMessage,
+  /**
+   * The specific `customs_submissions` row this message is about — an
+   * amendment re-uploads under the SAME `referenceNumber` as the original
+   * filing (BorderConnect and the gateway both keep the reference on amend),
+   * so `(organizationId, referenceNumber)` alone can match more than one row.
+   * Callers that already resolved a submission (the BorderConnect inbox
+   * router, the webhook) must pass its id; only the poll path — one
+   * submission is ever in flight per movement at a time — omits it and falls
+   * back to the latest submission for this movement + reference.
+   */
+  submissionId?: string,
 ): Promise<{ changed: boolean; status: MovementStatus; terminal: boolean }> {
   let current = m;
   let changed = false;
@@ -701,19 +749,47 @@ export async function applyStatusMessage(
     // local draft has no business absorbing gateway events.
     if (["sent", "accepted", "held"].includes(current.status)) {
       await recordCustomsEvents(tx, actor, current, status.events, status.shipments);
+      // No movement-wide decision rides this message, so a shipment the
+      // message doesn't name stays exactly where it is (no `fallback`) — but
+      // one it does name (e.g. an ACE `1C` release) still needs its own
+      // status to cascade; `recordCustomsEvents` only ever writes the entry
+      // number, never `status`.
+      const attached = await tx
+        .select({
+          id: schema.shipments.id,
+          controlNumber: schema.shipments.controlNumber,
+          status: schema.shipments.status,
+          entryNumber: schema.shipments.entryNumber,
+        })
+        .from(schema.shipments)
+        .where(eq(schema.shipments.movementId, current.id));
+      await cascadeShipmentStatuses(tx, attached, status.shipments);
     }
   }
 
   if (changed || status.status !== "pending") {
-    await tx
-      .update(customsSubmissions)
-      .set({ status: status.status === "pending" ? "acknowledged" : status.status })
-      .where(
-        and(
-          eq(customsSubmissions.organizationId, actor.orgId),
-          eq(customsSubmissions.referenceNumber, status.referenceNumber),
-        ),
-      );
+    const target =
+      submissionId ??
+      (
+        await tx
+          .select({ id: customsSubmissions.id })
+          .from(customsSubmissions)
+          .where(
+            and(
+              eq(customsSubmissions.organizationId, actor.orgId),
+              eq(customsSubmissions.movementId, current.id),
+              eq(customsSubmissions.referenceNumber, status.referenceNumber),
+            ),
+          )
+          .orderBy(desc(customsSubmissions.createdAt))
+          .limit(1)
+      )[0]?.id;
+    if (target) {
+      await tx
+        .update(customsSubmissions)
+        .set({ status: status.status === "pending" ? "acknowledged" : status.status })
+        .where(eq(customsSubmissions.id, target));
+    }
   }
 
   const terminal = ["released", "rejected", "arrived", "cancelled"].includes(current.status);
@@ -848,6 +924,7 @@ export async function applyInboundCustomsMessage(
   return withServiceRole(db, async (tx) => {
     const [sub] = await tx
       .select({
+        id: customsSubmissions.id,
         orgId: customsSubmissions.organizationId,
         movementId: customsSubmissions.movementId,
         provider: customsSubmissions.provider,
@@ -884,7 +961,7 @@ export async function applyInboundCustomsMessage(
       success: true,
       correlationId,
     });
-    const result = await applyStatusMessage(tx, { orgId: sub.orgId, userId: null }, m, message);
+    const result = await applyStatusMessage(tx, { orgId: sub.orgId, userId: null }, m, message, sub.id);
     return { applied: result.changed, status: result.status };
   });
 }

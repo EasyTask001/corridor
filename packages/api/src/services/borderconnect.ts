@@ -37,7 +37,6 @@ import {
   inboundKeys,
   isAciReleaseCode,
   parseInbound,
-  type BorderConnectInbound,
   type BorderConnectTransport,
   type CarrierNotice,
 } from "@corridor/integrations";
@@ -109,98 +108,97 @@ export function canonicalStringify(value: unknown): string {
  * object keys re-ordered along the way) hashes identically and
  * `payload_sha256`'s unique constraint no-ops the insert.
  */
+// A drain cycle after downtime can pull a large batch; chunking keeps one
+// INSERT's parameter count sane rather than bounding it on row count alone.
+const INSERT_CHUNK_SIZE = 500;
+
 export async function storeInboundMessages(
   tx: RlsTransaction,
   messages: Record<string, unknown>[],
 ): Promise<{ stored: number; duplicates: number }> {
-  let stored = 0;
-  let duplicates = 0;
-  for (const msg of messages) {
+  if (messages.length === 0) return { stored: 0, duplicates: 0 };
+  const rows = messages.map((msg) => {
     const keys = inboundKeys(msg);
-    const payloadSha256 = createHash("sha256").update(canonicalStringify(msg)).digest("hex");
+    return {
+      provider: "border_connect" as const,
+      companyKey: keys.companyKey,
+      dataType: keys.dataType,
+      sendId: keys.sendId,
+      tripNumber: keys.tripNumber,
+      cargoControlNumber: keys.cargoControlNumber,
+      shipmentControlNumber: keys.shipmentControlNumber,
+      payload: msg,
+      payloadSha256: createHash("sha256").update(canonicalStringify(msg)).digest("hex"),
+    };
+  });
+  let stored = 0;
+  for (let i = 0; i < rows.length; i += INSERT_CHUNK_SIZE) {
+    const chunk = rows.slice(i, i + INSERT_CHUNK_SIZE);
+    // `ON CONFLICT DO NOTHING` tolerates duplicate values within the same
+    // statement (unlike DO UPDATE, it never re-touches a row twice), so two
+    // identical messages in one drain batch dedupe here exactly as two
+    // messages across separate calls would.
     const inserted = await tx
       .insert(customsInbox)
-      .values({
-        provider: "border_connect",
-        companyKey: keys.companyKey,
-        dataType: keys.dataType,
-        sendId: keys.sendId,
-        tripNumber: keys.tripNumber,
-        cargoControlNumber: keys.cargoControlNumber,
-        shipmentControlNumber: keys.shipmentControlNumber,
-        payload: msg,
-        payloadSha256,
-      })
+      .values(chunk)
       .onConflictDoNothing({ target: customsInbox.payloadSha256 })
       .returning({ id: customsInbox.id });
-    if (inserted.length > 0) stored++;
-    else duplicates++;
+    stored += inserted.length;
   }
-  return { stored, duplicates };
+  return { stored, duplicates: messages.length - stored };
 }
 
-/** api_response routing: correlation_id = sendId first, reference_number = tripNumber as a fallback. */
-async function findSubmissionForApiResponse(
+async function latestSubmission(
   tx: RlsTransaction,
-  orgId: string,
-  parsed: Extract<BorderConnectInbound, { kind: "api_response" }>,
+  ...conditions: Parameters<typeof and>
 ): Promise<CustomsSubmissionRow | null> {
-  if (parsed.sendId) {
-    const [bySend] = await tx
-      .select()
-      .from(customsSubmissions)
-      .where(
-        and(
-          eq(customsSubmissions.organizationId, orgId),
-          eq(customsSubmissions.correlationId, parsed.sendId),
-        ),
-      )
-      .orderBy(desc(customsSubmissions.createdAt))
-      .limit(1);
-    if (bySend) return bySend;
-  }
-  if (parsed.tripNumber) {
-    const [byTrip] = await tx
-      .select()
-      .from(customsSubmissions)
-      .where(
-        and(
-          eq(customsSubmissions.organizationId, orgId),
-          eq(customsSubmissions.referenceNumber, parsed.tripNumber),
-        ),
-      )
-      .orderBy(desc(customsSubmissions.createdAt))
-      .limit(1);
-    if (byTrip) return byTrip;
-  }
-  return null;
+  const [row] = await tx
+    .select()
+    .from(customsSubmissions)
+    .where(and(...conditions))
+    .orderBy(desc(customsSubmissions.createdAt))
+    .limit(1);
+  return row ?? null;
 }
 
 /**
- * customs_status routing: tripNumber against the submission's own
- * reference_number first (the normal case — the trip is still the filing
- * BorderConnect echoes back); a CCN/SCN-only message (most ACI_NOTICE
- * sub-types) falls back to `shipments.control_number` for the movement,
- * then that movement's latest submission for the reference to report back.
+ * Shared submission-routing fallback chain: sendId (correlation_id) → trip
+ * number (reference_number) → CCN/SCN via the shipment it's attached to. Both
+ * inbound message kinds use it, with one difference: an `api_response` (the
+ * initial send ack, before a movement is necessarily linked yet) matches a
+ * trip number with no `movementId` filter, while a `customs_status` message
+ * only trusts a trip-number match that already has a movement attached —
+ * `findShipmentsForRns` stays a separate function (RNS carries no companyKey
+ * at all, so it searches by CCN across every organization and returns
+ * shipments, not submissions — a genuinely different contract, not the same
+ * one repeated).
  */
-async function findSubmissionForCustomsStatus(
+async function resolveSubmission(
   tx: RlsTransaction,
   orgId: string,
-  keys: { tripNumber?: string; cargoControlNumber?: string; shipmentControlNumber?: string },
+  keys: {
+    sendId?: string | null;
+    tripNumber?: string | null;
+    cargoControlNumber?: string | null;
+    shipmentControlNumber?: string | null;
+  },
+  opts: { requireMovement: boolean },
 ): Promise<CustomsSubmissionRow | null> {
+  if (keys.sendId) {
+    const bySend = await latestSubmission(
+      tx,
+      eq(customsSubmissions.organizationId, orgId),
+      eq(customsSubmissions.correlationId, keys.sendId),
+    );
+    if (bySend) return bySend;
+  }
   if (keys.tripNumber) {
-    const [byTrip] = await tx
-      .select()
-      .from(customsSubmissions)
-      .where(
-        and(
-          eq(customsSubmissions.organizationId, orgId),
-          eq(customsSubmissions.referenceNumber, keys.tripNumber),
-          isNotNull(customsSubmissions.movementId),
-        ),
-      )
-      .orderBy(desc(customsSubmissions.createdAt))
-      .limit(1);
+    const byTrip = await latestSubmission(
+      tx,
+      eq(customsSubmissions.organizationId, orgId),
+      eq(customsSubmissions.referenceNumber, keys.tripNumber),
+      ...(opts.requireMovement ? [isNotNull(customsSubmissions.movementId)] : []),
+    );
     if (byTrip) return byTrip;
   }
   const ccn = keys.cargoControlNumber ?? keys.shipmentControlNumber;
@@ -217,17 +215,11 @@ async function findSubmissionForCustomsStatus(
       )
       .limit(1);
     if (ship?.movementId) {
-      const [bySub] = await tx
-        .select()
-        .from(customsSubmissions)
-        .where(
-          and(
-            eq(customsSubmissions.organizationId, orgId),
-            eq(customsSubmissions.movementId, ship.movementId),
-          ),
-        )
-        .orderBy(desc(customsSubmissions.createdAt))
-        .limit(1);
+      const bySub = await latestSubmission(
+        tx,
+        eq(customsSubmissions.organizationId, orgId),
+        eq(customsSubmissions.movementId, ship.movementId),
+      );
       if (bySub) return bySub;
     }
   }
@@ -444,7 +436,12 @@ export async function processInboxRow(db: DatabaseClient, rowId: number): Promis
       }
 
       if (parsed.kind === "api_response") {
-        const submission = await findSubmissionForApiResponse(tx, org.id, parsed);
+        const submission = await resolveSubmission(
+          tx,
+          org.id,
+          { sendId: parsed.sendId, tripNumber: parsed.tripNumber },
+          { requireMovement: false },
+        );
         if (!submission) {
           await markRow(tx, rowId, {
             organizationId: org.id,
@@ -497,7 +494,7 @@ export async function processInboxRow(db: DatabaseClient, rowId: number): Promis
           ],
           shipments: [],
           raw: parsed.raw,
-        });
+        }, submission.id);
         await markRow(tx, rowId, {
           organizationId: org.id,
           movementId: m.id,
@@ -508,7 +505,7 @@ export async function processInboxRow(db: DatabaseClient, rowId: number): Promis
       }
 
       // parsed.kind === "customs_status"
-      const submission = await findSubmissionForCustomsStatus(tx, org.id, parsed.keys);
+      const submission = await resolveSubmission(tx, org.id, parsed.keys, { requireMovement: true });
       if (!submission?.movementId) {
         await markRow(tx, rowId, {
           organizationId: org.id,
@@ -534,10 +531,16 @@ export async function processInboxRow(db: DatabaseClient, rowId: number): Promis
         statusCode: 200,
         success: true,
       });
-      await applyStatusMessage(tx, { orgId: org.id, userId: null }, m, {
-        ...parsed.status,
-        referenceNumber: submission.referenceNumber ?? parsed.status.referenceNumber,
-      });
+      await applyStatusMessage(
+        tx,
+        { orgId: org.id, userId: null },
+        m,
+        {
+          ...parsed.status,
+          referenceNumber: submission.referenceNumber ?? parsed.status.referenceNumber,
+        },
+        submission.id,
+      );
       await markRow(tx, rowId, {
         organizationId: org.id,
         movementId: m.id,
