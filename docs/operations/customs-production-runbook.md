@@ -16,11 +16,14 @@ Before the first customer filing:
 - Configure `SENTRY_DSN`, `NEXT_PUBLIC_SENTRY_DSN`, and the Sentry source-map
   variables. Configure an OTLP metric endpoint with
   `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT`.
-- Confirm `/api/health` returns process liveness and `/api/ready` returns 200.
-  Readiness fails closed on Postgres, configured Redis, missing production
-  variables, jobs overdue by two minutes, expired leases, a live
-  BorderConnect drain older than three minutes, or missing provider activity
-  while submissions are waiting.
+- Set `READINESS_SECRET` (a random string) and give it to internal monitoring
+  only. Confirm `/api/health` returns process liveness and `/api/ready`
+  returns 200 with only `{ ok: true }` when called with no credential, and
+  the full readiness body when called with `Authorization: Bearer
+  $READINESS_SECRET`. Readiness fails closed on Postgres, configured Redis,
+  missing production variables, jobs overdue by two minutes, expired leases,
+  a live BorderConnect drain older than three minutes, or missing provider
+  activity while submissions are waiting.
 - Configure and deliberately test every Sentry rule below. Record the issue
   link, delivery timestamp, recipient, and acknowledgement in the pilot log.
 - Run the ACE and ACI smoke commands against the approved service-provider
@@ -43,10 +46,12 @@ drain stopped and no carrier filing. The receive endpoint is pop-on-read.
 
 ## Health and metrics
 
-`/api/health` is liveness only. `/api/ready` is unauthenticated but returns
-only booleans, counts, ages, status labels, and missing variable names—never
-values, payloads, account identifiers, or connection errors. It does not call
-BorderConnect.
+`/api/health` is liveness only. `/api/ready` requires no credential and
+returns only `{ ok: true|false }` to that shallow caller — internal
+monitoring presents `Authorization: Bearer $READINESS_SECRET` to get the
+full body, which is still limited to booleans, counts, ages, status labels,
+and missing variable names — never values, payloads, account identifiers, or
+connection errors. It does not call BorderConnect.
 
 The OTLP exporter emits these low-cardinality instruments:
 

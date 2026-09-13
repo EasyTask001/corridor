@@ -27,6 +27,7 @@ const productionEnv = {
   NEXT_PUBLIC_SUPABASE_ANON_KEY: "configured",
   SUPABASE_SERVICE_ROLE_KEY: "configured",
   CRON_SECRET: "configured",
+  READINESS_SECRET: "configured",
   SENTRY_DSN: "configured",
 };
 
@@ -43,6 +44,7 @@ describe("evaluateReadiness", () => {
       "NEXT_PUBLIC_SUPABASE_ANON_KEY",
       "SUPABASE_SERVICE_ROLE_KEY",
       "CRON_SECRET",
+      "READINESS_SECRET",
       "SENTRY_DSN",
       "BORDERCONNECT_API_URL_SUFFIX",
       "BORDERCONNECT_API_KEY",
