@@ -20,7 +20,7 @@ import {
 } from "@corridor/db";
 import { notifyOrganization } from "./notifications";
 
-const { movements, shipments, commodities, partners, complianceAlerts } = schema;
+const { movements, shipments, commodities, complianceAlerts } = schema;
 
 const LANE_HISTORY_LIMIT = 12;
 const REJECTED_WINDOW_DAYS = 90;
@@ -103,6 +103,7 @@ export async function computeMovementRisk(
         hsCode: commodities.hsCode,
         weightKg: commodities.weightKg,
         valueAmount: commodities.valueAmount,
+        brokerId: shipments.brokerId,
       })
       .from(commodities)
       .innerJoin(shipments, eq(shipments.id, commodities.shipmentId))
@@ -112,21 +113,9 @@ export async function computeMovementRisk(
 
   if (commodityRows.length === 0) return [];
 
-  let hasBroker = false;
-  const firstLine = commodityRows[0];
-  if (firstLine) {
-    const [consignee] = await tx
-      .select({ type: partners.type })
-      .from(partners)
-      .where(and(eq(partners.organizationId, orgId), eq(partners.type, "broker")))
-      .limit(1);
-    hasBroker = !!consignee; // org has at least one broker on file — used as a coarse signal
-  }
-
   return evaluateMovementRisk({
     movementId,
-    hasBroker,
-    cargo: commodityRows,
+    cargo: commodityRows.map(({ brokerId, ...line }) => ({ ...line, hasBroker: !!brokerId })),
     lane: { weights: lane.weights, values: lane.values, rejectedRecently: lane.rejectedRecently },
     lookupTariff: lookupHsCode,
   });

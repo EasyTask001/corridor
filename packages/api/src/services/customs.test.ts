@@ -64,10 +64,37 @@ describe("parseCustomsCredentials", () => {
 
 import type { CustomsStatusMessage } from "@corridor/integrations";
 import { createFakeDb, TEST_ORG_ID, TEST_USER_ID, type Row } from "../test/mock-context";
-import { applyStatusMessage, customsClientFor, transmitMovement } from "./customs";
+import {
+  applyStatusMessage,
+  customsClientFor,
+  requireCustomsCapability,
+  transmitMovement,
+} from "./customs";
 
 const MOVEMENT_ID = "44444444-4444-4444-8444-444444444444";
 const SHIPMENT_ID = "12121212-1212-4212-8212-121212121212";
+
+describe("requireCustomsCapability", () => {
+  it("returns PRECONDITION_FAILED with the provider's actionable reason", () => {
+    const client = {
+      capabilities: {
+        transmit: true,
+        amend: false,
+        cancel: true,
+        status: false,
+        inBond: false,
+        reasons: { inBond: "QP In-Bond customs messaging coming soon; tracking only." },
+      },
+    } as never;
+
+    expect(() => requireCustomsCapability(client, "inBond")).toThrowError(
+      expect.objectContaining({
+        code: "PRECONDITION_FAILED",
+        message: "QP In-Bond customs messaging coming soon; tracking only.",
+      }),
+    );
+  });
+});
 
 function gatewayRows(status: string, regime: "ACE" | "ACI" = "ACE"): Record<string, Row[]> {
   return {
@@ -635,6 +662,8 @@ describe("transmitMovement (border_connect mode)", () => {
           unitNumber: "T-101",
           status: "active",
           plateNumber: "AB12345",
+          plateJurisdiction: "ON",
+          truckType: "TR",
           registrationExpiry: isoDay(300),
           insuranceExpiry: isoDay(200),
           vin: "1HGCM82633A123456",

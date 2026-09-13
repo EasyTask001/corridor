@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 /**
- * LIVE smoke test against the real BorderConnect Service Provider account
- * (`.env.local`, EasyTask AI Corp). This is the only place in the repo that
+ * LIVE smoke test against an approved BorderConnect Service Provider test
+ * account. This is the only place in the repo that
  * makes a network call to BorderConnect's production API with real
  * credentials — everything else (client.test.ts, ace.test.ts, transport.
  * test.ts, ...) runs against a fixture or an injected fake transport.
@@ -9,9 +9,11 @@
  * Why this exists: `GET /api/receive` (`normaliseReceiveBody`, `transport.
  * ts`) has defended against four documented envelope shapes since Task 4
  * without ever seeing a real response. This script settles that by filing
- * one throwaway `ACE_TRIP` with `autoSend: false` (BorderConnect holds it in
- * its own system; it never reaches CBP) and printing exactly what `GET
- * /api/receive` sends back.
+ * one throwaway `ACE_TRIP` or `ACI_TRIP` with `autoSend: false` (BorderConnect holds it in
+ * its own system; it never reaches CBP/CBSA) and recording the receive
+ * envelope shape. Evidence is written with stable routing-key hashes; raw
+ * customs payloads, company keys, document data, and credentials are never
+ * printed or persisted.
  *
  * Safety rails (do not weaken these):
  *   1. `autoSend` is the literal `false` below, never read from an env var,
@@ -37,20 +39,29 @@
  *      it here would be a dependency cycle.
  *
  * Usage:
- *   source .env.local && pnpm --filter @corridor/integrations smoke:borderconnect
+ *   source .env.local && pnpm --filter @corridor/integrations smoke:borderconnect -- --regime=ACE
+ *   source .env.local && pnpm --filter @corridor/integrations smoke:borderconnect -- --regime=ACI
  *   source .env.local && pnpm --filter @corridor/integrations smoke:borderconnect -- --cleanup
  *   source .env.local && pnpm --filter @corridor/integrations smoke:borderconnect -- --drain-shared-queue
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildManifest, type ManifestSource } from "../src/customs/manifest";
 import { toAceTrip } from "../src/customs/borderconnect/ace";
+import { toAciTrip } from "../src/customs/borderconnect/aci";
 import {
   createBorderConnectHttpTransport,
   normaliseReceiveBody,
 } from "../src/customs/borderconnect/transport";
 import { CustomsTransportError } from "../src/customs/types";
+import {
+  parseSmokeRegime,
+  receiveShape,
+  redactedSmokeRecord,
+  type RedactedSmokeRecord,
+} from "../src/customs/borderconnect/smoke-support";
+import type { Regime } from "@corridor/domain";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(here, "../../../");
@@ -107,7 +118,8 @@ function refuseIfAutoSendOverrideIsSet(): void {
  * an avoidable `DATA_ERROR` unrelated to what this script is trying to
  * observe (the receive envelope shape).
  */
-function makeSource(): ManifestSource {
+function makeSource(regime: Regime): ManifestSource {
+  const aci = regime === "ACI";
   return {
     organization: {
       name: "Corridor Smoke Test",
@@ -118,11 +130,11 @@ function makeSource(): ManifestSource {
       timezone: "America/Toronto",
     },
     movement: {
-      regime: "ACE",
+      regime,
       movementNumber: "SMOKE-00001",
       tripNumber: null,
       carrierCode: "PFTR",
-      port: { code: "3801" },
+      port: { code: aci ? "0409" : "3801" },
       scheduledCrossingAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       isEmpty: false,
       iitIndicator: "none",
@@ -171,11 +183,11 @@ function makeSource(): ManifestSource {
     trailers: [],
     shipments: [
       {
-        controlNumber: "PFTRSMOKE0001",
-        shipmentType: "regular_bill",
-        cargoType: null,
+        controlNumber: aci ? "PFTRPARSSMOKE1" : "PFTRSMOKE0001",
+        shipmentType: aci ? null : "regular_bill",
+        cargoType: aci ? "regular" : null,
         entryNumber: "ENT-1",
-        entryPortCode: "3801",
+        entryPortCode: aci ? "0409" : "3801",
         inBondEntryType: null,
         inBondDestinationPortCode: null,
         inBondNumber: null,
@@ -261,17 +273,20 @@ function receiveAllowed(): boolean {
  * normalises) — this script's whole point is to see the envelope *before*
  * normalisation, so it can compare the two side by side.
  */
-async function rawReceive(suffix: string, apiKey: string): Promise<unknown> {
+async function rawReceive(
+  suffix: string,
+  apiKey: string,
+): Promise<{ httpStatus: number; body: unknown }> {
   const res = await fetch(`${BASE_URL}/api/receive/${suffix}`, {
     method: "GET",
     headers: { "Api-Key": apiKey, Accept: "application/json" },
   });
   const text = await res.text();
-  if (!text) return null;
+  if (!text) return { httpStatus: res.status, body: null };
   try {
-    return JSON.parse(text);
+    return { httpStatus: res.status, body: JSON.parse(text) };
   } catch {
-    return { raw: text, httpStatus: res.status };
+    return { httpStatus: res.status, body: { status: "NON_JSON_RESPONSE" } };
   }
 }
 
@@ -285,16 +300,54 @@ async function main(): Promise<void> {
   const apiUrlSuffix = requireEnv("BORDERCONNECT_API_URL_SUFFIX");
   const apiKey = requireEnv("BORDERCONNECT_API_KEY");
   const companyKey = requireEnv("BORDERCONNECT_TEST_COMPANY_KEY");
+  const regime = parseSmokeRegime(process.argv.slice(2));
 
   const cleanup = process.argv.includes("--cleanup");
+  const receiveRequested = receiveAllowed();
+  const outputArg = process.argv.find((arg) => arg.startsWith("--output="))?.slice(9);
+  const startedAt = new Date();
+  const outputPath = outputArg
+    ? resolve(process.cwd(), outputArg)
+    : resolve(
+        REPO_ROOT,
+        "artifacts/borderconnect-smoke",
+        `${startedAt.toISOString().replace(/[:.]/g, "-")}-${regime.toLowerCase()}.json`,
+      );
+  const records: RedactedSmokeRecord[] = [];
+  const record = (entry: RedactedSmokeRecord) => {
+    records.push(entry);
+    console.log("[smoke]", JSON.stringify(entry));
+  };
+  const saveEvidence = () => {
+    mkdirSync(dirname(outputPath), { recursive: true });
+    writeFileSync(
+      outputPath,
+      `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          startedAt: startedAt.toISOString(),
+          finishedAt: new Date().toISOString(),
+          regime,
+          autoSend: false,
+          receiveRequested,
+          records,
+        },
+        null,
+        2,
+      )}\n`,
+      { mode: 0o600 },
+    );
+    console.log(`[smoke] redacted evidence written to ${outputPath}`);
+  };
 
-  const manifest = buildManifest(makeSource());
+  const manifest = buildManifest(makeSource(regime));
   const tripNumber = smokeTripNumber(manifest.carrier.scac ?? "SMOK");
   const sendId = `smoke-${Date.now()}`;
 
   // Rail #1: `autoSend` is a literal below — never a variable, never a
   // parameter with a default that could be overridden by a caller.
-  const body = toAceTrip(manifest, {
+  const mapper = regime === "ACE" ? toAceTrip : toAciTrip;
+  const body = mapper(manifest, {
     companyKey,
     sendId,
     operation: "CREATE",
@@ -302,58 +355,142 @@ async function main(): Promise<void> {
     tripNumberOverride: tripNumber,
   });
 
-  console.log(`[smoke] tripNumber=${tripNumber} sendId=${sendId} companyKey=${companyKey}`);
-  console.log("[smoke] POSTing ACE_TRIP (autoSend: false) …");
+  record(
+    redactedSmokeRecord({
+      at: new Date(),
+      direction: "send",
+      regime,
+      message: body,
+    }),
+  );
+  console.log(`[smoke] POSTing ${regime}_TRIP (autoSend: false) …`);
 
   const transport = createBorderConnectHttpTransport({ apiUrlSuffix, apiKey });
   try {
     const sendResult = await transport.send(body);
-    console.log("[smoke] send() result:", JSON.stringify(sendResult, null, 2));
+    record(
+      redactedSmokeRecord({
+        at: new Date(),
+        direction: "receive",
+        regime,
+        message: { ...sendResult, companyKey, sendId, tripNumber },
+      }),
+    );
   } catch (e) {
     if (e instanceof CustomsTransportError) {
-      console.error(
-        `[smoke] send() failed: ${e.message} (status ${e.statusCode}, retryable ${e.retryable})`,
+      record(
+        redactedSmokeRecord({
+          at: new Date(),
+          direction: "receive",
+          regime,
+          message: {
+            status: "ERROR",
+            errorCode: `HTTP_${e.statusCode}`,
+            companyKey,
+            sendId,
+            tripNumber,
+          },
+          httpStatus: e.statusCode,
+        }),
       );
+      console.error(`[smoke] send() failed (status ${e.statusCode}, retryable ${e.retryable})`);
     } else {
-      console.error("[smoke] send() failed with an unexpected error:", e);
+      console.error("[smoke] send() failed with an unexpected error");
     }
     process.exitCode = 1;
+    saveEvidence();
     return;
   }
 
-  if (receiveAllowed()) {
+  if (receiveRequested) {
     for (let i = 1; i <= 5; i++) {
-      console.log(`\n[smoke] poll ${i}/5 — GET /api/receive/${apiUrlSuffix}`);
-      const rawBody = await rawReceive(apiUrlSuffix, apiKey);
-      console.log("[smoke] raw body:", JSON.stringify(rawBody, null, 2));
-      console.log("[smoke] normaliseReceiveBody(body):", JSON.stringify(normaliseReceiveBody(rawBody), null, 2));
+      console.log(`\n[smoke] poll ${i}/5 — GET /api/receive/[redacted-suffix]`);
+      let received: Awaited<ReturnType<typeof rawReceive>>;
+      try {
+        received = await rawReceive(apiUrlSuffix, apiKey);
+      } catch {
+        record(
+          redactedSmokeRecord({
+            at: new Date(),
+            direction: "receive",
+            regime,
+            message: { status: "NETWORK_ERROR", companyKey, sendId, tripNumber },
+          }),
+        );
+        console.error("[smoke] receive failed with a network error");
+        process.exitCode = 1;
+        break;
+      }
+      const shape = receiveShape(received.body);
+      const normalized = normaliseReceiveBody(received.body);
+      record(
+        redactedSmokeRecord({
+          at: new Date(),
+          direction: "receive",
+          regime,
+          message:
+            received.body && typeof received.body === "object" && !Array.isArray(received.body)
+              ? (received.body as Record<string, unknown>)
+              : { status: normalized.length === 0 ? "EMPTY" : "MESSAGES" },
+          shape,
+          httpStatus: received.httpStatus,
+        }),
+      );
+      for (const message of normalized) {
+        record(
+          redactedSmokeRecord({
+            at: new Date(),
+            direction: "receive",
+            regime,
+            message,
+          }),
+        );
+      }
       if (i < 5) await sleep(5000);
     }
   }
 
   if (cleanup) {
-    console.log("\n[smoke] --cleanup: sending ACE_TRIP DELETE …");
+    console.log(`\n[smoke] --cleanup: sending ${regime}_TRIP DELETE …`);
+    const cleanupBody = {
+      data: `${regime}_TRIP`,
+      operation: "DELETE",
+      autoSend: false,
+      tripNumber,
+      companyKey,
+      sendId: `smoke-cleanup-${Date.now()}`,
+    };
+    record(
+      redactedSmokeRecord({
+        at: new Date(),
+        direction: "cleanup",
+        regime,
+        message: cleanupBody,
+      }),
+    );
     try {
-      const deleteResult = await transport.send({
-        data: "ACE_TRIP",
-        operation: "DELETE",
-        autoSend: false,
-        tripNumber,
-        companyKey,
-      });
-      console.log("[smoke] DELETE result:", JSON.stringify(deleteResult, null, 2));
+      const deleteResult = await transport.send(cleanupBody);
+      record(
+        redactedSmokeRecord({
+          at: new Date(),
+          direction: "receive",
+          regime,
+          message: { ...deleteResult, companyKey, tripNumber, sendId: cleanupBody.sendId },
+        }),
+      );
     } catch (e) {
       if (e instanceof CustomsTransportError) {
-        console.error(`[smoke] DELETE failed: ${e.message} (status ${e.statusCode})`);
+        console.error(`[smoke] DELETE failed (status ${e.statusCode})`);
       } else {
-        console.error("[smoke] DELETE failed with an unexpected error:", e);
+        console.error("[smoke] DELETE failed with an unexpected error");
       }
       process.exitCode = 1;
     }
   }
+  saveEvidence();
 }
 
 main().catch((e) => {
-  console.error("[smoke] fatal:", e instanceof Error ? e.message : e);
+  console.error(`[smoke] fatal (${e instanceof Error ? e.name : "unknown error"})`);
   process.exitCode = 1;
 });

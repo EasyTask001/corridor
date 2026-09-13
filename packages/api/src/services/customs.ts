@@ -16,20 +16,31 @@ import {
   type DatabaseClient,
   type RlsTransaction,
 } from "@corridor/db";
-import { canTransition, hasBlockingIssues, type MovementStatus } from "@corridor/domain";
+import {
+  canTransition,
+  hasBlockingIssues,
+  type MovementStatus,
+  type ValidationIssue,
+} from "@corridor/domain";
 import {
   CustomsTransportError,
   buildManifest,
   createCustomsClient,
   hasCustomsCredentials,
   providerForRegime,
+  resolveCustomsCapabilities,
+  validateForBorderConnect,
+  type CustomsCapabilities,
   type CustomsClient,
+  type CustomsAmendOptions,
+  type CustomsCapabilityName,
   type CustomsClientSettings,
   type CustomsCredentials,
   type CustomsStatusMessage,
   type InboundCustomsMessage,
   type ManifestPayload,
 } from "@corridor/integrations";
+import { corridorMetrics } from "@corridor/observability";
 import { enqueueJob } from "./jobs";
 import {
   applyCustomsDecision,
@@ -49,6 +60,36 @@ import {
 const { integrationConfigs, integrationEvents, customsSubmissions, organizations } = schema;
 
 type MovementRow = typeof schema.movements.$inferSelect;
+
+function unavailableCapabilities(reason: string): CustomsCapabilities {
+  return {
+    transmit: false,
+    amend: false,
+    cancel: false,
+    status: false,
+    inBond: false,
+    reasons: {
+      transmit: reason,
+      amend: reason,
+      cancel: reason,
+      status: reason,
+      inBond: reason,
+    },
+  };
+}
+
+export function requireCustomsCapability(
+  client: Pick<CustomsClient, "capabilities">,
+  capability: CustomsCapabilityName,
+) {
+  if (client.capabilities[capability]) return;
+  throw new TRPCError({
+    code: "PRECONDITION_FAILED",
+    message:
+      client.capabilities.reasons[capability] ??
+      `This customs provider does not support ${capability}`,
+  });
+}
 
 /** How long transmit keeps polling a gateway for a decision before giving up. */
 export const POLL_WINDOW_MS = 48 * 60 * 60 * 1000;
@@ -154,7 +195,11 @@ async function resolveVaultBackedInputs(
     (mode === "gateway" || environment === "production") && cfg?.credentialsRef
       ? await credentialsFor(orgId, provider)
       : undefined;
-  if (mode === "gateway" && environment === "production" && (!cfg?.baseUrl || !credentials?.apiKey)) {
+  if (
+    mode === "gateway" &&
+    environment === "production" &&
+    (!cfg?.baseUrl || !credentials?.apiKey)
+  ) {
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
       message: `${provider === "cbp_ace" ? "CBP ACE" : "CBSA ACI"} production gateway credentials are not configured`,
@@ -208,7 +253,13 @@ async function resolveBorderConnectInputs(
       });
     }
   }
-  return { credentials: undefined, baseUrl: null, apiKey, apiUrlSuffix, companyKey: org?.companyKey ?? null };
+  return {
+    credentials: undefined,
+    baseUrl: null,
+    apiKey,
+    apiUrlSuffix,
+    companyKey: org?.companyKey ?? null,
+  };
 }
 
 export async function customsClientFor(tx: RlsTransaction, orgId: string, regime: "ACE" | "ACI") {
@@ -241,10 +292,100 @@ export async function customsClientFor(tx: RlsTransaction, orgId: string, regime
       settings,
       tenantKey: orgId,
       webhookSecret: process.env.CUSTOMS_GATEWAY_WEBHOOK_SECRET ?? null,
+      aciAmendEnabled: process.env.BORDERCONNECT_ACI_AMEND_ENABLED === "true",
       ...inputs,
     }),
     config: cfg ?? null,
   };
+}
+
+/** Read-only capability resolution for API responses and preflight controls. */
+export async function customsCapabilitiesFor(
+  tx: RlsTransaction,
+  orgId: string,
+  regime: "ACE" | "ACI",
+): Promise<CustomsCapabilities> {
+  const provider = providerForRegime(regime);
+  const [cfg] = await tx
+    .select()
+    .from(integrationConfigs)
+    .where(
+      and(eq(integrationConfigs.organizationId, orgId), eq(integrationConfigs.provider, provider)),
+    )
+    .limit(1);
+  if (cfg?.status === "disabled") {
+    return unavailableCapabilities(
+      `${regime === "ACE" ? "CBP ACE" : "CBSA ACI"} integration is disabled for this organization`,
+    );
+  }
+
+  const mode = cfg?.mode ?? "mock";
+  const environment = cfg?.environment ?? "sandbox";
+  if (mode === "border_connect") {
+    const [org] = await tx
+      .select({ companyKey: organizations.borderConnectCompanyKey })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1);
+    return resolveCustomsCapabilities({
+      regime,
+      mode,
+      environment,
+      apiUrlSuffix: process.env.BORDERCONNECT_API_URL_SUFFIX ?? null,
+      apiKey: process.env.BORDERCONNECT_API_KEY ?? null,
+      companyKey: org?.companyKey ?? null,
+      aciAmendEnabled: process.env.BORDERCONNECT_ACI_AMEND_ENABLED === "true",
+    });
+  }
+
+  const credentials =
+    mode === "gateway" && cfg?.credentialsRef ? await credentialsFor(orgId, provider) : undefined;
+  return resolveCustomsCapabilities({
+    regime,
+    mode,
+    environment,
+    credentials,
+    baseUrl: cfg?.baseUrl ?? process.env.CUSTOMS_GATEWAY_BASE_URL ?? null,
+    apiKey: cfg ? (credentials?.apiKey ?? null) : (process.env.CUSTOMS_GATEWAY_API_KEY ?? null),
+  });
+}
+
+function providerIssueStep(problem: string): ValidationIssue["step"] {
+  if (problem.startsWith("conveyance.")) return "truck";
+  if (problem.startsWith("equipment[")) return "trailer";
+  if (/^(crew|drivers|passengers)/.test(problem)) return "crew";
+  if (problem.includes(".commodities[")) return "commodity";
+  if (problem.startsWith("shipments[")) return "shipment";
+  return "trip";
+}
+
+/** Provider-specific preflight, shared by validation responses and transmit enforcement. */
+export async function customsPreflightIssues(
+  tx: RlsTransaction,
+  orgId: string,
+  full: FullMovement,
+): Promise<ValidationIssue[]> {
+  const capabilities = await customsCapabilitiesFor(tx, orgId, full.regime);
+  if (!capabilities.transmit) {
+    return [
+      {
+        code: "customs_transmit_unsupported",
+        severity: "blocking",
+        message: capabilities.reasons.transmit ?? "Customs transmission is not supported",
+        step: "trip",
+      },
+    ];
+  }
+
+  const { client } = await customsClientFor(tx, orgId, full.regime);
+  if (client.mode !== "border_connect") return [];
+  const org = await loadOrganization(tx, orgId);
+  return validateForBorderConnect(manifestFor(org, full)).map((problem, index) => ({
+    code: `border_connect_${index + 1}`,
+    severity: "blocking" as const,
+    message: problem,
+    step: providerIssueStep(problem),
+  }));
 }
 
 /** Audit of one outbound filing (customs_submissions, 0023). */
@@ -421,6 +562,21 @@ export async function logIntegrationEvent(
     durationMs: e.durationMs ?? null,
     correlationId: e.correlationId ?? null,
   });
+  if (e.direction === "outbound" && e.durationMs !== undefined) {
+    corridorMetrics.customsOutbound({
+      provider: e.provider,
+      operation: e.operation,
+      durationMs: e.durationMs,
+      ok: e.success,
+    });
+    if (e.success && ["transmit", "amend", "cancel"].includes(e.operation)) {
+      corridorMetrics.submissionAcknowledged({
+        provider: e.provider,
+        regime: e.provider === "cbp_ace" ? "ace" : e.provider === "cbsa_aci" ? "aci" : "other",
+        latencyMs: e.durationMs,
+      });
+    }
+  }
 }
 
 /**
@@ -431,7 +587,10 @@ export async function logIntegrationEvent(
  */
 export async function transmitMovement(tx: RlsTransaction, actor: Actor, movementId: string) {
   const full = await loadFull(tx, actor.orgId, movementId);
-  const issues = validationFor(full);
+  const baseIssues = validationFor(full);
+  const issues = hasBlockingIssues(baseIssues)
+    ? baseIssues
+    : [...baseIssues, ...(await customsPreflightIssues(tx, actor.orgId, full))];
   if (hasBlockingIssues(issues)) {
     throw new TRPCError({
       code: "PRECONDITION_FAILED",
@@ -561,6 +720,7 @@ export async function transmitAmendment(
   actor: Actor,
   movementId: string,
   amendmentNumber: number,
+  amendment: Omit<CustomsAmendOptions, "correlationId">,
 ) {
   const full = await loadFull(tx, actor.orgId, movementId);
   const ref = full.customsReferenceNumber;
@@ -576,14 +736,14 @@ export async function transmitAmendment(
   const correlationId = randomUUID();
   const started = Date.now();
   try {
-    const ack = await client.amend(manifest, ref, { correlationId });
+    const ack = await client.amend(manifest, ref, { correlationId, ...amendment });
     await logIntegrationEvent(tx, {
       orgId: actor.orgId,
       movementId,
       provider: client.provider,
       direction: "outbound",
       operation: "amend",
-      request: { amendmentNumber, referenceNumber: ref },
+      request: { amendmentNumber, referenceNumber: ref, ...amendment },
       response: { referenceNumber: ack.referenceNumber, receivedAt: ack.receivedAt, ...ack.raw },
       statusCode: 200,
       success: true,
@@ -598,7 +758,7 @@ export async function transmitAmendment(
       referenceNumber: ack.referenceNumber,
       correlationId,
       status: "acknowledged",
-      request: { amendmentNumber, manifest },
+      request: { amendmentNumber, manifest, ...amendment },
       response: ack.raw,
     });
     await scheduleDecision(
@@ -612,7 +772,7 @@ export async function transmitAmendment(
   } catch (err) {
     if (err instanceof CustomsTransportError) {
       throw new TRPCError({
-        code: "BAD_GATEWAY",
+        code: err.statusCode === 412 ? "PRECONDITION_FAILED" : "BAD_GATEWAY",
         message: err.retryable
           ? `${err.message}. The amendment was not transmitted — try again shortly.`
           : `${err.message}. Check the integration settings.`,
@@ -961,7 +1121,13 @@ export async function applyInboundCustomsMessage(
       success: true,
       correlationId,
     });
-    const result = await applyStatusMessage(tx, { orgId: sub.orgId, userId: null }, m, message, sub.id);
+    const result = await applyStatusMessage(
+      tx,
+      { orgId: sub.orgId, userId: null },
+      m,
+      message,
+      sub.id,
+    );
     return { applied: result.changed, status: result.status };
   });
 }

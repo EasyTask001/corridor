@@ -8,7 +8,7 @@
 export interface RiskFactor {
   key: string;
   label: string;
-  weight: number;
+  impact: "High" | "Medium" | "Low";
   present: boolean;
 }
 
@@ -47,16 +47,24 @@ const LABELS: Record<keyof HoldPredictionInput, string> = {
 };
 
 export function predictHold(input: HoldPredictionInput): HoldPrediction {
-  const factors: RiskFactor[] = (
-    Object.keys(HOLD_FACTOR_WEIGHTS) as (keyof HoldPredictionInput)[]
-  ).map((key) => ({
-    key,
-    label: LABELS[key],
-    weight: HOLD_FACTOR_WEIGHTS[key],
-    present: input[key],
-  }));
-  const raw = factors.reduce((s, f) => s + (f.present ? f.weight : 0), 0);
+  const allFactors = (Object.keys(HOLD_FACTOR_WEIGHTS) as (keyof HoldPredictionInput)[]).map(
+    (key) => ({
+      key,
+      label: LABELS[key],
+      weight: HOLD_FACTOR_WEIGHTS[key],
+      present: input[key],
+    }),
+  );
+  const raw = allFactors.reduce((s, f) => s + (f.present ? f.weight : 0), 0);
   const maxPossible = Object.values(HOLD_FACTOR_WEIGHTS).reduce((a, b) => a + b, 0);
+  const factors: RiskFactor[] = allFactors
+    .filter((factor) => factor.present)
+    .map(({ key, label, weight, present }) => ({
+      key,
+      label,
+      impact: weight >= 0.3 ? "High" : weight >= 0.2 ? "Medium" : "Low",
+      present,
+    }));
   const score = Math.min(1, raw / maxPossible);
   return {
     score,

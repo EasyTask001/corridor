@@ -57,9 +57,8 @@ export function buildTravelDocument(
   return {
     type,
     number: d.number,
-    ...(d.issuingCountry ? { issuingCountry: d.issuingCountry } : {}),
-    ...(d.issuingState ? { issuingState: d.issuingState } : {}),
-    ...(d.expiresOn ? { expiresOn: d.expiresOn } : {}),
+    ...(d.issuingCountry ? { country: d.issuingCountry } : {}),
+    ...(d.issuingState ? { stateProvince: d.issuingState } : {}),
   };
 }
 
@@ -113,7 +112,9 @@ function iitBondField(
   return undefined;
 }
 
-function buildAceCommodity(c: ManifestPayload["shipments"][number]["commodities"][number]): Record<string, unknown> {
+function buildAceCommodity(
+  c: ManifestPayload["shipments"][number]["commodities"][number],
+): Record<string, unknown> {
   return {
     description: c.description,
     quantity: c.quantity,
@@ -121,13 +122,16 @@ function buildAceCommodity(c: ManifestPayload["shipments"][number]["commodities"
     weight: c.weightKg,
     weightUnit: "KG",
     ...(c.marksAndNumbers ? { marksAndNumbers: [c.marksAndNumbers] } : {}),
-    ...(c.hsCode ? { harmonizedCode: c.hsCode } : {}),
-    ...(c.value ? { value: { amount: c.value.amount, currency: c.value.currency } } : {}),
+    ...(c.hsCode ? { harmonizedCode: c.hsCode.replace(/\D/g, "") } : {}),
+    ...(c.value?.currency === "USD" ? { value: String(c.value.amount) } : {}),
     ...(c.countryOfOrigin ? { countryOfOrigin: c.countryOfOrigin } : {}),
   };
 }
 
-function buildAceShipment(s: ManifestPayload["shipments"][number], companyKey: string): Record<string, unknown> {
+function buildAceShipment(
+  s: ManifestPayload["shipments"][number],
+  companyKey: string,
+): Record<string, unknown> {
   return {
     data: "ACE_SHIPMENT",
     companyKey,
@@ -165,7 +169,7 @@ export function toAceTrip(m: ManifestPayload, o: OutboundOptions): Record<string
     operation: o.operation,
     autoSend: o.autoSend,
     tripNumber,
-    estimatedArrivalDate: bcDateTime(m.trip.estimatedArrival, m.carrier.timezone),
+    estimatedArrivalDateTime: bcDateTime(m.trip.estimatedArrival, m.carrier.timezone),
     usPortOfArrival: m.trip.portOfEntry.padStart(4, "0"),
     ...(bond ? { instrumentsOfInternationalTrafficBond: bond } : {}),
     truck: {
@@ -182,7 +186,10 @@ export function toAceTrip(m: ManifestPayload, o: OutboundOptions): Record<string
     trailers: m.equipment.map((t) => ({
       number: t.unitNumber,
       type: mapTrailerType(t.type),
-      licensePlates: buildLicensePlates({ plate: t.plate, plateJurisdiction: t.plateJurisdiction }, t.plates),
+      licensePlates: buildLicensePlates(
+        { plate: t.plate, plateJurisdiction: t.plateJurisdiction },
+        t.plates,
+      ),
       sealNumbers: t.seals,
     })),
     drivers: m.crew

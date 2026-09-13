@@ -126,6 +126,7 @@ export function ShipmentDetail({
           isPars: s.isPars,
           shipperId: s.shipperId,
           consigneeId: s.consigneeId,
+          brokerId: s.brokerId,
           entryNumber: s.entryNumber,
           entryPortId: s.entryPortId,
           inBondEntryType: s.inBondEntryType,

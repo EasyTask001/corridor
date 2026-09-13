@@ -159,6 +159,9 @@ function ShipmentRows({
               {s.entryPortCode ? ` @ ${s.entryPortCode}` : ""}
             </div>
           )}
+          {s.brokerName && (
+            <div className="mt-0.5 text-[11px] text-fg-secondary">broker {s.brokerName}</div>
+          )}
         </td>
         <td className="px-3 py-2 capitalize">{kindOf(s)}</td>
         <td className="px-3 py-2 text-xs">

@@ -42,7 +42,8 @@ const FIELDS: { key: keyof Fields; label: string; mono?: boolean; helper?: strin
     key: "borderConnectCompanyKey",
     label: "BorderConnect company key",
     mono: true,
-    helper: "Issued by BorderConnect for your carrier account; required for BorderConnect filing mode.",
+    helper:
+      "Issued by BorderConnect for your carrier account; required for BorderConnect filing mode.",
   },
 ];
 

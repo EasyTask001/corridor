@@ -24,6 +24,7 @@ const DOCUMENT_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const MOVEMENT_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const SHIPPER_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const CONSIGNEE_ID = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+const BROKER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 
 const documentRow = (over: Row = {}): Row => ({
   id: DOCUMENT_ID,
@@ -50,8 +51,19 @@ const movementRow = (over: Row = {}): Row => ({
 });
 
 const partnerRows = (): Row[] => [
-  { id: SHIPPER_ID, organizationId: TEST_ORG_ID, name: "Maple Ridge Steel Ltd" },
-  { id: CONSIGNEE_ID, organizationId: TEST_ORG_ID, name: "Great Lakes Fabrication Inc" },
+  { id: BROKER_ID, organizationId: TEST_ORG_ID, name: "Northgate", type: "broker" },
+  {
+    id: SHIPPER_ID,
+    organizationId: TEST_ORG_ID,
+    name: "Maple Ridge Steel Ltd",
+    type: "shipper",
+  },
+  {
+    id: CONSIGNEE_ID,
+    organizationId: TEST_ORG_ID,
+    name: "Great Lakes Fabrication Inc",
+    type: "consignee",
+  },
 ];
 
 /** Two reviewer-confirmed lines, in the same shape the review UI submits. */
@@ -114,6 +126,7 @@ const applyInput = (over: Record<string, unknown> = {}) => ({
   controlReference: "PAPS90210",
   shipperId: SHIPPER_ID,
   consigneeId: CONSIGNEE_ID,
+  brokerId: BROKER_ID,
   lines: LINES,
   ...over,
 });
@@ -142,6 +155,7 @@ describe("documents.applyExtraction", () => {
       controlReference: "PAPS90210",
       shipperId: SHIPPER_ID,
       consigneeId: CONSIGNEE_ID,
+      brokerId: BROKER_ID,
       sourceDocumentId: DOCUMENT_ID,
     });
 

@@ -170,6 +170,7 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
   "integrations.configs.clearCredentials": "integration.credentials_cleared",
   "integrations.testCustoms": "integration.test_connection",
   "integrations.jobs.runNow": "job.run_now",
+  "integrations.inbox.reprocess": "integration.inbox_reprocess",
 
   // --- billing ------------------------------------------------------------
   "billing.checkout": "billing.session_opened",

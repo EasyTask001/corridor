@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. UI tasks (13, 14) must invoke the `ui-ux-pro-max` skill before touching components. Use `contextro` (`search`, `refactor_check`) before editing shared symbols.
 
-**Goal:** File and track ACE (CBP) and ACI (CBSA) e-manifests for every Corridor tenant through BorderConnect's eManifest API in Service Provider mode — one EasyTask API key, one `companyKey` per carrier organization — with a durable shared inbox, RNS/PARS release tracking, a ready-to-cross readiness rollup, and a (hosting-deferred) WebSocket listener.
+**Goal:** File and track ACE (CBP) and ACI (CBSA) e-manifests for every Corridor tenant through BorderConnect's eManifest API in Service Provider mode — one service-provider API key, one `companyKey` per carrier organization — with a durable shared inbox, RNS/PARS release tracking, a ready-to-cross readiness rollup, and a (hosting-deferred) WebSocket listener.
 
 **Architecture:** A third `CustomsClient` mode `border_connect` under `packages/integrations/src/customs/borderconnect/` (transport, ACE/ACI mappers validated against BorderConnect's vendored JSON Schemas, inbound message parser) plugs into the existing `createCustomsClient` / `customsClientFor` seam. Outbound filings go straight through `transmitMovement` / `transmitAmendment` / `cancelAtCustoms` unchanged. Inbound never goes through per-movement polling: a global `customs.borderconnect_drain` job (cron, every minute) GETs the shared queue, persists every message in a new `customs_inbox` table first, then routes each row by `companyKey → organizations.border_connect_company_key` and by `tripNumber / control number → customs_submissions / shipments`, and applies it through the existing `applyStatusMessage`. `organizations.border_connect_company_key` is a column (extend-before-add); enable/disable per regime is the existing `integration_configs` row per provider.
 
@@ -12,7 +12,7 @@
 
 ## Context
 
-Corridor already ships `mock` and a generic `gateway` customs client (0023). EasyTask's BorderConnect account is credentialed (`.env.local`: `BORDERCONNECT_API_KEY=a-33724-…`, `BORDERCONNECT_API_WEBSOCKET_URL=wss://borderconnect.com/api/sockets/<suffix>`), is a **Service Provider** account, and has a test carrier `companyKey`. The 2026-09-10 spec was approved but never implemented and made single-carrier mode a goal and Service Provider mode a non-goal; that is now reversed. BorderConnect's protocol (confirmed from the live docs + 25 PDF manuals + JSON schemas during planning) is message-oriented: `POST /api/send/{suffix}` and `GET /api/receive/{suffix}` with an `Api-Key` header; `companyKey` on every outbound message and echoed on every inbound type; `sendId` echoed only on `API_RESPONSE`; ACE status arrives inside `ACE_RESPONSE` (`processingResponse` | `validationResponses` | `tripStatus` | `shipmentStatusList`); ACI as `ACI_RESPONSE` (`ACCEPT|REJECT`) + `ACI_NOTICE`; RNS as `RNS_SHIPMENT`; service alerts as `SYSTEM_ALERT`. `operation: UPDATE|DELETE` + `autoSend:true` are confirmed for trips already on file. **The `GET /api/receive` success envelope is undocumented** and is settled by the live smoke script (Task 16) — the transport normalises defensively until then.
+Corridor already ships `mock` and a generic `gateway` customs client (0023). The approved BorderConnect test credentials are supplied only through `BORDERCONNECT_API_KEY`, `BORDERCONNECT_API_URL_SUFFIX`, and `BORDERCONNECT_TEST_COMPANY_KEY` in a private environment. The account is a **Service Provider** account. The 2026-09-10 spec was approved but never implemented and made single-carrier mode a goal and Service Provider mode a non-goal; that is now reversed. BorderConnect's protocol (confirmed from the live docs + 25 PDF manuals + JSON schemas during planning) is message-oriented: `POST /api/send/{suffix}` and `GET /api/receive/{suffix}` with an `Api-Key` header; `companyKey` on every outbound message and echoed on every inbound type; `sendId` echoed only on `API_RESPONSE`; ACE status arrives inside `ACE_RESPONSE` (`processingResponse` | `validationResponses` | `tripStatus` | `shipmentStatusList`); ACI as `ACI_RESPONSE` (`ACCEPT|REJECT`) + `ACI_NOTICE`; RNS as `RNS_SHIPMENT`; service alerts as `SYSTEM_ALERT`. `operation: UPDATE|DELETE` + `autoSend:true` are confirmed for trips already on file. **The `GET /api/receive` success envelope is undocumented** and is settled by the live smoke script (Task 16) — the transport normalises defensively until then.
 
 ## Global Constraints
 
@@ -65,10 +65,11 @@ scripts/borderconnect-smoke.ts                     live autoSend:false round-tri
 ### Task 1: Rewrite the spec to the Service-Provider design and save this plan
 
 **Files:**
+
 - Modify: `docs/superpowers/specs/2026-09-10-borderconnect-customs-adapter-design.md`
 - Create: `docs/superpowers/plans/2026-09-12-borderconnect-service-provider.md` (copy of this plan)
 
-- [ ] **Step 1: Rewrite the spec.** Keep the "Why" transport bullets, error codes, fixture-replay and testing sections. Replace: Status line → `Status: superseded 2026-09-12 — Service Provider mode, shared inbox; implemented by docs/superpowers/plans/2026-09-12-borderconnect-service-provider.md`. Non-goals: remove the Service-provider bullet and replace with "Carrier-key (non-SP) mode: not built; `companyKey` is always sent". Remove the `store.ts` / `pending_inbound` section and the "per-movement poll loop kept" non-goal; add sections **Service Provider identity** (`organizations.border_connect_company_key`; EasyTask suffix/key from env; `companyKey` on trip + every nested shipment + send requests), **Shared inbox** (`customs_inbox` grain, drain job, routing keys: `companyKey` → org; `sendId` → `customs_submissions.correlation_id`; `tripNumber` → `customs_submissions.reference_number`; `cargoControlNumber`/`shipmentControlNumber` → `shipments.control_number`; unroutable kept), **Confirmed protocol facts** (operation UPDATE/DELETE + autoSend rules verbatim from the ACE/ACI PDFs; ACE status inside `ACE_RESPONSE`; `sendId` only on `API_RESPONSE`; `GET receive` shape unconfirmed → smoke script), **Amend/cancel** (amend = full re-upload `operation: UPDATE, autoSend: true`; cancel = `ACE_SEND_REQUEST CANCEL_TRIP_AND_SHIPMENTS` / `ACI_SEND_REQUEST CANCEL, bundleTripAndShipments: true`), **RNS / SYSTEM_ALERT**, **Readiness**, **WebSocket listener (hosting deferred)**, and an updated **Open risks** list: receive envelope; ACI amendment reason codes with autoSend UPDATE; `time-zones.json` values; ACE hazmat `emergencyContact` and in-bond `irsNumber`/`fda` not captured (422 in v1); `companyKey` length (30 documented vs 32-char sample — do not hard-validate); `"FAILED"` vs `"FAILURE"`; whether an open WebSocket diverts messages from the HTTP queue.
+- [ ] **Step 1: Rewrite the spec.** Keep the "Why" transport bullets, error codes, fixture-replay and testing sections. Replace: Status line → `Status: superseded 2026-09-12 — Service Provider mode, shared inbox; implemented by docs/superpowers/plans/2026-09-12-borderconnect-service-provider.md`. Non-goals: remove the Service-provider bullet and replace with "Carrier-key (non-SP) mode: not built; `companyKey` is always sent". Remove the `store.ts` / `pending_inbound` section and the "per-movement poll loop kept" non-goal; add sections **Service Provider identity** (`organizations.border_connect_company_key`; service-provider suffix/key from env; `companyKey` on trip + every nested shipment + send requests), **Shared inbox** (`customs_inbox` grain, drain job, routing keys: `companyKey` → org; `sendId` → `customs_submissions.correlation_id`; `tripNumber` → `customs_submissions.reference_number`; `cargoControlNumber`/`shipmentControlNumber` → `shipments.control_number`; unroutable kept), **Confirmed protocol facts** (operation UPDATE/DELETE + autoSend rules verbatim from the ACE/ACI PDFs; ACE status inside `ACE_RESPONSE`; `sendId` only on `API_RESPONSE`; `GET receive` shape unconfirmed → smoke script), **Amend/cancel** (amend = full re-upload `operation: UPDATE, autoSend: true`; cancel = `ACE_SEND_REQUEST CANCEL_TRIP_AND_SHIPMENTS` / `ACI_SEND_REQUEST CANCEL, bundleTripAndShipments: true`), **RNS / SYSTEM_ALERT**, **Readiness**, **WebSocket listener (hosting deferred)**, and an updated **Open risks** list: receive envelope; ACI amendment reason codes with autoSend UPDATE; `time-zones.json` values; ACE hazmat `emergencyContact` and in-bond `irsNumber`/`fda` not captured (422 in v1); `companyKey` length (30 documented vs 32-char sample — do not hard-validate); `"FAILED"` vs `"FAILURE"`; whether an open WebSocket diverts messages from the HTTP queue.
 - [ ] **Step 2: Copy this plan** to `docs/superpowers/plans/2026-09-12-borderconnect-service-provider.md`.
 - [ ] **Step 3: Commit** `docs(customs): supersede the BorderConnect spec with the service-provider design and plan`.
 
@@ -77,11 +78,13 @@ scripts/borderconnect-smoke.ts                     live autoSend:false round-tri
 ### Task 2: Migration 0047 — mode widening, company key, truck type, `customs_inbox`, job policy
 
 **Files:**
+
 - Create: `supabase/migrations/0047_borderconnect.sql`
 - Modify: `packages/db/src/schema/integrations.ts:48,175` (mode enums; add `customsInbox`), `packages/db/src/schema/core.ts` (organizations: `borderConnectCompanyKey`), `packages/db/src/schema/registry.ts` (trucks: `truckType`)
 - Test: `packages/db/src/borderconnect.integration.test.ts`
 
 **Interfaces:**
+
 - Produces: `schema.customsInbox` (Drizzle table), `organizations.borderConnectCompanyKey: text | null`, `trucks.truckType: text` (default `'TR'`), mode enum `["mock","gateway","border_connect"]` on `integrationConfigs` and `customsSubmissions`; job type `customs.borderconnect_drain` allowed only for the service role.
 
 - [ ] **Step 1: Write the failing integration tests** (pattern: `packages/db/src/customs.integration.test.ts`, `rls.integration.test.ts` — `actorFor("owner@pathfinder.demo")`, `withRls`, `expectRlsDenied`, `withServiceRole`):
@@ -196,10 +199,12 @@ create policy background_jobs_insert on public.background_jobs for insert to aut
 ### Task 3: Extend the provider-neutral `ManifestPayload`
 
 **Files:**
+
 - Modify: `packages/integrations/src/customs/types.ts:10-114`, `packages/integrations/src/customs/manifest.ts`, `packages/api/src/services/customs.ts:243-308` (`manifestFor`), `packages/api/src/services/movements.ts:526-540` (crew projection into `FullMovement` if `dateOfBirth` is not already passed through — `crewForMovement` selects it at L420)
 - Test: `packages/integrations/src/customs/manifest.test.ts` (new)
 
 **Interfaces (Produces):**
+
 ```ts
 interface ManifestParty { name: string; address: string | null;
   postal: { line1: string | null; line2: string | null; city: string | null; region: string | null; postalCode: string | null; country: string | null } | null; }
@@ -224,19 +229,37 @@ ManifestSource mirrors each (organization.scacCode/canadianCarrierCode/timezone;
 ### Task 4: BorderConnect HTTP + fixture transport, vendored schemas
 
 **Files:**
+
 - Create: `packages/integrations/src/customs/borderconnect/transport.ts`, `transport.test.ts`, `schemas/{ace-emanifest,aci-emanifest,ace-send-request,aci-send-request,api-response,ace-response,aci-response,aci-notice,rns-shipment}-schema.json`
 - Modify: `packages/integrations/package.json` (devDependencies `ajv@^8` and `ajv-formats` — `ajv` is present only transitively at v6 via eslint, so a direct v8 dep is required; if the vendored schemas declare draft 2020-12, import from `ajv/dist/2020`. `resolveJsonModule` is already on.)
 
 **Interfaces (Produces):**
+
 ```ts
 export interface BorderConnectTransport {
-  send(message: Record<string, unknown>): Promise<{ status: string }>;   // POST /api/send/{suffix}
-  receive(): Promise<Record<string, unknown>[]>;                         // GET /api/receive/{suffix}, normalised
+  send(message: Record<string, unknown>): Promise<{ status: string }>; // POST /api/send/{suffix}
+  receive(): Promise<Record<string, unknown>[]>; // GET /api/receive/{suffix}, normalised
 }
-export interface BorderConnectHttpOptions { apiUrlSuffix: string; apiKey: string; fetchImpl?: typeof fetch; timeoutMs?: number; baseUrl?: string /* default https://borderconnect.com */ }
-export function createBorderConnectHttpTransport(o: BorderConnectHttpOptions): BorderConnectTransport;
+export interface BorderConnectHttpOptions {
+  apiUrlSuffix: string;
+  apiKey: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+  baseUrl?: string; /* default https://borderconnect.com */
+}
+export function createBorderConnectHttpTransport(
+  o: BorderConnectHttpOptions,
+): BorderConnectTransport;
 export function normaliseReceiveBody(body: unknown): Record<string, unknown>[];
-export const BORDERCONNECT_ERROR_CODES = ["MISSING_API_KEY","INVALID_API_KEY","EXPIRED_API_KEY","API_KEY_URL_MISMATCH","FAILED_TO_IMPORT_DATA","WRONG_HTTP_METHOD","TOO_MANY_REQUESTS"] as const;
+export const BORDERCONNECT_ERROR_CODES = [
+  "MISSING_API_KEY",
+  "INVALID_API_KEY",
+  "EXPIRED_API_KEY",
+  "API_KEY_URL_MISMATCH",
+  "FAILED_TO_IMPORT_DATA",
+  "WRONG_HTTP_METHOD",
+  "TOO_MANY_REQUESTS",
+] as const;
 ```
 
 - [ ] **Step 1: Vendor the schemas:** `for n in ace-emanifest aci-emanifest ace-send-request aci-send-request api-response ace-response aci-response aci-notice rns-shipment; do curl -fsSL "https://borderconnect.com/emanifest-api/manual/$n-schema.json" -o packages/integrations/src/customs/borderconnect/schemas/$n-schema.json; done` — if any 404s, note it in the README and skip that schema's ajv test.
@@ -249,33 +272,45 @@ export const BORDERCONNECT_ERROR_CODES = ["MISSING_API_KEY","INVALID_API_KEY","E
 ### Task 5: Outbound mappers — `ACE_TRIP`, `ACI_TRIP`, send requests, validation
 
 **Files:**
+
 - Create: `borderconnect/format.ts`, `code-lists.ts`, `validate.ts`, `ace.ts`, `aci.ts`, `send-request.ts`, and tests `ace.test.ts`, `aci.test.ts`, `send-request.test.ts`, `format.test.ts`
 
 **Interfaces (Produces):**
+
 ```ts
-export interface OutboundOptions { companyKey: string; sendId: string; operation: "CREATE" | "UPDATE"; autoSend: boolean;
+export interface OutboundOptions {
+  companyKey: string;
+  sendId: string;
+  operation: "CREATE" | "UPDATE";
+  autoSend: boolean;
   /** Amend/cancel must reuse the trip number already on file (customs_submissions.reference_number). */
-  tripNumberOverride?: string }
-export function tripNumberFor(m: ManifestPayload): string;                 // format.ts — see rules below
-export function bcDateTime(iso: string, timeZone: string): string;         // "yyyy-mm-dd hh:mm:ss", rounded to nearest 15 min, in timeZone
-export function toAceTrip(m: ManifestPayload, o: OutboundOptions): Record<string, unknown>;   // throws CustomsTransportError 422
+  tripNumberOverride?: string;
+}
+export function tripNumberFor(m: ManifestPayload): string; // format.ts — see rules below
+export function bcDateTime(iso: string, timeZone: string): string; // "yyyy-mm-dd hh:mm:ss", rounded to nearest 15 min, in timeZone
+export function toAceTrip(m: ManifestPayload, o: OutboundOptions): Record<string, unknown>; // throws CustomsTransportError 422
 export function toAciTrip(m: ManifestPayload, o: OutboundOptions): Record<string, unknown>;
-export function toCancelSendRequest(regime: Regime, tripNumber: string, o: Pick<OutboundOptions,"companyKey"|"sendId">): Record<string, unknown>;
-export function validateForBorderConnect(m: ManifestPayload): string[];    // list of "path: problem"; [] when valid
+export function toCancelSendRequest(
+  regime: Regime,
+  tripNumber: string,
+  o: Pick<OutboundOptions, "companyKey" | "sendId">,
+): Record<string, unknown>;
+export function validateForBorderConnect(m: ManifestPayload): string[]; // list of "path: problem"; [] when valid
 ```
 
 Rules the code must encode (from the ACE/ACI JSON reference PDFs):
+
 - `tripNumberFor`: use `m.trip.tripNumber` if it matches the regime pattern (ACE `^[A-Z]{4}[A-Z0-9]{4,21}$`, ACI `^[A-Z0-9-]{4}[A-Z0-9]{4,21}$` with O→0, I→1 normalisation on ACI); else derive `${m.carrier.code}${m.trip.movementNumber.replace(/[^A-Za-z0-9]/g,"").toUpperCase()}`; if that also fails the pattern → 422 `trip.tripNumber: must start with the carrier code and be 8–25 alphanumerics`.
 - `bcDateTime`: `Intl.DateTimeFormat("en-CA", {timeZone, hourCycle:"h23", …})` parts → `YYYY-MM-DD HH:mm:ss`, minutes rounded to nearest 15 (carry over to the hour/day). Fetch `https://borderconnect.com/data/time-zones.json` while implementing: if its codes are IANA names, also send `estimatedArrivalTimeZone: m.carrier.timezone`; if not, omit the field and note the list in the README.
 - Ports: `usPortOfArrival` / `portOfEntry` = `m.trip.portOfEntry.padStart(4,"0")`.
 - ACE truck: `{ number: unitNumber, type: truckType, vinNumber: vin (422 if null), licensePlates: [{number: plate, stateProvince: plateJurisdiction}, …plates].slice(0,2), sealNumbers, dotNumber? }`; trailers: `{ number, type, licensePlates: [...], sealNumbers }` — fetch `https://borderconnect.com/data/trailer-types.json` and map `equipment_types.code` (TF/FT/TK…) onto it in `code-lists.ts` (422 on an unmapped code). ACI truck uses singular `licensePlate` and `type`/`vinNumber` optional.
-- Drivers: crew with role `person_in_charge` / `crew_member` → `{ firstName, lastName, gender (only "M"/"F"; "X" omitted), dateOfBirth, citizenshipCountry: citizenship, fastCardNumber: first document of type "fast" whose number matches `^4270[0-9]{8}0[12]$`, travelDocuments: documents mapped through a `DriverDocumentType → travel-document-types.json` table in `code-lists.ts` (fetch the list; unmapped types omitted) }`. ACE requires ≥1 driver (422). Passengers (role `passenger`) → ACE `passengers[]` requires gender, dateOfBirth, citizenshipCountry, travelDocuments — 422 listing the missing ones. Never emit `primaryEmail` / `secondaryEmail` objects.
-- ACE shipments: `type` from `code-lists.ACE_SHIPMENT_TYPES` — the domain values are `ACE_SHIPMENT_TYPES` in `packages/domain` (`regular_bill`, `section_321`, `goods_astray`, `in_bond`, … — read the array, not the SQL): `regular_bill`→`PAPS`, `goods_astray`→`GOODS_ASTRAY`, `in_bond`→`IN_BOND`, and every other value 422 with "no BorderConnect shipment type for <value>" until confirmed. Packaging: `commodities.packaging_type` / `quantity_unit` hold CBP *names* ("Box"), not codes — map name → code case-insensitively through the vendored `packaging-unit.json` (`name` field), 422 when unmatched. `shipmentControlNumber` = `controlNumber` (pattern `^[A-Z]{4}[A-Z0-9]{4,12}$`, 422). `provinceOfLoading` = `loading.province` (422 if null). `shipper`/`consignee` = `{ name, address: { addressLine: [line1,line2].filter(Boolean).join(" "), city, postalCode, stateProvince: region, country } }` — name, addressLine, city, postalCode 422 if null. `commodities[]` = `{ description, quantity (422 if null), packagingUnit: packagingType (422 if null or not in `code-lists.ACE_PACKAGING_UNITS`), weight: weightKg (422 if null), weightUnit: "KG", marksAndNumbers: [s] if set, harmonizedCode: hsCode?, value?, countryOfOrigin? }`. Hazmat lines → 422 `commodities[j].hazmat: BorderConnect requires an emergency contact Corridor does not capture yet`. `shipmentType === in_bond` → 422 `inBond: irsNumber/fda not captured yet` (v1). `iitIndicator` → `instrumentsOfInternationalTrafficBond: { type: "CARRIER" | "IMPORTER" }`, omitted when `none`.
-- ACI shipments: `shipmentType` via `code-lists.ACI_SHIPMENT_TYPES`: `isPars` is not on the payload — use `controlNumber.includes("PARS")` **or** `cargoType`: `csa`→`CSA`, `a49`→`A49`, `e29b`→`E29B`, `shipmentType in_bond`→`BOND`, `consolidated`→`PARS` + `consolidatedFreight: true`, `regular` with a PARS control number →`PARS`, otherwise 422 `shipmentType: a plain non-PARS ACI shipment has no confirmed BorderConnect type (open risk)`. `cargoControlNumber` = `controlNumber`; `portOfEntry` + `releaseOffice` = trip port; `estimatedArrivalDate` = trip ETA; `cityOfLoading: { cityName: loading.city, stateProvince: loading.province }` (422 if either null); `shipper`/`consignee` as ACE; `deliveryDestinations: [{ name: consignee.name, address }]` when `delivery` postal is set; commodities as ACE but `marksAndNumbers` is a string and `packagingUnit` from `ACI_PACKAGING_UNITS`. Any of `m.trip.aci.{lvs,postal,flyingTruck,inTransit,iit}` true → 422 `trip.aci.<flag>: not representable in the BorderConnect eManifest API`.
+- Drivers: crew with role `person_in_charge` / `crew_member` → `{ firstName, lastName, gender (only "M"/"F"; "X" omitted), dateOfBirth, citizenshipCountry: citizenship, fastCardNumber: first document of type "fast" whose number matches `^4270[0-9]{8}0[12]$`, travelDocuments: documents mapped through a `DriverDocumentType → travel-document-types.json`table in`code-lists.ts` (fetch the list; unmapped types omitted) }`. ACE requires ≥1 driver (422). Passengers (role `passenger`) → ACE `passengers[]` requires gender, dateOfBirth, citizenshipCountry, travelDocuments — 422 listing the missing ones. Never emit `primaryEmail` / `secondaryEmail` objects.
+- ACE shipments: `type` from `code-lists.ACE_SHIPMENT_TYPES` — the domain values are `ACE_SHIPMENT_TYPES` in `packages/domain` (`regular_bill`, `section_321`, `goods_astray`, `in_bond`, … — read the array, not the SQL): `regular_bill`→`PAPS`, `goods_astray`→`GOODS_ASTRAY`, `in_bond`→`IN_BOND`, and every other value 422 with "no BorderConnect shipment type for <value>" until confirmed. Packaging: `commodities.packaging_type` / `quantity_unit` hold CBP _names_ ("Box"), not codes — map name → code case-insensitively through the vendored `packaging-unit.json` (`name` field), 422 when unmatched. `shipmentControlNumber` = `controlNumber` (pattern `^[A-Z]{4}[A-Z0-9]{4,12}$`, 422). `provinceOfLoading` = `loading.province` (422 if null). `shipper`/`consignee` = `{ name, address: { addressLine: [line1,line2].filter(Boolean).join(" "), city, postalCode, stateProvince: region, country } }` — name, addressLine, city, postalCode 422 if null. `commodities[]` = `{ description, quantity (422 if null), packagingUnit: packagingType (422 if null or not in `code-lists.ACE_PACKAGING_UNITS`), weight: weightKg (422 if null), weightUnit: "KG", marksAndNumbers: [s] if set, harmonizedCode: hsCode?, value?, countryOfOrigin? }`. Hazmat lines → 422 `commodities[j].hazmat: BorderConnect requires an emergency contact Corridor does not capture yet`. `shipmentType === in_bond` → 422 `inBond: irsNumber/fda not captured yet` (v1). `iitIndicator` → `instrumentsOfInternationalTrafficBond: { type: "CARRIER" | "IMPORTER" }`, omitted when `none`.
+- ACI shipments: `shipmentType` via `code-lists.ACI_SHIPMENT_TYPES`: `isPars` is not on the payload — use `controlNumber.includes("PARS")` **or** `cargoType`: `csa`→`CSA`, `a49`→`A49`, `e29b`→`E29B`, `shipmentType in_bond`→`BOND`, `consolidated`→`PARS` + `consolidatedFreight: true`, `regular` with a PARS control number →`PARS`, otherwise 422 `shipmentType: a plain non-PARS ACI shipment has no confirmed BorderConnect type (open risk)`. `cargoControlNumber` = `controlNumber`; `portOfEntry` + `releaseOffice` = trip port; `estimatedArrivalDateTime` = trip ETA; `cityOfLoading: { cityName: loading.city, stateProvince: loading.province }` (422 if either null); `shipper`/`consignee` as ACE; `deliveryDestinations: [{ name: consignee.name, address }]` when `delivery` postal is set; commodities as ACE but `marksAndNumbers` is a string and `packagingUnit` from `ACI_PACKAGING_UNITS`. Any of `m.trip.aci.{lvs,postal,flyingTruck,inTransit,iit}` true → 422 `trip.aci.<flag>: not representable in the BorderConnect eManifest API`.
 - Both: top-level `data`, `sendId`, `companyKey`, `operation`, `autoSend`, `tripNumber`, ETA; `companyKey` also on every nested shipment; nested `ACE_SHIPMENT`/`ACI_SHIPMENT` never carries its own `operation`.
 - `toCancelSendRequest`: ACE `{ data: "ACE_SEND_REQUEST", type: "CANCEL_TRIP_AND_SHIPMENTS", tripNumber, companyKey, sendId }`; ACI `{ data: "ACI_SEND_REQUEST", type: "CANCEL", bundleTripAndShipments: true, tripNumber, companyKey, sendId }`.
 
-- [ ] **Step 1: Write the tests.** `format.test.ts` (tripNumber derivation and rejection; `bcDateTime` rounding 14:37→14:30, 14:38→14:45, 23:53→next day 00:00, timezone). `ace.test.ts`: a full valid ACE manifest (reuse `makeSource()` from Task 3 through `buildManifest`) → `toAceTrip` output validates with ajv against `schemas/ace-emanifest-schema.json` (`new Ajv({ strict: false, allErrors: true })`), snapshot the shape; `companyKey on trip and every shipment`; `operation/autoSend passthrough`; each 422 rule above has one test asserting the error lists *all* missing fields at once (e.g. remove vin **and** provinceOfLoading → both named). `aci.test.ts` same against `aci-emanifest-schema.json` plus the shipment-type table and the ACI-flag 422. `send-request.test.ts` validates both cancel requests against their schemas.
+- [ ] **Step 1: Write the tests.** `format.test.ts` (tripNumber derivation and rejection; `bcDateTime` rounding 14:37→14:30, 14:38→14:45, 23:53→next day 00:00, timezone). `ace.test.ts`: a full valid ACE manifest (reuse `makeSource()` from Task 3 through `buildManifest`) → `toAceTrip` output validates with ajv against `schemas/ace-emanifest-schema.json` (`new Ajv({ strict: false, allErrors: true })`), snapshot the shape; `companyKey on trip and every shipment`; `operation/autoSend passthrough`; each 422 rule above has one test asserting the error lists _all_ missing fields at once (e.g. remove vin **and** provinceOfLoading → both named). `aci.test.ts` same against `aci-emanifest-schema.json` plus the shipment-type table and the ACI-flag 422. `send-request.test.ts` validates both cancel requests against their schemas.
 - [ ] **Step 2: Run** → FAIL. **Step 3: Implement** `format.ts`, `code-lists.ts` (fetch and vendor the small lists as `as const` arrays with the source URL in a comment), `validate.ts` (collects problems; `toAceTrip`/`toAciTrip` call it and throw `new CustomsTransportError(`BorderConnect: manifest is missing ${problems.length} required field(s): ${problems.join("; ")}`, 422, false)`), then the mappers.
 - [ ] **Step 4: Run** `pnpm --filter @corridor/integrations test -- borderconnect` → PASS; `pnpm typecheck && pnpm lint`.
 - [ ] **Step 5: Commit** `feat(integrations): map ManifestPayload to BorderConnect ACE_TRIP / ACI_TRIP with schema-validated tests`.
@@ -285,52 +320,92 @@ Rules the code must encode (from the ACE/ACI JSON reference PDFs):
 ### Task 6: Inbound parser and the new customs event codes
 
 **Files:**
+
 - Modify: `packages/domain/src/customs-events.ts:8-34`
 - Create: `borderconnect/inbound.ts`, `inbound.test.ts`, `fixtures/inbound/*.json`
 
 **Interfaces (Produces):**
+
 ```ts
 // packages/domain
-CUSTOMS_EVENT_CODES += "pars_matched" | "pars_not_matched" | "review_time_warning" | "csa_reported" | "import_error" | "entry_number_assigned"
+CUSTOMS_EVENT_CODES +=
+  "pars_matched" |
+  "pars_not_matched" |
+  "review_time_warning" |
+  "csa_reported" |
+  "import_error" |
+  "entry_number_assigned";
 // borderconnect/inbound.ts
 export type BorderConnectInbound =
-  | { kind: "api_response"; companyKey: string | null; sendId: string | null; ok: boolean; status: string; message: string; errors: string[]; tripNumber: string | null; raw }
-  | { kind: "customs_status"; companyKey: string | null; keys: { tripNumber?: string; cargoControlNumber?: string; shipmentControlNumber?: string }; status: CustomsStatusMessage /* referenceNumber = tripNumber or "" */; raw }
-  | { kind: "rns"; cargoControlNumber: string; transactionNumber: string | null; releaseCode: string | null; releaseName: string | null; releasedAt: string; officeCode: string | null; raw }
+  | {
+      kind: "api_response";
+      companyKey: string | null;
+      sendId: string | null;
+      ok: boolean;
+      status: string;
+      message: string;
+      errors: string[];
+      tripNumber: string | null;
+      raw;
+    }
+  | {
+      kind: "customs_status";
+      companyKey: string | null;
+      keys: { tripNumber?: string; cargoControlNumber?: string; shipmentControlNumber?: string };
+      status: CustomsStatusMessage /* referenceNumber = tripNumber or "" */;
+      raw;
+    }
+  | {
+      kind: "rns";
+      cargoControlNumber: string;
+      transactionNumber: string | null;
+      releaseCode: string | null;
+      releaseName: string | null;
+      releasedAt: string;
+      officeCode: string | null;
+      raw;
+    }
   | { kind: "alert"; message: string; raw }
   | { kind: "unknown"; dataType: string; companyKey: string | null; raw };
 export function parseInbound(msg: unknown): BorderConnectInbound;
-export function inboundKeys(msg: unknown): { dataType: string; companyKey: string|null; sendId: string|null; tripNumber: string|null; cargoControlNumber: string|null; shipmentControlNumber: string|null };
+export function inboundKeys(msg: unknown): {
+  dataType: string;
+  companyKey: string | null;
+  sendId: string | null;
+  tripNumber: string | null;
+  cargoControlNumber: string | null;
+  shipmentControlNumber: string | null;
+};
 ```
 
 Mapping table (encode as data, one test per row):
 
-| Message | → `status` / `decision` | events (code) |
-|---|---|---|
-| `API_RESPONSE` status OK/QUEUED/IMPORTED/TRANSMITTED/COMPLETED | `ok: true` (submission → `acknowledged`) | — |
-| `API_RESPONSE` DATA_ERROR/SEND_ERROR/SYNC_ERROR/ACCESS_DENIED_ERROR/IMPORTED_WITH_ERRORS/PROCESSED_WITH_ERRORS | `ok: false` → `rejected`, message = `errors[].identifier: note` joined | `import_error` |
-| `ACE_RESPONSE.validationResponses[]` non-empty | `rejected` | `rejected` per entry (`code – description`) |
-| `ACE_RESPONSE.processingResponse` (no validation errors) | `accepted` | `accepted` |
-| `ACE_RESPONSE.tripStatus` AAD/19 | decision `null`, events only | `arrival_recorded` |
-| tripStatus RTR / RCO | `released` | `released` |
-| tripStatus HTR | `held` | `held` |
-| `ACE_RESPONSE.shipmentStatusList[]` 02/05 (+entryNumber) | events only | `entry_on_file` (shipmentControlNumber, entryNumber, port) |
-| 1C | events only; `shipments[]` status `released` | `entered_and_released` |
-| 1G/1H | `held` | `held` |
-| 11/12/13/19 | events only | `arrival_recorded` |
-| 1D | events only | `entry_on_file` |
-| other codes | events only | `preliminary_check_passed` with raw code/description in `raw` |
-| `ACI_RESPONSE` type ACCEPT | `accepted` | `accepted` |
-| `ACI_RESPONSE` type REJECT | `rejected`, message = `errorResponses[].errorCode errorField: errorDescription/errorText` | `rejected` |
-| `ACI_NOTICE` ARRIVAL_REPORTED | events only | `arrival_recorded` (one per `references[]` CCN, or trip-level) |
-| MATCHED | events only | `pars_matched` |
-| NOT_MATCHED | events only | `pars_not_matched` |
-| CSA_REPORTED | events only | `csa_reported` |
-| INSUFFICIENT_REVIEW_TIME_WARNING | events only | `review_time_warning` |
-| `RNS_SHIPMENT` | `kind: "rns"` | (handled in Task 11) |
-| `SYSTEM_ALERT` | `kind: "alert"` | — |
+| Message                                                                                                        | → `status` / `decision`                                                                   | events (code)                                                  |
+| -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `API_RESPONSE` status OK/QUEUED/IMPORTED/TRANSMITTED/COMPLETED                                                 | `ok: true` (submission → `acknowledged`)                                                  | —                                                              |
+| `API_RESPONSE` DATA_ERROR/SEND_ERROR/SYNC_ERROR/ACCESS_DENIED_ERROR/IMPORTED_WITH_ERRORS/PROCESSED_WITH_ERRORS | `ok: false` → `rejected`, message = `errors[].identifier: note` joined                    | `import_error`                                                 |
+| `ACE_RESPONSE.validationResponses[]` non-empty                                                                 | `rejected`                                                                                | `rejected` per entry (`code – description`)                    |
+| `ACE_RESPONSE.processingResponse` (no validation errors)                                                       | `accepted`                                                                                | `accepted`                                                     |
+| `ACE_RESPONSE.tripStatus` AAD/19                                                                               | decision `null`, events only                                                              | `arrival_recorded`                                             |
+| tripStatus RTR / RCO                                                                                           | `released`                                                                                | `released`                                                     |
+| tripStatus HTR                                                                                                 | `held`                                                                                    | `held`                                                         |
+| `ACE_RESPONSE.shipmentStatusList[]` 02/05 (+entryNumber)                                                       | events only                                                                               | `entry_on_file` (shipmentControlNumber, entryNumber, port)     |
+| 1C                                                                                                             | events only; `shipments[]` status `released`                                              | `entered_and_released`                                         |
+| 1G/1H                                                                                                          | `held`                                                                                    | `held`                                                         |
+| 11/12/13/19                                                                                                    | events only                                                                               | `arrival_recorded`                                             |
+| 1D                                                                                                             | events only                                                                               | `entry_on_file`                                                |
+| other codes                                                                                                    | events only                                                                               | `preliminary_check_passed` with raw code/description in `raw`  |
+| `ACI_RESPONSE` type ACCEPT                                                                                     | `accepted`                                                                                | `accepted`                                                     |
+| `ACI_RESPONSE` type REJECT                                                                                     | `rejected`, message = `errorResponses[].errorCode errorField: errorDescription/errorText` | `rejected`                                                     |
+| `ACI_NOTICE` ARRIVAL_REPORTED                                                                                  | events only                                                                               | `arrival_recorded` (one per `references[]` CCN, or trip-level) |
+| MATCHED                                                                                                        | events only                                                                               | `pars_matched`                                                 |
+| NOT_MATCHED                                                                                                    | events only                                                                               | `pars_not_matched`                                             |
+| CSA_REPORTED                                                                                                   | events only                                                                               | `csa_reported`                                                 |
+| INSUFFICIENT_REVIEW_TIME_WARNING                                                                               | events only                                                                               | `review_time_warning`                                          |
+| `RNS_SHIPMENT`                                                                                                 | `kind: "rns"`                                                                             | (handled in Task 11)                                           |
+| `SYSTEM_ALERT`                                                                                                 | `kind: "alert"`                                                                           | —                                                              |
 
-- [ ] **Step 1: Save fixture messages** under `fixtures/inbound/` — one JSON per row above, built from the examples in the ACE/ACI Response, ACI Notice, API Response and RNS Shipment PDFs (companyKey `c-9000-2bcd8ae5954e0c48`, tripNumber `ABCD260912001`, CCN `1234PARS0001`).
+- [ ] **Step 1: Save fixture messages** under `fixtures/inbound/` — one JSON per row above, built from the examples in the ACE/ACI Response, ACI Notice, API Response and RNS Shipment PDFs using clearly synthetic routing identifiers.
 - [ ] **Step 2: Write `inbound.test.ts`**: one `it` per table row loading its fixture and asserting `kind`, `status.status`, `status.decision`, event codes, `shipments[]`, keys; plus `unknown data type is preserved`, `missing data field → unknown`, `companyKey null when absent`.
 - [ ] **Step 3: Run** → FAIL. **Step 4: Implement** `customs-events.ts` (codes + labels: "PARS matched", "PARS not matched", "Insufficient review time", "CSA reported", "Import error", "Entry number assigned") and `inbound.ts` (pure functions, `occurredAt` from `cbpDateTime`/`cbsaDateTime`/`dateTime` → ISO).
 - [ ] **Step 5: Run** `pnpm --filter @corridor/domain test && pnpm --filter @corridor/integrations test -- inbound` → PASS. **Step 6: Commit** `feat(integrations): parse BorderConnect inbound messages into customs status events`.
@@ -340,22 +415,35 @@ Mapping table (encode as data, one test per row):
 ### Task 7: `createBorderConnectCustomsClient`, fixture replay, wiring into `createCustomsClient`
 
 **Files:**
+
 - Create: `borderconnect/client.ts`, `client.test.ts`, `fixtures/outcomes/{ace,aci}-{accepted,held,rejected}.json`, `README.md`
 - Modify: `packages/integrations/src/customs/types.ts:195` (`CustomsClientMode`), `index.ts:34-66` (+ exports), `fixture-state.ts` (new store `borderConnectQueue`)
 
 **Interfaces (Produces):**
+
 ```ts
 export interface BorderConnectClientOptions {
-  provider: "cbp_ace" | "cbsa_aci"; environment?: "sandbox" | "production";
-  apiUrlSuffix: string | null; apiKey: string | null; companyKey: string | null;
-  transport?: BorderConnectTransport; now?: () => Date; tenantKey: string;
+  provider: "cbp_ace" | "cbsa_aci";
+  environment?: "sandbox" | "production";
+  apiUrlSuffix: string | null;
+  apiKey: string | null;
+  companyKey: string | null;
+  transport?: BorderConnectTransport;
+  now?: () => Date;
+  tenantKey: string;
 }
-export function createBorderConnectCustomsClient(o: BorderConnectClientOptions): CustomsClient & { readonly live: boolean };
-export function createFixtureBorderConnectTransport(tenantKey: string, now: () => Date): BorderConnectTransport;
+export function createBorderConnectCustomsClient(
+  o: BorderConnectClientOptions,
+): CustomsClient & { readonly live: boolean };
+export function createFixtureBorderConnectTransport(
+  tenantKey: string,
+  now: () => Date,
+): BorderConnectTransport;
 // index.ts: createCustomsClient input gains { apiUrlSuffix?: string|null; companyKey?: string|null }; mode "border_connect" branch.
 ```
 
 Behaviour:
+
 - `live = !!(apiUrlSuffix && apiKey)`; transport = `opts.transport ?? (live ? http : fixture)`.
 - `transmit(manifest, {correlationId})`: `sendId = correlationId ?? randomUUID()`; `companyKey` 422 if null **and live**; body = `toAceTrip|toAciTrip(manifest, {companyKey: companyKey ?? "fixture", sendId, operation: "CREATE", autoSend: true})`; `await transport.send(body)`; return `{ referenceNumber: tripNumber, receivedAt: now().toISOString(), decisionEtaMs: 0, raw: { borderConnect: true, live, sendId, status } }`. (`decisionEtaMs` is unused in this mode — Task 8 stops scheduling.)
 - `amend(manifest, referenceNumber, opts)`: same with `operation: "UPDATE"` and `tripNumberOverride: referenceNumber` (Task 5's `OutboundOptions`), so the re-upload targets the trip already on file.
@@ -367,14 +455,22 @@ Behaviour:
 
 - [ ] **Step 1: Write `client.test.ts`** (pattern `gateway/client.test.ts`; `beforeEach(clearCustomsFixtureState)`): transmit returns tripNumber as reference and raw.sendId; fixture receive yields IMPORTED + accepted for a normal control number, rejected for `…R`, held for `…H`; amend sends `operation: "UPDATE"` with the original tripNumber; cancel sends the right send-request per regime; every unsupported method throws `CustomsTransportError` 501 (one test iterating the seven names — so a future edit cannot quietly succeed with a wrong mapping); `live` client with injected transport sends `companyKey` from options and refuses to transmit with `companyKey: null` (422); `createCustomsClient({mode:"border_connect"})` returns a client with `mode === "border_connect"`.
 - [ ] **Step 2: Run** → FAIL. **Step 3: Implement** client, fixture transport, `CustomsClientMode = "mock" | "gateway" | "border_connect"`, `index.ts` branch:
+
 ```ts
 if (input.mode === "border_connect") {
-  return createBorderConnectCustomsClient({ provider, environment: input.environment ?? "sandbox",
-    apiUrlSuffix: input.apiUrlSuffix ?? null, apiKey: input.apiKey ?? null,
-    companyKey: input.companyKey ?? null, tenantKey: input.tenantKey });
+  return createBorderConnectCustomsClient({
+    provider,
+    environment: input.environment ?? "sandbox",
+    apiUrlSuffix: input.apiUrlSuffix ?? null,
+    apiKey: input.apiKey ?? null,
+    companyKey: input.companyKey ?? null,
+    tenantKey: input.tenantKey,
+  });
 }
 ```
+
 and exports (`createBorderConnectCustomsClient`, `createBorderConnectHttpTransport`, `normaliseReceiveBody`, `parseInbound`, `inboundKeys`, `toAceTrip`, `toAciTrip`, `toCancelSendRequest`, `type BorderConnectInbound`, `type BorderConnectTransport`).
+
 - [ ] **Step 4: README.md** — mode selection, env vars, message flow diagram (send → API_RESPONSE → ACE/ACI_RESPONSE → inbox), fixture suffix table, the open-risk list from Task 1.
 - [ ] **Step 5: Run** `pnpm typecheck && pnpm lint && pnpm test` → PASS (the literal `"gateway"` assertions in `gateway/client.test.ts:59`, `customs.test.ts:179,219`, `customs.integration.test.ts:113` are unaffected). **Step 6: Commit** `feat(integrations): border_connect customs client with offline fixture replay`.
 
@@ -383,24 +479,38 @@ and exports (`createBorderConnectCustomsClient`, `createBorderConnectHttpTranspo
 ### Task 8: API wiring — `customsClientFor`, no per-movement polling, router enum
 
 **Files:**
+
 - Modify: `packages/api/src/services/customs.ts:129-178` (`customsClientFor`), `:218-241` (`scheduleDecision`), `packages/api/src/router/integrations.ts:70` (`mode` enum), `packages/api/src/services/notices.ts` (no change — env-level notices client stays `gateway|mock`)
 - Test: `packages/api/src/services/customs.test.ts`
 
 - [ ] **Step 1: Tests** (use `createFakeDb` / `TEST_ORG_ID` from `../test/mock-context` as the existing `pollCustomsStatus` tests do): `customsClientFor returns a border_connect client carrying the org's company key and the env suffix/key`; `in production with mode border_connect and no company key → PRECONDITION_FAILED "BorderConnect company key is not set"`; `in sandbox with no BORDERCONNECT_API_KEY the client is not live (fixture)`; `scheduleDecision enqueues nothing for a border_connect client` (spy `enqueueJob`); `transmitMovement in border_connect mode records a customs_submissions row with mode border_connect and status acknowledged` (existing transmit test scaffold).
 - [ ] **Step 2: Run** → FAIL. **Step 3: Implement:**
+
 ```ts
 // customsClientFor
 const mode = cfg?.mode ?? "mock";
-const org = mode === "border_connect"
-  ? (await tx.select({ companyKey: schema.organizations.borderConnectCompanyKey }).from(schema.organizations).where(eq(schema.organizations.id, orgId)).limit(1))[0]
-  : undefined;
+const org =
+  mode === "border_connect"
+    ? (
+        await tx
+          .select({ companyKey: schema.organizations.borderConnectCompanyKey })
+          .from(schema.organizations)
+          .where(eq(schema.organizations.id, orgId))
+          .limit(1)
+      )[0]
+    : undefined;
 if (mode === "border_connect" && environment === "production" && !org?.companyKey)
-  throw new TRPCError({ code: "PRECONDITION_FAILED", message: "BorderConnect company key is not set for this organization (Settings → Organization)" });
+  throw new TRPCError({
+    code: "PRECONDITION_FAILED",
+    message: "BorderConnect company key is not set for this organization (Settings → Organization)",
+  });
 // createCustomsClient({...existing, apiUrlSuffix: process.env.BORDERCONNECT_API_URL_SUFFIX ?? null,
 //   apiKey: mode === "border_connect" ? (process.env.BORDERCONNECT_API_KEY ?? null) : <existing expression>,
 //   companyKey: org?.companyKey ?? null })
 ```
-Keep the existing `gateway` credential/baseUrl gates untouched, but the Vault read at L149-152 (`(mode === "gateway" || environment === "production") && cfg?.credentialsRef`) must **not** run for `border_connect` — the key is EasyTask's, from env, never per-org Vault: `mode !== "border_connect" && (…existing condition…)`. `scheduleDecision` currently has an `else` arm that enqueues `customs.decide` for every non-gateway mode (L233-239) — that handler calls `fetchDecision`, which throws in this mode — so add an explicit first arm: `if (client.mode === "border_connect") return;` with a one-line comment "status arrives through customs.borderconnect_drain". Router: `mode: z.enum(["mock", "gateway", "border_connect"])`; when `mode === "border_connect"` force `baseUrl: null` server-side.
+
+Keep the existing `gateway` credential/baseUrl gates untouched, but the Vault read at L149-152 (`(mode === "gateway" || environment === "production") && cfg?.credentialsRef`) must **not** run for `border_connect` — the Service Provider key is deployment-wide, from env, never per-org Vault: `mode !== "border_connect" && (…existing condition…)`. `scheduleDecision` currently has an `else` arm that enqueues `customs.decide` for every non-gateway mode (L233-239) — that handler calls `fetchDecision`, which throws in this mode — so add an explicit first arm: `if (client.mode === "border_connect") return;` with a one-line comment "status arrives through customs.borderconnect_drain". Router: `mode: z.enum(["mock", "gateway", "border_connect"])`; when `mode === "border_connect"` force `baseUrl: null` server-side.
+
 - [ ] **Step 4: Run** `pnpm --filter @corridor/api test && pnpm typecheck && pnpm lint` → PASS. **Step 5: Commit** `feat(api): file through BorderConnect when an organization's customs mode is border_connect`.
 
 ---
@@ -408,13 +518,21 @@ Keep the existing `gateway` credential/baseUrl gates untouched, but the Vault re
 ### Task 9: `applyStatusMessage` events-only branch
 
 **Files:**
+
 - Modify: `packages/api/src/services/movements.ts:120-190` (extract `recordCustomsEvents`), `packages/api/src/services/customs.ts:608-665` (`applyStatusMessage`)
 - Test: `packages/api/src/services/customs.test.ts` (`applyStatusMessage` block at L118)
 
 **Interfaces (Produces):**
+
 ```ts
 // movements.ts
-export async function recordCustomsEvents(tx: Tx, actor: Actor, m: MovementRow, events: CustomsEventMessage[], outcomes: CustomsShipmentMessage[]): Promise<void>;
+export async function recordCustomsEvents(
+  tx: Tx,
+  actor: Actor,
+  m: MovementRow,
+  events: CustomsEventMessage[],
+  outcomes: CustomsShipmentMessage[],
+): Promise<void>;
 // = the body of applyShipmentOutcomes minus the decision-driven status cascade; applyShipmentOutcomes calls it then cascades.
 ```
 
@@ -427,19 +545,44 @@ export async function recordCustomsEvents(tx: Tx, actor: Actor, m: MovementRow, 
 ### Task 10: The inbox drain — service, job, cron route, Test-connection
 
 **Files:**
+
 - Create: `packages/api/src/services/borderconnect.ts`, `packages/api/src/services/borderconnect.test.ts`, `apps/web/src/app/api/jobs/borderconnect-drain/route.ts`
 - Modify: `packages/api/src/services/jobs.ts:34-43` (JobType), `:169-277` (detached handler), `apps/web/vercel.json` (cron `* * * * *`), `packages/api/src/router/integrations.ts:199-229` (`testCustoms`), `packages/api/src/index.ts` exports if the route needs `drainBorderConnectInbox`
 - Test: `packages/api/src/jobs.integration.test.ts` (detached-handler assertion like L295), `packages/db/src/customs.integration.test.ts` (nobody but service role enqueues `customs.borderconnect_drain`)
 
 **Interfaces (Produces):**
+
 ```ts
-export function borderConnectEnv(): { apiUrlSuffix: string | null; apiKey: string | null; live: boolean };
-export async function storeInboundMessages(tx: RlsTransaction, messages: Record<string, unknown>[]): Promise<{ stored: number; duplicates: number }>;  // sha256(JSON.stringify(msg)) → payload_sha256, onConflictDoNothing; fills data_type + keys via inboundKeys()
-export async function processInboxRow(db: DatabaseClient, rowId: number): Promise<{ outcome: "applied" | "acknowledged" | "unroutable" | "ignored" | "rns" | "alert"; detail?: string }>;
-export async function drainBorderConnectInbox(db: DatabaseClient, opts?: { transport?: BorderConnectTransport; limit?: number }): Promise<{ received: number; stored: number; duplicates: number; processed: Record<string, number>; errors: number }>;
+export function borderConnectEnv(): {
+  apiUrlSuffix: string | null;
+  apiKey: string | null;
+  live: boolean;
+};
+export async function storeInboundMessages(
+  tx: RlsTransaction,
+  messages: Record<string, unknown>[],
+): Promise<{ stored: number; duplicates: number }>; // sha256(JSON.stringify(msg)) → payload_sha256, onConflictDoNothing; fills data_type + keys via inboundKeys()
+export async function processInboxRow(
+  db: DatabaseClient,
+  rowId: number,
+): Promise<{
+  outcome: "applied" | "acknowledged" | "unroutable" | "ignored" | "rns" | "alert";
+  detail?: string;
+}>;
+export async function drainBorderConnectInbox(
+  db: DatabaseClient,
+  opts?: { transport?: BorderConnectTransport; limit?: number },
+): Promise<{
+  received: number;
+  stored: number;
+  duplicates: number;
+  processed: Record<string, number>;
+  errors: number;
+}>;
 ```
 
 Routing inside `processInboxRow` (one `withServiceRole` transaction per row; on throw: `processing_error = message`, `processed_at` **stays null** so the next drain retries, but after 5 failures (`processing_error` prefixed with `attempt=N`) mark processed with the error to avoid poison rows):
+
 1. `parsed = parseInbound(row.payload)`. `alert` → Task 11. `rns` → Task 11.
 2. `org` = `organizations where border_connect_company_key = row.company_key`. None → `processed_at = now(), processing_error = "unknown companyKey"`, outcome `unroutable`.
 3. `api_response`: submission = `customs_submissions where organization_id = org and correlation_id = sendId` (fallback: `reference_number = tripNumber`, latest). None → unroutable. `ok` → `status = "acknowledged"` (only if currently `sent`/`acknowledged`), outcome `acknowledged`. Not ok → load the movement (`requireMovement`), `applyStatusMessage(tx, {orgId, userId:null}, m, { referenceNumber: submission.reference_number, status: "rejected", decision: "rejected", message, events: [import_error], shipments: [], raw })` → outcome `applied`.
@@ -449,6 +592,7 @@ Routing inside `processInboxRow` (one `withServiceRole` transaction per row; on 
 `drainBorderConnectInbox`: phase A (no tx) `transport.receive()`; phase B `withServiceRole(storeInboundMessages)`; phase C select `id from customs_inbox where processed_at is null order by id limit 200` and `processInboxRow` each; `logIntegrationEvent` is per-row (org-scoped), so the drain itself logs nothing global — return counts. When `!borderConnectEnv().live` and no transport injected, use `createFixtureBorderConnectTransport("system", …)` so local dev end-to-end works (transmit → fixture queue → drain → accepted).
 
 Job + route:
+
 ```ts
 // jobs.ts
 | "customs.borderconnect_drain"
@@ -456,6 +600,7 @@ Job + route:
 // route.ts (mirror notices-sync): enqueueJob({ orgId: null, jobType: "customs.borderconnect_drain", payload: {}, idempotencyKey: `bc-drain:${new Date().toISOString().slice(0,16)}`, maxAttempts: 2 }) then processDueJobs(db, { limit: 5, worker: "cron-borderconnect" })
 // vercel.json: { "path": "/api/jobs/borderconnect-drain", "schedule": "* * * * *" }
 ```
+
 `testCustoms`: if the org's config mode is `border_connect`, run `drainBorderConnectInbox(ctx.db)` **outside** `ctx.rls` — `withServiceRole` must never be opened inside an RLS transaction (`packages/db/src/rls.ts:61-70`); follow the `jobs.runNow` shape at `router/integrations.ts:316-330`: read the config in one `ctx.rls`, drain on `ctx.db`, then audit in a second `ctx.rls`. Messages are stored, never discarded, so this is safe to click. Return `{ ok: true, mode: "border_connect", live, detail: { received, stored } }`.
 
 - [ ] **Step 1: Tests (`borderconnect.test.ts`, vitest unit with the fake db, or an integration test under `packages/api/src/*.integration.test.ts` — pick the integration form since routing depends on RLS-free service-role queries and real FKs):** seed org A (`company_key = "c-A"`) and org B (`"c-B"`) with one `sent` ACE movement + `customs_submissions` row each (`reference_number = tripNumber`, `correlation_id = sendId`); an injected transport whose `receive()` returns: API_RESPONSE IMPORTED for A; ACE_RESPONSE processingResponse for A; ACI_NOTICE MATCHED for B (events-only); an API_RESPONSE DATA_ERROR for B's second submission; one message with companyKey `c-Z`; the A message duplicated. Assert: A `accepted` with an `accepted` customs_event; B's movement unchanged but has a `pars_matched` event; B's second submission `rejected`; the `c-Z` row kept with `processing_error = "unknown companyKey"`; one duplicate row; every processed row has `processed_at`, `movement_id`; `integration_events` rows have `correlation_id = bc-inbox:<id>`; a second drain with an empty receive processes nothing. Plus `jobs.integration.test.ts`: `customs.borderconnect_drain` is a detached handler and an org-null job is claimable.
@@ -468,10 +613,12 @@ Job + route:
 ### Task 11: RNS releases and SYSTEM_ALERT notices
 
 **Files:**
+
 - Modify: `packages/api/src/services/borderconnect.ts` (`processInboxRow` branches), `packages/api/src/services/notices.ts` (extract `recordCarrierNotices(tx, notices)` from `syncCarrierNotices` so the drain can reuse the insert + fan-out)
 - Test: the Task 10 integration test file
 
 Behaviour:
+
 - `rns`: **there is no companyKey on RNS_SHIPMENT**, and `shipments.control_number` is unique only per organization (`shipments_organization_id_control_number_key`), so resolve across orgs: candidates = `shipments where control_number = cargoControlNumber`; if several, keep those whose movement is ACI and in `sent|accepted|held`; exactly one left → route to it; 0 or still >1 → unroutable with `processing_error = "ambiguous CCN (<n> candidates)"` / `"unknown CCN"`. Insert `pars_rns_events { organizationId, shipmentId, parsNumber: cargoControlNumber, releaseCode: releaseCode.number, releasedAt, officeCode: releaseOffice.number, transactionNumber, raw }` (same columns `movements.ts:154-166` writes). If `releaseCode` denotes a release (fetch `https://borderconnect.com/data/ca/rns/release-codes.json` or the RNS PDF list while implementing; vendor the "released" subset in `code-lists.ts`), stamp `shipments.status = "released", released_at` through the existing shipment-status rules (see `SHIPMENT_STAMP` in movements.ts) and, if the shipment has a movement, add a `customs_event` with code `released` and `raw: { rns: true, ... }` via `recordCustomsEvents`.
 - `alert`: `recordCarrierNotices(tx, [{ provider: "cbsa_aci" and "cbp_ace" (two rows), externalId: `borderconnect:${sha256}`, severity: "warning", title: "BorderConnect system alert", body: message, publishedAt: receivedAt }])`; fan-out is whatever `syncCarrierNotices` already does.
 
@@ -483,29 +630,52 @@ Behaviour:
 ### Task 12: `crossingReadiness()` and its API exposure
 
 **Files:**
+
 - Create: `packages/domain/src/readiness.ts`, `readiness.test.ts`; export from `packages/domain/src/index.ts`
 - Modify: `packages/api/src/router/movement.ts` (`get` output gains `readiness`), `packages/api/src/services/movements.ts` (`loadFull` already returns events + shipments; add latest `pars_rns_events` per shipment for ACI)
 
 **Interfaces (Produces):**
+
 ```ts
 export type ReadinessState = "ok" | "pending" | "blocked";
-export interface ReadinessCheck { key: string; label: string; state: ReadinessState; detail: string | null }
-export interface CrossingReadiness { ready: boolean; checks: ReadinessCheck[] }
+export interface ReadinessCheck {
+  key: string;
+  label: string;
+  state: ReadinessState;
+  detail: string | null;
+}
+export interface CrossingReadiness {
+  ready: boolean;
+  checks: ReadinessCheck[];
+}
 export function crossingReadiness(input: {
-  regime: Regime; status: MovementStatus;
-  shipments: Array<{ controlNumber: string; status: ShipmentStatus; entryNumber: string | null; isPars: boolean; rnsReleasedAt: string | null }>;
-  events: Array<{ code: CustomsEventCode; shipmentControlNumber: string | null; occurredAt: string }>;
+  regime: Regime;
+  status: MovementStatus;
+  shipments: Array<{
+    controlNumber: string;
+    status: ShipmentStatus;
+    entryNumber: string | null;
+    isPars: boolean;
+    rnsReleasedAt: string | null;
+  }>;
+  events: Array<{
+    code: CustomsEventCode;
+    shipmentControlNumber: string | null;
+    occurredAt: string;
+  }>;
 }): CrossingReadiness;
 ```
+
 Checks — ACE: `manifest` (status accepted/released → ok; sent → pending; rejected/held → blocked), `entries` (every non-in-bond shipment has `entryNumber` or an `entry_on_file`/`entered_and_released` event → ok; else pending), `holds` (any `held` event after the last `accepted`/`released` → blocked), `rejects` (last `rejected` newer than last `accepted` → blocked). ACI: `manifest`, `pars_match` (every PARS shipment has `pars_matched`; `pars_not_matched` → blocked), `rns_release` (every PARS shipment `rnsReleasedAt` or shipment status released → ok; else pending), `rejects`. `ready = every check ok`. Empty trip (`isEmpty`) → only `manifest` + `rejects`.
 
 - [ ] **Step 1: Tests:** one per check state per regime, plus `ready` true only when all ok, empty-trip case. **Step 2: Run** → FAIL. **Step 3: Implement** the pure function; in `movement.get` compute `readiness: crossingReadiness({...})` from `loadFull` data (+ a small `latestRnsByShipment(tx, shipmentIds)` select on `parsRnsEvents`). **Step 4: Run** `pnpm test && pnpm typecheck` → PASS. **Step 5: Commit** `feat(domain,api): ready-to-cross readiness rollup on movement.get`.
 
 ---
 
-### Task 13: Settings UI — BorderConnect mode and the Company Key field  *(invoke `ui-ux-pro-max` first)*
+### Task 13: Settings UI — BorderConnect mode and the Company Key field _(invoke `ui-ux-pro-max` first)_
 
 **Files:**
+
 - Modify: `apps/web/src/app/(app)/settings/integrations/integrations-panel.tsx:17-49` (PROVIDERS), `:127-160` (submit), `:138` (mode cast), `:221-243` (mode select + baseUrl), `:294` (credentials), `:355` (Test connection copy)
 - Modify: `apps/web/src/app/(app)/settings/organization/organization-form.tsx:9-42` (Fields + FIELDS), `packages/domain/src/organization.ts:69` (`updateOrganizationInput` + `borderConnectCompanyKey: z.string().trim().min(1).max(64).nullable().optional()`), `packages/api/src/router/organization.ts:367-395` (`update` set + `get` already returns all columns)
 - Test: `apps/web` Playwright `settings.spec.ts` (or the nearest existing settings spec) + `packages/api` router test for the update input
@@ -513,15 +683,16 @@ Checks — ACE: `manifest` (status accepted/released → ok; sent → pending; r
 - [ ] **Step 1: Router/domain test:** `organization.update accepts borderConnectCompanyKey and persists it; a duplicate across orgs surfaces as CONFLICT` (map the unique violation through the shared Postgres-error → TRPCError helper, `packages/api/src/services/db-errors.ts`).
 - [ ] **Step 2: Implement API + domain.** Audit via the existing `writeAudit("organization.update", …)` path.
 - [ ] **Step 3: Organization form:** add `{ key: "borderConnectCompanyKey", label: "BorderConnect company key", mono: true }` with helper text "Issued by BorderConnect for your carrier account; required for BorderConnect filing mode." Blank → `null`.
-- [ ] **Step 4: Integrations panel:** mode select gains `<option value="border_connect">BorderConnect</option>` (label "BorderConnect (EasyTask service provider)"); when selected, hide base URL / API key / secret inputs and show a status row `Company key: set ✓ | missing — set it in Settings → Organization` (read from `trpc.organization.get`), plus "Filing as: <SCAC> (ACE) / <CBSA code> (ACI)". Test-connection button copy in this mode: "Check inbox" (calls the same `testCustoms`, shows `received`/`stored`). Mock delay/failure inputs hidden.
+- [ ] **Step 4: Integrations panel:** mode select gains `<option value="border_connect">BorderConnect</option>` (label "BorderConnect (service provider)"); when selected, hide base URL / API key / secret inputs and show a status row `Company key: set ✓ | missing — set it in Settings → Organization` (read from `trpc.organization.get`), plus "Filing as: <SCAC> (ACE) / <CBSA code> (ACI)". Test-connection button copy in this mode: "Check inbox" (calls the same `testCustoms`, shows `received`/`stored`). Mock delay/failure inputs hidden.
 - [ ] **Step 5: Playwright:** set ACE to BorderConnect with no company key → warning visible; set company key on the organization page → warning gone; save persists mode `border_connect`. Run with `PLAYWRIGHT_BASE_URL=http://localhost:3100` against a worktree server.
 - [ ] **Step 6: Run** `pnpm typecheck && pnpm lint && pnpm test` + the Playwright spec → PASS. **Step 7: Commit** `feat(web): BorderConnect filing mode and company key in Settings`.
 
 ---
 
-### Task 14: Readiness panel and list badge  *(invoke `ui-ux-pro-max` first)*
+### Task 14: Readiness panel and list badge _(invoke `ui-ux-pro-max` first)_
 
 **Files:**
+
 - Create: `apps/web/src/components/movement/readiness-panel.tsx`
 - Modify: `apps/web/src/components/movement/movement-workspace.tsx` (mount above `<Timeline>` at ~L577-583), `apps/web/src/app/(app)/movements/movements-table.tsx:31-38,85` (a compact badge next to `StatusBadge`), `packages/api/src/router/movement.ts:170-176` (`list` gains `readyToCross: "ready" | "pending" | "blocked" | null` via SQL subqueries — ACE: status accepted/released and no attached shipment with `entry_number is null`; ACI: status accepted/released and every attached shipment has a `pars_rns_events` row; `held`/`rejected` → blocked; no per-row JS)
 - Test: Playwright `movements.spec.ts` (existing) — assert the panel renders its checks for an accepted movement seeded by the fixture path
@@ -535,13 +706,14 @@ Checks — ACE: `manifest` (status accepted/released → ok; sent → pending; r
 ### Task 15: WebSocket listener app (hosting deferred)
 
 **Files:**
+
 - Create: `apps/borderconnect-listener/{package.json,tsconfig.json,src/index.ts,src/socket.ts,src/socket.test.ts,Dockerfile,README.md}`
 - Modify: `pnpm-workspace.yaml` (already `apps/*`? verify), `turbo.json` (build/test pipeline includes the new app), root `README.md` apps list
 
 **Interfaces:** reuses `storeInboundMessages` (export it from `@corridor/api`) and `getDb`/`withServiceRole` from `@corridor/db`; env `BORDERCONNECT_API_URL_SUFFIX`, `BORDERCONNECT_API_KEY`, `DATABASE_URL` (service-role Postgres URL), `SUPABASE_*` as `@corridor/db` needs.
 
 - [ ] **Step 1: `socket.test.ts`** with a mock `WebSocket` (inject a factory): sends `{"apiKey": ...}` as the first frame within 10 s; treats the first `API_RESPONSE` `Connected` as authenticated; every later frame (object or array) is passed to `onMessages`; `ACCESS_DENIED_ERROR` closes and does **not** reconnect; other closes reconnect with capped exponential backoff (1s → 60s); ping every 30 s.
-- [ ] **Step 2: Implement** `socket.ts` (`ws` dependency, `connectBorderConnectSocket({ suffix, apiKey, onMessages, wsFactory })`) and `index.ts` (wires `onMessages` → `withServiceRole(db, tx => storeInboundMessages(tx, msgs))`; processing stays in the cron drain, whose dedup makes running socket + polling together safe). Dockerfile: `node:22-alpine`, `pnpm --filter @corridor/borderconnect-listener... deploy`.
+- [ ] **Step 2: Implement** `socket.ts` (`ws` dependency, `connectBorderConnectSocket({ suffix, apiKey, onMessages, wsFactory })`) and `index.ts` (wires `onMessages` → `withServiceRole(db, tx => storeInboundMessages(tx, msgs))`; exercise it only in an isolated window with HTTP polling stopped until the provider confirms the shared-queue semantics). Dockerfile: `node:22-alpine`, `pnpm --filter @corridor/borderconnect-listener... deploy`.
 - [ ] **Step 3: README:** what it does, that it is not deployed yet, the open question whether an open socket diverts the HTTP queue (verify with Task 16's script while the container runs locally before ever relying on it), and how to run it locally (`pnpm --filter @corridor/borderconnect-listener dev`).
 - [ ] **Step 4: Run** `pnpm typecheck && pnpm lint && pnpm test` → PASS. **Step 5: Commit** `feat(listener): BorderConnect WebSocket listener writing to the customs inbox`.
 
@@ -550,6 +722,7 @@ Checks — ACE: `manifest` (status accepted/released → ok; sent → pending; r
 ### Task 16: Live smoke script, env/docs, final verification
 
 **Files:**
+
 - Create: `packages/integrations/scripts/borderconnect-smoke.ts` + package script `"smoke:borderconnect": "tsx scripts/borderconnect-smoke.ts"` (there is no root `scripts/`; `tsx` is a devDep of `@corridor/db` only — add it to `@corridor/integrations`)
 - Modify: `.env.example:106-121` (add `BORDERCONNECT_API_URL_SUFFIX=`, `BORDERCONNECT_TEST_COMPANY_KEY=`; drop `BORDERCONNECT_API_WEBSOCKET_URL`), `turbo.json:22-24` (env list += the three `BORDERCONNECT_*`), `apps/web/src/lib/env.ts` if it enumerates server env vars, `CHANGELOG.md` Unreleased, `docs/security-review.md` §8 (add `services/borderconnect.ts` drain + `api/jobs/borderconnect-drain` + the listener as service-role call sites; note RNS resolution is the one cross-org lookup, by carrier-prefixed control number, exactly-one-match required), `docs/user-manual/05-customs-filing.md:5` (third mode), `SECURITY.md:112`, `packages/integrations/src/customs/gateway/README.md:24-49` (point to the BorderConnect README)
 

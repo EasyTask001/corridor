@@ -7,8 +7,9 @@ later task.
 
 `createBorderConnectHttpTransport()` mirrors `../gateway/transport.ts`'s
 retry/timeout/error conventions (`CustomsTransportError`, `retryable = 429 ||
->= 500`, an `AbortController` with a configurable deadline) against
-BorderConnect's own wire protocol, which differs from the gateway's:
+
+> = 500`, an `AbortController` with a configurable deadline) against
+> BorderConnect's own wire protocol, which differs from the gateway's:
 
 - Auth is an `Api-Key` header, not `Authorization: Bearer`.
 - The URL shape is fixed per company, not a configurable REST path per call:
@@ -34,6 +35,7 @@ direct field/regex assertions against the documented PDF manuals (`ace.ts`,
 `toEqual` tests (`ace.test.ts`, `aci.test.ts`).
 
 ## Outbound mapping (`format.ts`, `code-lists.ts`, `validate.ts`, `ace.ts`,
+
 `aci.ts`, `send-request.ts`)
 
 `toAceTrip`/`toAciTrip` turn a `ManifestPayload` into the `ACE_TRIP`/
@@ -52,7 +54,7 @@ lists rarely change, and depending on a network call would make every test
 ### Time zones
 
 `https://borderconnect.com/data/time-zones.json` returns US time-zone
-*abbreviations* (`PST`/`AST`/`CST`/`EST`/`MST`), not IANA zone names. Since
+_abbreviations_ (`PST`/`AST`/`CST`/`EST`/`MST`), not IANA zone names. Since
 Corridor stores an IANA name (`organizations.timezone`, e.g.
 `America/Toronto`) and has no reliable way to turn that into one of these
 five abbreviations for every zone Corridor's carriers operate in, `bcDateTime`
@@ -62,14 +64,14 @@ never emits a separate `estimatedArrivalTimeZone` field.
 ### Known gaps / judgment calls (task 5)
 
 - **Trailer type mapping** (`TRAILER_TYPE_MAP`): only Corridor `equipment_
-  types.code` values with an identically-coded, identically-described
+types.code` values with an identically-coded, identically-described
   BorderConnect `trailer-types.json` entry are mapped (~20 of ~60 Corridor
   codes). Codes with no confident match (tank sub-types split differently,
   vans, generic containers, …) 422 rather than guess.
 - **Driver document types** (`DRIVER_DOCUMENT_TYPE_MAP`): `fast` has no
   BorderConnect travel-document code at all (a FAST card still reaches
   BorderConnect via `fastCardNumber`, matched by its CBP-format regex).
-  `permanent_resident_card` and `us_alien_registration` each have *two*
+  `permanent_resident_card` and `us_alien_registration` each have _two_
   candidate BorderConnect codes (a C1/A1 vs. C2/A2 split) with nothing in
   Corridor's data to disambiguate — both are left unmapped rather than
   guessed.
@@ -100,7 +102,7 @@ adapter doesn't recognize, or that isn't shaped like an object, comes back as
 `kind: "unknown"` rather than crashing the drain job. `inboundKeys(msg)` pulls
 the routing keys (`companyKey`, `sendId`, `tripNumber`,
 `cargoControlNumber`/`shipmentControlNumber`) the drain job needs to resolve
-`organization_id` and `customs_submission_id`/`movement_id` *before*
+`organization_id` and `customs_submission_id`/`movement_id` _before_
 `parseInbound` runs, also without throwing.
 
 `ACE_RESPONSE`/`ACI_RESPONSE`/`ACI_NOTICE` all become `kind: "customs_status"`
@@ -119,13 +121,13 @@ resolves to it.
 
 ### Mode selection / env vars
 
-| Input | Source | Notes |
-| --- | --- | --- |
-| `apiUrlSuffix` | `BORDERCONNECT_API_URL_SUFFIX` | One Service Provider account for all of Corridor — shared across every tenant. |
-| `apiKey` | `BORDERCONNECT_API_KEY` | Same account-wide key. |
-| `companyKey` | `organizations.border_connect_company_key` | Per-tenant — BorderConnect's way of telling one carrier's messages apart on a shared account. |
-| `tenantKey` | the organization id | Never sent over the wire; scopes the fixture queue only. |
-| `environment` | `integration_configs.environment` (per org, Settings → Organization) | Gates `live` — see below. |
+| Input          | Source                                                               | Notes                                                                                         |
+| -------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `apiUrlSuffix` | `BORDERCONNECT_API_URL_SUFFIX`                                       | One Service Provider account for all of Corridor — shared across every tenant.                |
+| `apiKey`       | `BORDERCONNECT_API_KEY`                                              | Same account-wide key.                                                                        |
+| `companyKey`   | `organizations.border_connect_company_key`                           | Per-tenant — BorderConnect's way of telling one carrier's messages apart on a shared account. |
+| `tenantKey`    | the organization id                                                  | Never sent over the wire; scopes the fixture queue only.                                      |
+| `environment`  | `integration_configs.environment` (per org, Settings → Organization) | Gates `live` — see below.                                                                     |
 
 `live = isBorderConnectLive({ environment, apiUrlSuffix, apiKey })`, i.e.
 `environment === "production"` **and** both env vars set. The account-wide
@@ -141,16 +143,14 @@ service degrades to a deterministic mock/fixture when its env var is unset. A
 caller may also inject its own `transport` (what every test above the
 fixture-replay-specific ones does), which always wins over both.
 
-Known limitation: `customs.borderconnect_drain`'s transport
-(`services/borderconnect.ts` `resolveTransport`) has no per-org `environment`
-to check — the drain reads the shared, deployment-wide BorderConnect inbox —
-so it goes live purely off the env vars. On a deployment with those set, a
-sandbox org's transmit still enqueues into the in-process fixture queue, but
-the live drain never polls it; that org's filing is stuck until it goes to
-`production`. This only matters for a deployment that mixes sandbox and
-production orgs while BorderConnect env vars are configured (e.g. `pnpm dev`
-against a real account) — not a correctness or tenant-isolation issue, since
-nothing is misfiled, just not drained.
+The drain receives an explicit deployment environment. Production jobs require
+the live account credentials and an encrypted `BORDERCONNECT_SPOOL_DIR` /
+`BORDERCONNECT_SPOOL_KEY`; sandbox jobs always use the fixture queue, even when
+the deployment has a live account configured. The encrypted spool is written
+before a pop-on-read receive batch is inserted into `customs_inbox` and is
+removed only after the insert commits, so a database outage stops the receive
+loop without losing the provider batch. Use a persistent 0700 volume for the
+spool in production.
 
 A **live** client refuses to `transmit`/`amend`/`cancel` with `companyKey:
 null` (a 422 `CustomsTransportError` — there is no tenant to attribute the
@@ -205,18 +205,18 @@ canned inbound replies a real crossing would eventually push back:
    control-number-suffix convention `gateway/client.ts`'s `fixtureOutcomeFor`
    uses (reused here, not reimplemented):
 
-   | First shipment's control number ends in | Outcome | ACE file enqueued | ACI file enqueued |
-   | --- | --- | --- | --- |
-   | `H` | held | `ace-held.json` (`ACE_RESPONSE`, `tripStatus: "HTR"`) | `aci-held.json` (`ACI_NOTICE`, `type: "INSUFFICIENT_REVIEW_TIME_WARNING"` — ACI has no `ACE`-style "held" trip status, so the closest documented CBSA signal for "still under review" is used) |
-   | `R` | rejected | `ace-rejected.json` (`ACE_RESPONSE`, `validationResponses`) | `aci-rejected.json` (`ACI_RESPONSE`, `type: "REJECT"`, `errorResponses`) |
-   | anything else | accepted | `ace-accepted.json` (`ACE_RESPONSE`, `processingResponse`) | `aci-accepted.json` (`ACI_RESPONSE`, `type: "ACCEPT"`) |
+   | First shipment's control number ends in | Outcome  | ACE file enqueued                                           | ACI file enqueued                                                                                                                                                                              |
+   | --------------------------------------- | -------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `H`                                     | held     | `ace-held.json` (`ACE_RESPONSE`, `tripStatus: "HTR"`)       | `aci-held.json` (`ACI_NOTICE`, `type: "INSUFFICIENT_REVIEW_TIME_WARNING"` — ACI has no `ACE`-style "held" trip status, so the closest documented CBSA signal for "still under review" is used) |
+   | `R`                                     | rejected | `ace-rejected.json` (`ACE_RESPONSE`, `validationResponses`) | `aci-rejected.json` (`ACI_RESPONSE`, `type: "REJECT"`, `errorResponses`)                                                                                                                       |
+   | anything else                           | accepted | `ace-accepted.json` (`ACE_RESPONSE`, `processingResponse`)  | `aci-accepted.json` (`ACI_RESPONSE`, `type: "ACCEPT"`)                                                                                                                                         |
 
    The control number is read straight off the built send-request body
    (`shipmentControlNumber` for an `ACE_SHIPMENT`, `cargoControlNumber` for an
    `ACI_SHIPMENT`), not off the `ManifestPayload` — the fixture transport only
    ever sees the wire body, matching what a real send would see.
 
-Every enqueued message is stamped with the *sent* `companyKey`, `sendId` and
+Every enqueued message is stamped with the _sent_ `companyKey`, `sendId` and
 `tripNumber`, so a test (or a future drain-job test) can correlate a queued
 reply back to the request that produced it. `receive()` drains the queue —
 same "poll and consume" shape a real `GET /api/receive` call has, just
@@ -233,20 +233,16 @@ relevant here:
 1. **`GET /api/receive` envelope** is still unconfirmed against a live account
    — `normaliseReceiveBody` (`transport.ts`) defensively handles four shapes.
    `scripts/borderconnect-smoke.ts` (Task 16) exists and is ready to settle
-   this (loads `.env.local`, builds a minimal ACE manifest, files it with
-   `autoSend: false`, polls `GET receive` five times printing the raw body
-   next to `normaliseReceiveBody(body)`), but **it has not been run against
-   the live account yet**: `.env.local` in this worktree (and in the main
-   checkout) has `BORDERCONNECT_API_KEY` and the account's WebSocket URL
-   (from which `BORDERCONNECT_API_URL_SUFFIX=EasyTask` is confidently
-   derived — see the plan's Task 16 entry) but no
-   `BORDERCONNECT_TEST_COMPANY_KEY` value anywhere in the repo, its git
-   history, or any doc. The smoke script correctly refuses to run without
-   it (verified — see the Task 16 report) rather than guess one and send a
-   real request under a fabricated tenant identity. **This risk remains
-   open**: someone with access to the BorderConnect Service Provider
-   account/dashboard needs to supply the real test `companyKey`, add it to
-   `.env.local` as `BORDERCONNECT_TEST_COMPANY_KEY`, and re-run
+   this for either ACE or ACI (loads a private environment, files a minimal
+   manifest with `autoSend: false`, and records only redacted envelope shape,
+   status, routing-key hashes, and timestamps), but **it has not been run against
+   the live account yet**. The smoke script requires
+   `BORDERCONNECT_API_URL_SUFFIX`, `BORDERCONNECT_API_KEY`, and
+   `BORDERCONNECT_TEST_COMPANY_KEY` from a private environment and correctly
+   refuses to run when any is absent rather than guessing an account value.
+   **This risk remains open**: someone with access to the approved
+   BorderConnect Service Provider test account must provision those secrets
+   outside Git and re-run
    `pnpm --filter @corridor/integrations smoke:borderconnect`. Note that
    settling the envelope specifically needs the receive half, which is now
    behind an explicit `--drain-shared-queue` flag (safety rail #4 in the
@@ -254,14 +250,15 @@ relevant here:
    polling a live account with real tenants filing through it would destroy
    their pending messages. Run it only against an account nobody is filing
    through, or with the drain job and the listener stopped.
-2. **ACI amendments**: this client's `amend()` sends `operation: UPDATE,
-   autoSend: true` for both regimes — for ACE that's confirmed, but ACI may
-   require `ACI_SEND_REQUEST { type: "AMEND", tripAmendmentReasonCode }`
-   instead if a plain re-upload doesn't carry a reason code BorderConnect
-   wants. Treat ACI `amend()` as experimental until confirmed.
-3. **`companyKey` length** (30 documented vs. a 32-char sample in
-   BorderConnect's own docs) — this client never validates its length or
-   shape, only that it's non-null in live mode.
+2. **ACI amendments**: the production capability is disabled by default and
+   both the server procedure and client return a precondition failure. Keep
+   `BORDERCONNECT_ACI_AMEND_ENABLED=false` until BorderConnect supplies a
+   written sequence and a live CBSA amendment round trip is captured through
+   Corridor.
+3. **`companyKey` length** — the live contract matrix and tenant schema now
+   enforce BorderConnect's documented 30-character maximum. A null key is
+   rejected before a live send so a shared Service Provider account can never
+   produce an unattributable filing.
 4. Hazmat `emergencyContact` and in-bond `irsNumber`/`fda` are still not
    captured anywhere in the outbound mapping (`validate.ts` 422s those
    shipments) — unaffected by this task, carried forward as-is.

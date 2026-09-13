@@ -7,6 +7,7 @@ import {
   toUIMessageStream,
   type UIMessage,
 } from "ai";
+import * as Sentry from "@sentry/nextjs";
 import { cookies } from "next/headers";
 import {
   ACTIVE_ORG_COOKIE,
@@ -17,6 +18,7 @@ import {
   retrieveContext,
 } from "@corridor/api";
 import { COPILOT_SYSTEM_PROMPT, buildContextBlock, languageModel } from "@corridor/ai";
+import { corridorMetrics } from "@corridor/observability";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
@@ -67,9 +69,19 @@ export async function POST(req: Request) {
       .map((p) => p.text)
       .join(" ") ?? "";
 
-  const context = lastUserText
-    ? await ctx.rls((tx) => retrieveContext(tx, orgId, lastUserText))
-    : { regulations: [], orgKnowledge: [] };
+  let context: Awaited<ReturnType<typeof retrieveContext>> = {
+    regulations: [],
+    orgKnowledge: [],
+  };
+  if (lastUserText) {
+    try {
+      context = await ctx.rls((tx) => retrieveContext(tx, orgId, lastUserText));
+    } catch (error) {
+      corridorMetrics.aiFailure({ operation: "embedding", provider: "configured" });
+      Sentry.captureException(error, { tags: { component: "copilot", operation: "embedding" } });
+      throw error;
+    }
+  }
 
   /**
    * Meter one assistant message. Never allowed to fail the answer the user is
@@ -119,7 +131,11 @@ export async function POST(req: Request) {
     // copilotTools) rather than holding one open for the whole stream.
     tools: copilotTools(ctx.rls, orgId),
     stopWhen: stepCountIs(4),
-    onError: ({ error }) => console.error("[copilot]", error),
+    onError: ({ error }) => {
+      console.error("[copilot]", error);
+      corridorMetrics.aiFailure({ operation: "copilot", provider: resolved.label });
+      Sentry.captureException(error, { tags: { component: "copilot", operation: "stream" } });
+    },
     // Fires once the assistant message is complete (after any tool steps), so
     // the meter counts delivered answers, not model round-trips.
     onFinish: () => meterMessage("model"),

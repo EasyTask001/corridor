@@ -1,4 +1,4 @@
-# `@corridor/mobile` — Corridor Driver
+# `@corridor/mobile` — Corridor Driver Beta
 
 An Expo (SDK 54) driver app for the loads a Driver-Portal member is assigned
 to. It talks to the **same** tRPC router as the web app over
@@ -51,6 +51,10 @@ Until an automated device run exists, walk the app by hand at least once
 before trusting a change that touches capture, POD, auth persistence, or
 push: sign in, open an assigned load, photograph a document, capture a
 signature, sign out.
+
+The release-gating iPhone/Android matrix is tracked in
+`docs/operations/mobile-device-qa.md`. The app name and sign-in screen remain
+labelled Beta until that physical-device matrix passes.
 
 ## Screens
 

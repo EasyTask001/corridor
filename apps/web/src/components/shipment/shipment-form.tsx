@@ -20,6 +20,7 @@ export interface ShipmentFormValues {
   isPars: boolean;
   shipperId: string | null;
   consigneeId: string | null;
+  brokerId: string | null;
   entryNumber: string | null;
   entryPortId: string | null;
   inBondEntryType: "IT" | "TE" | "IE" | null;
@@ -42,6 +43,7 @@ export interface ShipmentFormInitial {
   isPars: boolean;
   shipperId: string | null;
   consigneeId: string | null;
+  brokerId: string | null;
   entryNumber: string | null;
   entryPortId: string | null;
   inBondEntryType: "IT" | "TE" | "IE" | null;
@@ -94,6 +96,7 @@ export function ShipmentForm({
   };
   const shippers = bySide("shipper", initial?.shipperId);
   const consignees = bySide("consignee", initial?.consigneeId);
+  const brokers = partners.filter((p) => p.type === "broker" || p.type === "both");
 
   const [entryPortId, setEntryPortId] = useState(initial?.entryPortId ?? null);
   const [inBondPortId, setInBondPortId] = useState(initial?.inBondDestinationPortId ?? null);
@@ -123,6 +126,7 @@ export function ShipmentForm({
           isPars: fd.get("isPars") === "on",
           shipperId: str(fd.get("shipperId")),
           consigneeId: str(fd.get("consigneeId")),
+          brokerId: str(fd.get("brokerId")),
           entryNumber: str(fd.get("entryNumber")),
           entryPortId,
           inBondEntryType: (str(fd.get("inBondEntryType")) as "IT" | "TE" | "IE" | null) ?? null,
@@ -231,6 +235,22 @@ export function ShipmentForm({
         >
           <option value="">Select…</option>
           {consignees.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Customs broker" htmlFor="brokerId">
+        <select
+          id="brokerId"
+          name="brokerId"
+          defaultValue={initial?.brokerId ?? ""}
+          disabled={disabled}
+          className="input"
+        >
+          <option value="">No broker assigned</option>
+          {brokers.map((p) => (
             <option key={p.id} value={p.id}>
               {p.label}
             </option>

@@ -58,6 +58,7 @@ export interface ResolvedShipment {
   cargoType: string | null;
   shipperId: string | null;
   consigneeId: string | null;
+  brokerId: string | null;
   entryPortId: string | null;
   inBondEntryType: "IT" | "TE" | "IE" | null;
   inBondDestinationPortId: string | null;
@@ -101,7 +102,7 @@ const EDITABLE_MOVEMENT = new Set(["draft", "rejected"]);
 async function lookups(tx: RlsTransaction, orgId: string) {
   const [partnerRows, codeRows, portRows] = await Promise.all([
     tx
-      .select({ id: partners.id, name: partners.name })
+      .select({ id: partners.id, name: partners.name, type: partners.type })
       .from(partners)
       .where(and(eq(partners.organizationId, orgId), eq(partners.status, "active"))),
     tx
@@ -206,6 +207,11 @@ export async function validateShipmentRows(
         column: "consignee_name",
         message: `no partner named "${row.consignee_name}"`,
       });
+    const broker = ref.partner(row.broker_name);
+    if (row.broker_name && !broker)
+      errors.push({ column: "broker_name", message: `no partner named "${row.broker_name}"` });
+    else if (broker && broker.type !== "broker" && broker.type !== "both")
+      errors.push({ column: "broker_name", message: `"${row.broker_name}" is not a broker` });
 
     const portOr = (column: string, kind: string, code: string | undefined) => {
       if (!code) return null;
@@ -251,6 +257,7 @@ export async function validateShipmentRows(
       cargoType: row.regime === "ACI" ? (row.cargo_type ?? null) : null,
       shipperId: shipper?.id ?? null,
       consigneeId: consignee?.id ?? null,
+      brokerId: broker?.id ?? null,
       entryPortId,
       inBondEntryType: row.in_bond_entry_type ?? null,
       inBondDestinationPortId,
@@ -445,6 +452,7 @@ export async function commitImport(tx: RlsTransaction, actor: Actor, batchId: st
           cargoType: p.cargoType as typeof shipments.$inferInsert.cargoType,
           shipperId: p.shipperId,
           consigneeId: p.consigneeId,
+          brokerId: p.brokerId,
           entryPortId: p.entryPortId,
           inBondEntryType: p.inBondEntryType,
           inBondDestinationPortId: p.inBondDestinationPortId,

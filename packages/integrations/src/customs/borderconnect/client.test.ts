@@ -3,10 +3,7 @@ import { createCustomsClient } from "../index";
 import { buildManifest, type ManifestSource } from "../manifest";
 import { clearCustomsFixtureState } from "../fixture-state";
 import type { InBondMessage, ManifestPayload } from "../types";
-import {
-  createBorderConnectCustomsClient,
-  createFixtureBorderConnectTransport,
-} from "./client";
+import { createBorderConnectCustomsClient, createFixtureBorderConnectTransport } from "./client";
 import type { BorderConnectTransport } from "./transport";
 
 const fixedNow = () => new Date("2026-09-12T12:00:00.000Z");
@@ -334,6 +331,61 @@ describe("createBorderConnectCustomsClient — amend", () => {
     expect(calls[1]).toMatchObject({ operation: "UPDATE", tripNumber: "ACE-ORIGINAL-REF" });
     expect(amended.referenceNumber).toBe("ACE-ORIGINAL-REF");
   });
+
+  it("blocks live ACI amendment until the explicit validation gate is enabled", async () => {
+    const { calls, transport } = spyTransport();
+    const c = createBorderConnectCustomsClient({
+      provider: "cbsa_aci",
+      environment: "production",
+      apiUrlSuffix: "service-provider",
+      apiKey: "secret",
+      companyKey: "CK1",
+      tenantKey: "t1",
+      now: fixedNow,
+      transport,
+    });
+
+    await expect(
+      c.amend(buildManifest(makeAciSource()), "ACI-ORIGINAL-REF", {
+        reasonCode: "20",
+        scope: "shipment",
+      }),
+    ).rejects.toMatchObject({
+      name: "CustomsTransportError",
+      statusCode: 412,
+      retryable: false,
+      message: expect.stringContaining("BORDERCONNECT_ACI_AMEND_ENABLED"),
+    });
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe("createBorderConnectCustomsClient — capabilities", () => {
+  it("uses the same fail-closed capability map exposed to callers", () => {
+    const c = createBorderConnectCustomsClient({
+      provider: "cbsa_aci",
+      environment: "production",
+      apiUrlSuffix: "service-provider",
+      apiKey: "secret",
+      companyKey: "CK1",
+      tenantKey: "t1",
+      aciAmendEnabled: false,
+    });
+
+    expect(c.capabilities).toEqual({
+      transmit: true,
+      amend: false,
+      cancel: true,
+      status: false,
+      inBond: false,
+      reasons: {
+        amend:
+          "ACI amendment is disabled until a live CBSA round trip is validated (BORDERCONNECT_ACI_AMEND_ENABLED)",
+        status: "Status arrives through the shared BorderConnect inbox",
+        inBond: "QP In-Bond customs messaging coming soon; tracking only.",
+      },
+    });
+  });
 });
 
 describe("createBorderConnectCustomsClient — cancel", () => {
@@ -408,7 +460,9 @@ describe("fixture replay — ACE", () => {
     });
     expect(await transport.receive()).toEqual([]); // drained
 
-    const held = await c.transmit(withControlNumber(buildManifest(makeAceSource()), "PFTRPAPS000H"));
+    const held = await c.transmit(
+      withControlNumber(buildManifest(makeAceSource()), "PFTRPAPS000H"),
+    );
     messages = await transport.receive();
     expect(messages[1]).toMatchObject({
       data: "ACE_RESPONSE",
@@ -416,7 +470,9 @@ describe("fixture replay — ACE", () => {
       tripNumber: held.referenceNumber,
     });
 
-    const rejected = await c.transmit(withControlNumber(buildManifest(makeAceSource()), "PFTRPAPS000R"));
+    const rejected = await c.transmit(
+      withControlNumber(buildManifest(makeAceSource()), "PFTRPAPS000R"),
+    );
     messages = await transport.receive();
     expect(messages[1]).toMatchObject({
       data: "ACE_RESPONSE",
@@ -439,7 +495,11 @@ describe("fixture replay — ACE", () => {
     await c.cancel("PFTR00001", "Load cancelled");
     const messages = await transport.receive();
     expect(messages).toEqual([
-      expect.objectContaining({ data: "API_RESPONSE", status: "TRANSMITTED", tripNumber: "PFTR00001" }),
+      expect.objectContaining({
+        data: "API_RESPONSE",
+        status: "TRANSMITTED",
+        tripNumber: "PFTR00001",
+      }),
     ]);
   });
 });
@@ -465,7 +525,9 @@ describe("fixture replay — ACI", () => {
       tripNumber: accepted.referenceNumber,
     });
 
-    const held = await c.transmit(withControlNumber(buildManifest(makeAciSource()), "PFTRCSA0000H"));
+    const held = await c.transmit(
+      withControlNumber(buildManifest(makeAciSource()), "PFTRCSA0000H"),
+    );
     messages = await transport.receive();
     expect(messages[1]).toMatchObject({
       data: "ACI_NOTICE",
@@ -473,7 +535,9 @@ describe("fixture replay — ACI", () => {
       tripNumber: held.referenceNumber,
     });
 
-    const rejected = await c.transmit(withControlNumber(buildManifest(makeAciSource()), "PFTRCSA0000R"));
+    const rejected = await c.transmit(
+      withControlNumber(buildManifest(makeAciSource()), "PFTRCSA0000R"),
+    );
     messages = await transport.receive();
     expect(messages[1]).toMatchObject({
       data: "ACI_RESPONSE",
@@ -507,10 +571,6 @@ describe("createBorderConnectCustomsClient — unsupported methods", () => {
       ["fetchStatus", () => c.fetchStatus("REF")],
       ["fetchDecision", () => c.fetchDecision("REF", manifest, { currentStatus: "sent" })],
       ["fetchNotices", () => c.fetchNotices(null)],
-      ["inBondArrival", () => c.inBondArrival(rec)],
-      ["inBondExport", () => c.inBondExport(rec)],
-      ["inBondCancel", () => c.inBondCancel(rec, "reason")],
-      ["inBondStatus", () => c.inBondStatus(rec.bondNumber)],
     ];
     for (const [name, call] of calls) {
       await expect(call()).rejects.toMatchObject({
@@ -518,6 +578,20 @@ describe("createBorderConnectCustomsClient — unsupported methods", () => {
         statusCode: 501,
         retryable: false,
         message: expect.stringContaining(name),
+      });
+    }
+
+    for (const call of [
+      () => c.inBondArrival(rec),
+      () => c.inBondExport(rec),
+      () => c.inBondCancel(rec, "reason"),
+      () => c.inBondStatus(rec.bondNumber),
+    ]) {
+      await expect(call()).rejects.toMatchObject({
+        name: "CustomsTransportError",
+        statusCode: 412,
+        retryable: false,
+        message: "QP In-Bond customs messaging coming soon; tracking only.",
       });
     }
   });
@@ -549,7 +623,12 @@ describe("createBorderConnectCustomsClient — ping", () => {
     });
     await c.transmit(buildManifest(makeAceSource()));
     const result = await c.ping();
-    expect(result).toMatchObject({ ok: true, mode: "border_connect", live: false, detail: { messages: 2 } });
+    expect(result).toMatchObject({
+      ok: true,
+      mode: "border_connect",
+      live: false,
+      detail: { messages: 2 },
+    });
     expect((await c.ping()).detail).toEqual({ messages: 0 });
   });
 });

@@ -384,6 +384,41 @@ describe("mock in-bond", () => {
   });
 });
 
+describe("customs capabilities", () => {
+  it("exposes support before callers attempt an operation", () => {
+    const mock = createCustomsClient({ regime: "ACE", mode: "mock", tenantKey: "t1" });
+    const gateway = createCustomsClient({ regime: "ACI", mode: "gateway", tenantKey: "t1" });
+    const unconfiguredProduction = createCustomsClient({
+      regime: "ACE",
+      mode: "border_connect",
+      environment: "production",
+      tenantKey: "t1",
+    });
+
+    expect(mock.capabilities).toMatchObject({
+      transmit: true,
+      amend: true,
+      cancel: true,
+      status: true,
+      inBond: true,
+    });
+    expect(gateway.capabilities).toMatchObject({
+      transmit: true,
+      amend: true,
+      cancel: true,
+      status: true,
+      inBond: true,
+    });
+    expect(unconfiguredProduction.capabilities).toMatchObject({
+      transmit: false,
+      amend: false,
+      cancel: false,
+      status: false,
+      inBond: false,
+    });
+  });
+});
+
 describe("vault-backed credentials", () => {
   it("hasCustomsCredentials ignores absent and blank fields", () => {
     expect(hasCustomsCredentials()).toBe(false);

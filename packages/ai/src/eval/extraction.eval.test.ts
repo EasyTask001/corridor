@@ -1,98 +1,96 @@
 /**
- * Extraction regression gate. Runs the pipeline over fixture documents and
- * scores field-level accuracy against expected JSON. Fails the build when
- * accuracy drops below THRESHOLD — run this when prompts, schemas or the
- * extractor change.
+ * Extraction regression and release gate.
  *
- *   pnpm --filter @corridor/ai eval                 # mock extractor (default in tests)
- *   CORRIDOR_EVAL_EXTRACTOR=model pnpm --filter @corridor/ai eval   # real model (needs AI_GATEWAY_API_KEY or OPENAI_API_KEY)
+ * Regression uses the tracked synthetic fixtures. Pilot/GA gates require a
+ * private sanitized corpus supplied outside Git and a configured model:
+ *
+ *   CORRIDOR_EVAL_GATE=pilot CORRIDOR_EVAL_CORPUS_DIR=/private/path \
+ *   CORRIDOR_EVAL_EXTRACTOR=model pnpm --filter @corridor/ai eval
  */
-import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { createModelExtractor } from "../document-intelligence/model-extractor";
 import { mockExtractor } from "../document-intelligence/mock-extractor";
 import { runExtractionPipeline } from "../document-intelligence/pipeline";
+import {
+  aggregateExtractionScores,
+  extractionGate,
+  scoreExtraction,
+  type EvalExpected,
+  type ExtractionGateName,
+  type ExtractionScore,
+} from "./scoring";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const fixturesDir = join(here, "fixtures");
-const THRESHOLD = 0.9;
-
+const trackedFixturesDir = join(here, "fixtures");
+const corpusDir = process.env.CORRIDOR_EVAL_CORPUS_DIR
+  ? resolve(process.env.CORRIDOR_EVAL_CORPUS_DIR)
+  : trackedFixturesDir;
+const requestedGate = process.env.CORRIDOR_EVAL_GATE ?? "regression";
+if (!(["regression", "pilot", "ga"] as string[]).includes(requestedGate)) {
+  throw new Error("CORRIDOR_EVAL_GATE must be regression, pilot, or ga");
+}
+const gateName = requestedGate as ExtractionGateName;
+const gate = extractionGate(gateName);
 const useModel = process.env.CORRIDOR_EVAL_EXTRACTOR === "model";
-const extractor = useModel ? (createModelExtractor() ?? mockExtractor) : mockExtractor;
+const configuredModel = useModel ? createModelExtractor() : null;
+const extractor = configuredModel ?? mockExtractor;
 
-interface Expected {
-  documentType?: string;
-  documentNumber?: string | null;
-  documentDate?: string | null;
-  shipper?: { name?: string | null };
-  consignee?: { name?: string | null };
-  cargo?: Array<Record<string, unknown>>;
-  rateConfirmation?: Record<string, unknown>;
-  _expectLowConfidence?: boolean;
+function mimeType(filename: string): string {
+  switch (extname(filename).toLowerCase()) {
+    case ".pdf":
+      return "application/pdf";
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    default:
+      return "text/plain";
+  }
 }
 
-/** Compare leaf values; strings case/space-insensitively, numbers within 1%. */
-function same(a: unknown, b: unknown): boolean {
-  if (a == null || b == null) return a == null && b == null;
-  if (typeof a === "number" && typeof b === "number")
-    return Math.abs(a - b) <= Math.abs(b) * 0.01 + 1e-9;
-  return String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
-}
+const files = readdirSync(corpusDir);
+const fixtures = files
+  .filter((filename) => filename.endsWith(".expected.json"))
+  .map((expectedFilename) => {
+    const name = expectedFilename.slice(0, -".expected.json".length);
+    const sourceFilename = files.find(
+      (filename) => filename.startsWith(`${name}.`) && !filename.endsWith(".expected.json"),
+    );
+    if (!sourceFilename) throw new Error(`No source document for ${expectedFilename}`);
+    return { name, sourceFilename, expectedFilename };
+  });
 
-function score(actual: Record<string, unknown>, expected: Expected) {
-  let total = 0;
-  let hit = 0;
-  const misses: string[] = [];
-  const check = (path: string, a: unknown, e: unknown) => {
-    total++;
-    if (same(a, e)) hit++;
-    else misses.push(`${path}: got ${JSON.stringify(a)}, want ${JSON.stringify(e)}`);
-  };
-  for (const k of ["documentType", "documentNumber", "documentDate"] as const) {
-    if (k in expected) check(k, actual[k], expected[k]);
-  }
-  for (const p of ["shipper", "consignee"] as const) {
-    const ep = expected[p];
-    if (ep && "name" in ep) check(`${p}.name`, (actual[p] as { name?: unknown })?.name, ep.name);
-  }
-  const ac = (actual.cargo as Array<Record<string, unknown>>) ?? [];
-  for (const [i, el] of (expected.cargo ?? []).entries()) {
-    const al = ac[i] ?? {};
-    for (const [k, v] of Object.entries(el)) check(`cargo[${i}].${k}`, al[k], v);
-  }
-  if (expected.cargo) check("cargo.length", ac.length, expected.cargo.length);
-  if (expected.rateConfirmation) {
-    const arc = (actual.rateConfirmation as Record<string, unknown> | null) ?? {};
-    for (const [k, v] of Object.entries(expected.rateConfirmation))
-      check(`rateConfirmation.${k}`, arc[k], v);
-  }
-  return { total, hit, accuracy: total ? hit / total : 1, misses };
-}
+describe(`extraction eval (${gateName}, ${extractor.name})`, () => {
+  const scores: ExtractionScore[] = [];
 
-const fixtures = readdirSync(fixturesDir)
-  .filter((f) => f.endsWith(".txt"))
-  .map((f) => f.replace(/\.txt$/, ""));
-
-describe(`extraction eval (${extractor.name})`, () => {
-  const results: Array<{ name: string; accuracy: number }> = [];
-
-  for (const name of fixtures) {
-    it(`${name} meets field accuracy ≥ ${THRESHOLD}`, async () => {
-      const bytes = new Uint8Array(readFileSync(join(fixturesDir, `${name}.txt`)));
+  for (const fixture of fixtures) {
+    it(`${fixture.name} produces a scoreable extraction`, async () => {
+      const bytes = new Uint8Array(readFileSync(join(corpusDir, fixture.sourceFilename)));
       const expected = JSON.parse(
-        readFileSync(join(fixturesDir, `${name}.expected.json`), "utf8"),
-      ) as Expected;
+        readFileSync(join(corpusDir, fixture.expectedFilename), "utf8"),
+      ) as EvalExpected;
       const out = await runExtractionPipeline(
-        { bytes, mimeType: "text/plain", filename: `${name}.txt`, declaredType: "other" },
+        {
+          bytes,
+          mimeType: mimeType(fixture.sourceFilename),
+          filename: fixture.sourceFilename,
+          declaredType: "other",
+        },
         { extractor },
       );
-      expect(out.ok, out.ok ? "" : `${out.error} ${out.issues?.join("; ") ?? ""}`).toBe(true);
+      expect(out.ok, out.ok ? "" : `${out.error}; extraction was not scoreable`).toBe(true);
       if (!out.ok) return;
-      const s = score(out.document, expected);
-      results.push({ name, accuracy: s.accuracy });
-      expect(s.accuracy, s.misses.join("\n")).toBeGreaterThanOrEqual(THRESHOLD);
+      const score = scoreExtraction(out.document, expected, fixture.name);
+      scores.push(score);
+      if (gateName === "regression") {
+        expect(score.accuracy, `missed fields: ${score.misses.join(", ")}`).toBeGreaterThanOrEqual(
+          gate.overallAccuracy,
+        );
+      }
       if (expected._expectLowConfidence) {
         expect(out.lowConfidenceFields.length).toBeGreaterThan(0);
         expect(out.confidence).toBeLessThan(0.7);
@@ -102,11 +100,33 @@ describe(`extraction eval (${extractor.name})`, () => {
     });
   }
 
-  it("reports aggregate accuracy", () => {
-    const mean = results.reduce((s, r) => s + r.accuracy, 0) / Math.max(1, results.length);
-    console.log(
-      `[eval] ${extractor.name}: mean field accuracy ${(mean * 100).toFixed(1)}% over ${results.length} fixtures`,
-    );
-    expect(mean).toBeGreaterThanOrEqual(THRESHOLD);
+  it("meets corpus size, critical-field, and overall accuracy gates", () => {
+    if (gateName !== "regression") {
+      expect(
+        process.env.CORRIDOR_EVAL_CORPUS_DIR,
+        "Pilot/GA evaluation requires CORRIDOR_EVAL_CORPUS_DIR outside Git",
+      ).toBeTruthy();
+      expect(
+        configuredModel,
+        "Pilot/GA evaluation requires a configured model extractor",
+      ).not.toBeNull();
+    }
+    const report = {
+      schemaVersion: 1,
+      gate: gateName,
+      extractor: extractor.name,
+      generatedAt: new Date().toISOString(),
+      thresholds: gate,
+      ...aggregateExtractionScores(scores),
+    };
+    console.log(`[eval] ${JSON.stringify(report)}`);
+    if (process.env.CORRIDOR_EVAL_REPORT_PATH) {
+      const reportPath = resolve(process.env.CORRIDOR_EVAL_REPORT_PATH);
+      mkdirSync(dirname(reportPath), { recursive: true });
+      writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
+    }
+    expect(report.documents).toBeGreaterThanOrEqual(gate.minimumDocuments);
+    expect(report.critical.accuracy).toBeGreaterThanOrEqual(gate.criticalAccuracy);
+    expect(report.overall.accuracy).toBeGreaterThanOrEqual(gate.overallAccuracy);
   });
 });

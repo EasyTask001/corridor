@@ -1,0 +1,67 @@
+name: Production release gates
+
+on:
+  workflow_dispatch:
+    inputs:
+      extraction_gate:
+        description: Private extraction corpus gate
+        required: true
+        type: choice
+        options: [pilot, ga]
+
+permissions:
+  contents: read
+
+jobs:
+  extraction:
+    name: Private extraction accuracy gate
+    runs-on: ubuntu-latest
+    environment: production-gates
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Download protected sanitized corpus
+        env:
+          CORPUS_URL: ${{ secrets.CORRIDOR_EVAL_CORPUS_URL }}
+          CORPUS_TOKEN: ${{ secrets.CORRIDOR_EVAL_CORPUS_TOKEN }}
+        run: |
+          test -n "$CORPUS_URL" -a -n "$CORPUS_TOKEN"
+          mkdir -p private-eval-corpus
+          curl --fail --location --retry 3 --header "Authorization: Bearer $CORPUS_TOKEN" "$CORPUS_URL" --output corpus.tar.gz
+          tar --extract --gzip --file corpus.tar.gz --directory private-eval-corpus
+          rm -f corpus.tar.gz
+      - name: Run ${{ inputs.extraction_gate }} accuracy gate
+        env:
+          CORRIDOR_EVAL_GATE: ${{ inputs.extraction_gate }}
+          CORRIDOR_EVAL_CORPUS_DIR: ${{ github.workspace }}/private-eval-corpus
+          CORRIDOR_EVAL_EXTRACTOR: model
+          CORRIDOR_EVAL_REPORT_PATH: ${{ github.workspace }}/extraction-${{ inputs.extraction_gate }}.json
+          AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: pnpm --filter @corridor/ai exec vitest run src/eval
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extraction-${{ inputs.extraction_gate }}-report
+          path: extraction-${{ inputs.extraction_gate }}.json
+          retention-days: 30
+
+  mobile:
+    name: Physical mobile QA evidence gate
+    runs-on: ubuntu-latest
+    needs: extraction
+    environment: production-gates
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download signed device evidence
+        env:
+          EVIDENCE_URL: ${{ secrets.CORRIDOR_MOBILE_QA_EVIDENCE_URL }}
+          EVIDENCE_TOKEN: ${{ secrets.CORRIDOR_MOBILE_QA_EVIDENCE_TOKEN }}
+        run: |
+          test -n "$EVIDENCE_URL" -a -n "$EVIDENCE_TOKEN"
+          curl --fail --location --retry 3 --header "Authorization: Bearer $EVIDENCE_TOKEN" "$EVIDENCE_URL" --output mobile-device-qa.json
+      - run: node apps/mobile/scripts/verify-device-qa.mjs mobile-device-qa.json

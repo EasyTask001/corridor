@@ -45,6 +45,7 @@ import {
 
 type Outputs = inferRouterOutputs<AppRouter>;
 type Suggestion = NonNullable<Outputs["movement"]["suggestions"]["generate"]>;
+type Capabilities = Outputs["integrations"]["customsCapabilities"];
 
 const PANEL: Record<StepKey, () => React.ReactNode> = {
   trip: TripStep,
@@ -60,12 +61,14 @@ export function MovementWorkspace({
   initial,
   initialValidation,
   options,
+  initialCapabilities,
   permissions,
   simulationEnabled,
 }: {
   initial: Movement;
   initialValidation: Validation;
   options: Options;
+  initialCapabilities: Capabilities;
   permissions: { write: boolean; transmit: boolean; cancel: boolean; amend: boolean };
   simulationEnabled: boolean;
 }) {
@@ -82,6 +85,10 @@ export function MovementWorkspace({
   const { data: validation = initialValidation } = useQuery({
     ...validateOpts,
     initialData: initialValidation,
+  });
+  const { data: capabilities = initialCapabilities } = useQuery({
+    ...trpc.integrations.customsCapabilities.queryOptions({ regime: m.regime }),
+    initialData: initialCapabilities,
   });
 
   const borderWait = useQuery({
@@ -238,16 +245,16 @@ export function MovementWorkspace({
                 {borderWait.data && (
                   <>
                     {" "}
-                    · wait{" "}
-                    <span className="font-mono" title="Border wait (stub feed)">
-                      {borderWait.data.lanes.commercial} min
-                    </span>
+                    · wait <span className="font-mono">{borderWait.data.lanes.commercial} min</span>
                     {borderWait.data.lanes.fast < borderWait.data.lanes.commercial && (
                       <span className="text-fg-secondary/60">
                         {" "}
                         · FAST {borderWait.data.lanes.fast} min
                       </span>
                     )}
+                    <span className="ml-2 text-xs text-status-warning">
+                      {borderWait.data.disclaimer}
+                    </span>
                   </>
                 )}
               </p>
@@ -278,8 +285,14 @@ export function MovementWorkspace({
               {isEditable(m.status) && permissions.transmit && (
                 <button
                   className="btn-signal"
-                  disabled={!validation.canTransmit || submit.isPending}
-                  title={validation.canTransmit ? undefined : "Resolve blocking issues first"}
+                  disabled={!capabilities.transmit || !validation.canTransmit || submit.isPending}
+                  title={
+                    !capabilities.transmit
+                      ? capabilities.reasons.transmit
+                      : validation.canTransmit
+                        ? undefined
+                        : "Resolve blocking issues first"
+                  }
                   onClick={() => submit.mutate({ id })}
                 >
                   {submit.isPending
@@ -297,13 +310,20 @@ export function MovementWorkspace({
                 </button>
               )}
               {m.status === "accepted" && permissions.amend && (
-                <button className="btn-secondary" onClick={() => setAmending((v) => !v)}>
+                <button
+                  className="btn-secondary"
+                  disabled={!capabilities.amend}
+                  title={capabilities.reasons.amend}
+                  onClick={() => setAmending((v) => !v)}
+                >
                   Amend
                 </button>
               )}
               {!terminal && permissions.cancel && (
                 <button
                   className="btn-secondary text-status-danger"
+                  disabled={!capabilities.cancel}
+                  title={capabilities.reasons.cancel}
                   onClick={() => setCancelling((v) => !v)}
                 >
                   Cancel
@@ -311,6 +331,12 @@ export function MovementWorkspace({
               )}
             </div>
           </header>
+
+          {m.status === "accepted" && permissions.amend && !capabilities.amend && (
+            <p role="status" className="text-sm text-status-warning">
+              {capabilities.reasons.amend}
+            </p>
+          )}
 
           {error && (
             <p
@@ -417,11 +443,14 @@ export function MovementWorkspace({
                 const fd = new FormData(e.currentTarget);
                 const reasonCode = String(fd.get("reasonCode") ?? "");
                 const shipmentId = String(fd.get("amendShipment") ?? "");
+                const target = shipmentId
+                  ? ({ scope: "shipment", shipmentId } as const)
+                  : ({ scope: "trip" } as const);
                 amend.mutate({
                   movementId: id,
+                  ...target,
                   reason: String(fd.get("reason") ?? ""),
                   ...(reasonCode && { reasonCode: reasonCode as CbsaAmendmentReasonCode }),
-                  ...(shipmentId && { shipmentId }),
                   patch: {
                     scheduledCrossingAt: fromLocalInput(String(fd.get("eta") ?? "")),
                     portId: amendPortId,

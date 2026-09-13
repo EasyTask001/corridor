@@ -158,15 +158,17 @@ export const CBSA_AMENDMENT_REASON_CODE_VALUES = [
 export const cbsaAmendmentReasonCode = z.enum(CBSA_AMENDMENT_REASON_CODE_VALUES);
 export type CbsaAmendmentReasonCode = z.infer<typeof cbsaAmendmentReasonCode>;
 
-export const amendmentInput = z.object({
+const amendmentBase = z.object({
   movementId: uuid,
   reason: nonEmpty.max(500),
   /** Required when the movement files under ACI (checked by the API and the DB). */
   reasonCode: cbsaAmendmentReasonCode.optional(),
-  /** The shipment the amendment is about; omitted = the trip header. */
-  shipmentId: uuid.optional(),
   patch: movementPatch,
 });
+export const amendmentInput = z.discriminatedUnion("scope", [
+  amendmentBase.extend({ scope: z.literal("trip"), shipmentId: z.undefined().optional() }),
+  amendmentBase.extend({ scope: z.literal("shipment"), shipmentId: uuid }),
+]);
 export type AmendmentInput = z.infer<typeof amendmentInput>;
 
 /** Customs decisions (Phase 3 mock clients / Phase 2 dev simulation). */

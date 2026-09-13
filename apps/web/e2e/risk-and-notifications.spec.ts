@@ -30,6 +30,19 @@ async function setChecked(checkbox: Locator, desired: boolean) {
 }
 
 test.describe("risk detection", () => {
+  test("inspection risk is a score with only present, labelled contributors", async ({ page }) => {
+    await login(page, "dispatch@pathfinder.demo");
+    await page.goto("/alerts");
+
+    const row = page.locator("div.panel > div", {
+      hasText: "Inspection Risk — 58 / 100 · Elevated",
+    });
+    await expect(row).toBeVisible();
+    await expect(row).toContainText("High impact:");
+    await expect(row).toContainText("Medium impact:");
+    await expect(row).not.toContainText(/likelihood|probability/i);
+  });
+
   test("a wildly outlying shipment line raises a risk_flag alert on the movement", async ({
     page,
   }) => {
@@ -64,7 +77,13 @@ test.describe("risk detection", () => {
     await form.getByLabel("Weight", { exact: true }).fill("99000");
     await form.getByLabel("Quantity", { exact: true }).fill("12");
     await form.getByLabel("Quantity unit").selectOption("Coil");
-    await form.getByRole("button", { name: "Save line" }).click();
+    await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.url().includes("/api/trpc/shipment.commodities.upsert") && response.ok(),
+      ),
+      form.getByRole("button", { name: "Save line" }).click(),
+    ]);
     await expect(page.getByText("Hot-rolled steel coils")).toBeVisible();
 
     // Risk findings land as compliance alerts (a separate concern from the

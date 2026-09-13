@@ -17,64 +17,79 @@ export interface TariffEntry {
   usDutyRate: number | null;
   caDutyRate: number | null;
   notes?: string;
+  source: string;
+  dataQuality: "synthetic_demo" | "authoritative";
+  updatedAt: string;
+  disclaimer: string | null;
 }
 
-const TABLE: TariffEntry[] = [
-  {
-    hsCode: "0808.10",
-    description: "Apples, fresh",
-    usDutyRate: 0,
-    caDutyRate: 0,
-    notes: "USMCA/CUSMA duty-free",
-  },
-  { hsCode: "0808.30", description: "Pears, fresh", usDutyRate: 0, caDutyRate: 0 },
-  {
-    hsCode: "4407.11",
-    description: "Lumber, coniferous (pine), sawn",
-    usDutyRate: 0,
-    caDutyRate: 0,
-    notes: "Softwood lumber duties may apply (AD/CVD)",
-  },
-  {
-    hsCode: "7208.10",
-    description: "Flat-rolled iron/steel, hot-rolled, in coils, with patterns in relief",
-    usDutyRate: 0,
-    caDutyRate: 0,
-    notes: "Section 232 measures may apply",
-  },
-  {
-    hsCode: "7210.49",
-    description: "Flat-rolled iron/steel, zinc-plated (galvanized), other",
-    usDutyRate: 0,
-    caDutyRate: 0,
-    notes: "Section 232 measures may apply",
-  },
-  {
-    hsCode: "7308.90",
-    description: "Structures and parts of iron or steel, other",
-    usDutyRate: 0,
-    caDutyRate: 0,
-  },
-  {
-    hsCode: "8471.30",
-    description: "Portable automatic data processing machines ≤10 kg",
-    usDutyRate: 0,
-    caDutyRate: 0,
-  },
-  {
-    hsCode: "8708.99",
-    description: "Parts and accessories of motor vehicles, other",
-    usDutyRate: 0.025,
-    caDutyRate: 0,
-  },
-  {
-    hsCode: "3923.21",
-    description: "Sacks and bags of polymers of ethylene",
-    usDutyRate: 0.03,
-    caDutyRate: 0,
-  },
-  { hsCode: "9403.60", description: "Wooden furniture, other", usDutyRate: 0, caDutyRate: 0 },
-];
+const TABLE_UPDATED_AT = "2026-09-12T00:00:00.000Z";
+const EXPERIMENTAL_DISCLAIMER = "Experimental — synthetic demo data, not live";
+
+const TABLE: TariffEntry[] = (
+  [
+    {
+      hsCode: "0808.10",
+      description: "Apples, fresh",
+      usDutyRate: 0,
+      caDutyRate: 0,
+      notes: "USMCA/CUSMA duty-free",
+    },
+    { hsCode: "0808.30", description: "Pears, fresh", usDutyRate: 0, caDutyRate: 0 },
+    {
+      hsCode: "4407.11",
+      description: "Lumber, coniferous (pine), sawn",
+      usDutyRate: 0,
+      caDutyRate: 0,
+      notes: "Softwood lumber duties may apply (AD/CVD)",
+    },
+    {
+      hsCode: "7208.10",
+      description: "Flat-rolled iron/steel, hot-rolled, in coils, with patterns in relief",
+      usDutyRate: 0,
+      caDutyRate: 0,
+      notes: "Section 232 measures may apply",
+    },
+    {
+      hsCode: "7210.49",
+      description: "Flat-rolled iron/steel, zinc-plated (galvanized), other",
+      usDutyRate: 0,
+      caDutyRate: 0,
+      notes: "Section 232 measures may apply",
+    },
+    {
+      hsCode: "7308.90",
+      description: "Structures and parts of iron or steel, other",
+      usDutyRate: 0,
+      caDutyRate: 0,
+    },
+    {
+      hsCode: "8471.30",
+      description: "Portable automatic data processing machines ≤10 kg",
+      usDutyRate: 0,
+      caDutyRate: 0,
+    },
+    {
+      hsCode: "8708.99",
+      description: "Parts and accessories of motor vehicles, other",
+      usDutyRate: 0.025,
+      caDutyRate: 0,
+    },
+    {
+      hsCode: "3923.21",
+      description: "Sacks and bags of polymers of ethylene",
+      usDutyRate: 0.03,
+      caDutyRate: 0,
+    },
+    { hsCode: "9403.60", description: "Wooden furniture, other", usDutyRate: 0, caDutyRate: 0 },
+  ] satisfies Array<Omit<TariffEntry, "source" | "dataQuality" | "updatedAt" | "disclaimer">>
+).map((entry) => ({
+  ...entry,
+  source: "Corridor embedded tariff demo",
+  dataQuality: "synthetic_demo",
+  updatedAt: TABLE_UPDATED_AT,
+  disclaimer: EXPERIMENTAL_DISCLAIMER,
+}));
 
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 

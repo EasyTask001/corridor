@@ -17,8 +17,8 @@ existing HTTP drain (`packages/api/src/services/borderconnect.ts`'s
 - Every frame after that ack is handed to `storeInboundMessages` inside a
   `withServiceRole` transaction, unchanged from how the HTTP drain stores
   what it polls — same table, same `payload_sha256` dedup, so a message the
-  socket sees and a message the cron drain later polls for the same content
-  collapse into one row rather than duplicating.
+  socket sees and a message later supplied to the inbox store with the same
+  content collapse into one row rather than duplicating.
 - On `ACCESS_DENIED_ERROR` (a bad/expired key), the socket closes and this
   app does **not** reconnect — retrying a dead key would just hammer
   BorderConnect. Any other close reconnects with capped exponential backoff
@@ -31,11 +31,13 @@ existing HTTP drain (`packages/api/src/services/borderconnect.ts`'s
   ready for a future decision about whether (and where) to run it
   continuously — see `docs/superpowers/specs/2026-09-10-borderconnect-customs-adapter-design.md`'s
   "WebSocket listener (hosting deferred)" section.
-- It deliberately does **not** touch the cron drain job or its route —
-  running this listener and the HTTP poller at the same time is intended to
-  be safe (`storeInboundMessages`'s `payload_sha256` dedup is exactly the
-  mechanism that makes overlap harmless), not a replacement for one or the
-  other.
+- It deliberately does **not** touch the cron drain job or its route. During
+  the pilot it must run only in an isolated test window with the HTTP drain
+  stopped and no customer filing; the two live receive transports must never
+  run concurrently while their queue semantics remain unconfirmed.
+- Sentry captures listener exceptions and traces through the shared telemetry
+  scrubber, and optional OTLP metrics report inbox receive/store/duplicate
+  counts. No raw frame or routing key is attached to telemetry.
 
 ## Open question: does an open socket divert the HTTP polling queue?
 
@@ -69,10 +71,15 @@ Service Provider credentials `apps/web` uses for the HTTP transport) and
 never uses `supabase-js`, only `@corridor/db`'s `getDb()`/`withServiceRole()`,
 which talk to Postgres directly over `DATABASE_URL`.
 
+Also configure `BORDERCONNECT_SPOOL_DIR` on a persistent 0700 volume and
+`BORDERCONNECT_SPOOL_KEY` with a random 32-byte hex or base64 secret. Frames
+are encrypted into this spool before the database insert and are replayed on
+restart; the listener stops instead of dropping a batch when persistence fails.
+
+Set `BORDERCONNECT_API_URL_SUFFIX`, `BORDERCONNECT_API_KEY`, and `DATABASE_URL`
+in a private environment file or secret manager, then run:
+
 ```bash
-export BORDERCONNECT_API_URL_SUFFIX=EasyTask
-export BORDERCONNECT_API_KEY=...
-export DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55322/postgres
 pnpm --filter @corridor/borderconnect-listener dev
 ```
 
@@ -82,9 +89,7 @@ artifact" for later):
 ```bash
 docker build -t corridor-borderconnect-listener -f apps/borderconnect-listener/Dockerfile .
 docker run --rm \
-  -e BORDERCONNECT_API_URL_SUFFIX=EasyTask \
-  -e BORDERCONNECT_API_KEY=... \
-  -e DATABASE_URL=postgresql://... \
+  --env-file /path/to/private/environment \
   corridor-borderconnect-listener
 ```
 

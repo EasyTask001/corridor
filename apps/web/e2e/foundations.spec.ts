@@ -152,6 +152,19 @@ test.describe("seeded roles", () => {
       "rel",
       "noopener",
     );
+    const experimental = "Experimental — synthetic demo data, not live";
+    await expect(page.getByText(experimental, { exact: true })).toHaveCount(2);
+
+    await page.getByLabel("Description or code").fill("steel");
+    const tariffResult = page
+      .getByRole("list", { name: "Tariff results" })
+      .getByRole("listitem")
+      .first();
+    await expect(tariffResult).toContainText(experimental);
+
+    await page.getByLabel("Port or office").fill("3801");
+    await page.getByRole("button", { name: /^3801 — DETROIT/ }).click();
+    await expect(page.getByTestId("border-wait-minutes")).toContainText(experimental);
 
     await page.goto("/settings/profile");
     await expect(page.getByLabel("Display name")).toBeVisible();

@@ -97,7 +97,14 @@ function makeSource(): ManifestSource {
       seals: ["S1"],
     },
     trailers: [
-      { unitNumber: "TR-1", trailerType: "TF", plateNumber: "GH4", plateJurisdiction: "ON", plates: [], seals: ["S2"] },
+      {
+        unitNumber: "TR-1",
+        trailerType: "TF",
+        plateNumber: "GH4",
+        plateJurisdiction: "ON",
+        plates: [],
+        seals: ["S2"],
+      },
     ],
     shipments: [
       {
@@ -113,7 +120,13 @@ function makeSource(): ManifestSource {
         loadingProvince: "ON",
         loadingCity: "Hamilton",
         shipperName: "Acme Steel",
-        shipperAddress: { line1: "1 Mill Rd", city: "Hamilton", region: "ON", postalCode: "L8L1A1", country: "CA" },
+        shipperAddress: {
+          line1: "1 Mill Rd",
+          city: "Hamilton",
+          region: "ON",
+          postalCode: "L8L1A1",
+          country: "CA",
+        },
         consigneeName: "Depot Inc",
         consigneeAddress: {
           line1: "2 Depot Ave",
@@ -150,7 +163,12 @@ function makeSource(): ManifestSource {
   };
 }
 
-const opts: OutboundOptions = { companyKey: "CK1", sendId: "SID1", operation: "CREATE", autoSend: true };
+const opts: OutboundOptions = {
+  companyKey: "CK1",
+  sendId: "SID1",
+  operation: "CREATE",
+  autoSend: true,
+};
 
 describe("toAceTrip — full valid manifest", () => {
   it("produces the exact expected ACE_TRIP object", () => {
@@ -162,7 +180,7 @@ describe("toAceTrip — full valid manifest", () => {
       operation: "CREATE",
       autoSend: true,
       tripNumber: "PFTR00001",
-      estimatedArrivalDate: "2026-09-08 10:30:00",
+      estimatedArrivalDateTime: "2026-09-08 10:30:00",
       usPortOfArrival: "3801",
       instrumentsOfInternationalTrafficBond: { type: "CARRIER" },
       truck: {
@@ -192,7 +210,7 @@ describe("toAceTrip — full valid manifest", () => {
           dateOfBirth: "1985-03-14",
           citizenshipCountry: "CA",
           fastCardNumber: "42700000000001",
-          travelDocuments: [{ type: "ACW", number: "P123", issuingCountry: "CA", expiresOn: "2030-01-01" }],
+          travelDocuments: [{ type: "ACW", number: "P123", country: "CA" }],
         },
       ],
       passengers: [
@@ -202,7 +220,7 @@ describe("toAceTrip — full valid manifest", () => {
           gender: "F",
           dateOfBirth: "1990-05-05",
           citizenshipCountry: "US",
-          travelDocuments: [{ type: "AEW", number: "N123", issuingCountry: "US", expiresOn: "2028-01-01" }],
+          travelDocuments: [{ type: "AEW", number: "N123", country: "US" }],
         },
       ],
       shipments: [
@@ -214,7 +232,13 @@ describe("toAceTrip — full valid manifest", () => {
           provinceOfLoading: "ON",
           shipper: {
             name: "Acme Steel",
-            address: { addressLine: "1 Mill Rd", city: "Hamilton", postalCode: "L8L1A1", stateProvince: "ON", country: "CA" },
+            address: {
+              addressLine: "1 Mill Rd",
+              city: "Hamilton",
+              postalCode: "L8L1A1",
+              stateProvince: "ON",
+              country: "CA",
+            },
           },
           consignee: {
             name: "Depot Inc",
@@ -234,8 +258,8 @@ describe("toAceTrip — full valid manifest", () => {
               weight: 1000,
               weightUnit: "KG",
               marksAndNumbers: ["LOT-1"],
-              harmonizedCode: "7208.10",
-              value: { amount: 5000, currency: "USD" },
+              harmonizedCode: "720810",
+              value: "5000",
               countryOfOrigin: "CA",
             },
           ],
@@ -264,7 +288,10 @@ describe("toAceTrip — full valid manifest", () => {
 
   it("carries companyKey on the trip and on every nested shipment", () => {
     const m = buildManifest(makeSource());
-    const out = toAceTrip(m, opts) as { companyKey: string; shipments: Array<{ companyKey: string }> };
+    const out = toAceTrip(m, opts) as {
+      companyKey: string;
+      shipments: Array<{ companyKey: string }>;
+    };
     expect(out.companyKey).toBe("CK1");
     expect(out.shipments.every((s) => s.companyKey === "CK1")).toBe(true);
   });
@@ -283,7 +310,9 @@ describe("toAceTrip — full valid manifest", () => {
 
   it("uses tripNumberOverride instead of deriving one", () => {
     const m = buildManifest(makeSource());
-    const out = toAceTrip(m, { ...opts, tripNumberOverride: "PFTRZZZZZ" }) as { tripNumber: string };
+    const out = toAceTrip(m, { ...opts, tripNumberOverride: "PFTRZZZZZ" }) as {
+      tripNumber: string;
+    };
     expect(out.tripNumber).toBe("PFTRZZZZZ");
   });
 
@@ -291,7 +320,9 @@ describe("toAceTrip — full valid manifest", () => {
     const src = makeSource();
     src.shipments[0]!.commodities[0]!.packagingType = "sKiD"; // real value is "Skid" in code-lists.ts
     const m = buildManifest(src);
-    const out = toAceTrip(m, opts) as { shipments: Array<{ commodities: Array<{ packagingUnit: string }> }> };
+    const out = toAceTrip(m, opts) as {
+      shipments: Array<{ commodities: Array<{ packagingUnit: string }> }>;
+    };
     expect(out.shipments[0]!.commodities[0]!.packagingUnit).toBe("SKD");
   });
 

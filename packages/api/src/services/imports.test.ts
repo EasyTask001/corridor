@@ -8,6 +8,7 @@ import { createFakeDb, TEST_ORG_ID } from "../test/mock-context";
 import { parseCsv, validateCommodityRows, validateShipmentRows } from "./imports";
 
 const PARTNER = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const BROKER = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const PORT = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const SHIPMENT = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 
@@ -18,6 +19,13 @@ const rows = {
       organizationId: TEST_ORG_ID,
       name: "Maple Ridge Steel Ltd",
       type: "shipper",
+      status: "active",
+    },
+    {
+      id: BROKER,
+      organizationId: TEST_ORG_ID,
+      name: "Northgate Customs Brokers",
+      type: "broker",
       status: "active",
     },
   ],
@@ -53,7 +61,7 @@ describe("validateShipmentRows", () => {
   const csv = (lines: string[]) =>
     parseCsv(
       [
-        "regime,carrier_code,control_reference,shipment_type,cargo_type,shipper_name,consignee_name,entry_port,is_pars",
+        "regime,carrier_code,control_reference,shipment_type,cargo_type,shipper_name,consignee_name,broker_name,entry_port,is_pars",
         ...lines,
       ].join("\n"),
     ).rows;
@@ -63,13 +71,16 @@ describe("validateShipmentRows", () => {
     const { report, payload } = await validateShipmentRows(
       db.tx,
       TEST_ORG_ID,
-      csv(["ACE,,PAPS90101,regular_bill,,Maple Ridge Steel Ltd,,3801,false"]),
+      csv([
+        "ACE,,PAPS90101,regular_bill,,Maple Ridge Steel Ltd,,Northgate Customs Brokers,3801,false",
+      ]),
     );
     expect(report).toMatchObject({ okCount: 1, errorCount: 0 });
     expect(payload[0]).toMatchObject({
       carrierCode: "PFTR",
       controlReference: "PAPS90101",
       shipperId: PARTNER,
+      brokerId: BROKER,
       entryPortId: PORT,
       shipmentType: "regular_bill",
     });
@@ -80,14 +91,14 @@ describe("validateShipmentRows", () => {
     const { report } = await validateShipmentRows(
       db.tx,
       TEST_ORG_ID,
-      csv(["ACE,PFTR,PAPS90102,bogus,,Nobody Inc,,9999,no"]),
+      csv(["ACE,PFTR,PAPS90102,bogus,,Nobody Inc,,,9999,no"]),
     );
     expect(report.errorCount).toBe(1);
     expect(report.rows[0]?.errors.map((e) => e.column)).toEqual(["shipment_type"]);
     const { report: r2 } = await validateShipmentRows(
       db.tx,
       TEST_ORG_ID,
-      csv(["ACE,PFTR,PAPS90102,regular_bill,,Nobody Inc,,9999,no"]),
+      csv(["ACE,PFTR,PAPS90102,regular_bill,,Nobody Inc,,,9999,no"]),
     );
     expect(r2.rows[0]?.errors.map((e) => e.column).sort()).toEqual(["entry_port", "shipper_name"]);
   });
@@ -97,7 +108,7 @@ describe("validateShipmentRows", () => {
     const { report } = await validateShipmentRows(
       db.tx,
       TEST_ORG_ID,
-      csv(["ACI,7ELU,PARS500,regular_bill,,,,,true", "ACI,ZZZZ,PARS501,,regular,,,,true"]),
+      csv(["ACI,7ELU,PARS500,regular_bill,,,,,,true", "ACI,ZZZZ,PARS501,,regular,,,,,true"]),
     );
     expect(report.rows[0]?.errors.map((e) => e.column)).toEqual(
       expect.arrayContaining(["cargo_type", "shipment_type"]),
@@ -113,9 +124,9 @@ describe("validateShipmentRows", () => {
       db.tx,
       TEST_ORG_ID,
       csv([
-        "ACE,PFTR,PAPS90103,regular_bill,,,,,",
-        "ACE,PFTR,PAPS90103,regular_bill,,,,,",
-        "ACE,PFTR,PAPS00001,regular_bill,,,,,",
+        "ACE,PFTR,PAPS90103,regular_bill,,,,,,",
+        "ACE,PFTR,PAPS90103,regular_bill,,,,,,",
+        "ACE,PFTR,PAPS00001,regular_bill,,,,,,",
       ]),
     );
     expect(report.rows.map((r) => r.status)).toEqual(["ok", "error", "error"]);

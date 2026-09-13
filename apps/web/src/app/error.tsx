@@ -1,6 +1,19 @@
 "use client";
 
-export default function Error({ reset }: { reset: () => void }) {
+import { useEffect } from "react";
+import * as Sentry from "@sentry/nextjs";
+
+export default function Error({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  useEffect(() => {
+    Sentry.captureException(error);
+  }, [error]);
+
   return (
     <main className="mx-auto flex min-h-[50vh] max-w-xl flex-col items-center justify-center gap-4 p-6 text-center">
       <h1 className="text-xl font-semibold">Something went wrong</h1>

@@ -30,9 +30,11 @@ import {
   type RlsTransaction,
 } from "@corridor/db";
 import { CUSTOMS_EVENT_LABELS } from "@corridor/domain";
+import { corridorMetrics } from "@corridor/observability";
 import {
   createBorderConnectHttpTransport,
   createFixtureBorderConnectTransport,
+  createBorderConnectSpool,
   FIXTURE_BORDERCONNECT_TENANT_KEY,
   inboundKeys,
   isAciReleaseCode,
@@ -61,11 +63,25 @@ export function borderConnectEnv(): {
   return { apiUrlSuffix, apiKey, live: !!(apiUrlSuffix && apiKey) };
 }
 
-function resolveTransport(opts?: { transport?: BorderConnectTransport }): BorderConnectTransport {
+function resolveTransport(opts?: {
+  transport?: BorderConnectTransport;
+  environment?: "sandbox" | "production";
+}): BorderConnectTransport {
   if (opts?.transport) return opts.transport;
   const env = borderConnectEnv();
-  if (env.live) {
-    return createBorderConnectHttpTransport({ apiUrlSuffix: env.apiUrlSuffix!, apiKey: env.apiKey! });
+  const environment =
+    opts?.environment ??
+    (process.env.VERCEL_ENV === "production" || process.env.CORRIDOR_ENV === "production"
+      ? "production"
+      : "sandbox");
+  if (environment === "production" && !env.live) {
+    throw new Error("BorderConnect production receive credentials are not configured");
+  }
+  if (environment === "production") {
+    return createBorderConnectHttpTransport({
+      apiUrlSuffix: env.apiUrlSuffix!,
+      apiKey: env.apiKey!,
+    });
   }
   // No live credentials and nothing injected: the same in-process fixture
   // queue `customsClientFor`'s border_connect client falls back to, drained
@@ -75,6 +91,17 @@ function resolveTransport(opts?: { transport?: BorderConnectTransport }): Border
   // (transmit → fixture queue → drain → accepted) has something to pull from
   // without a real BorderConnect account.
   return createFixtureBorderConnectTransport(FIXTURE_BORDERCONNECT_TENANT_KEY, () => new Date());
+}
+
+function requiredSpool(environment: "sandbox" | "production") {
+  if (environment !== "production") return null;
+  const spool = createBorderConnectSpool();
+  if (!spool) {
+    throw new Error(
+      "BORDERCONNECT_SPOOL_DIR and a 32-byte BORDERCONNECT_SPOOL_KEY are required before polling a live BorderConnect queue",
+    );
+  }
+  return spool;
 }
 
 /**
@@ -258,7 +285,9 @@ async function findShipmentsForRns(tx: RlsTransaction, cargoControlNumber: strin
   // system — an ACE shipment can never be RNS-released) or to a movement that
   // is done (`cancelled`/`arrived`/`released`/`rejected`) or has none at all.
   // Short-circuiting on `candidates.length <= 1` would route those anyway.
-  const movementIds = [...new Set(candidates.map((c) => c.movementId).filter((id): id is string => !!id))];
+  const movementIds = [
+    ...new Set(candidates.map((c) => c.movementId).filter((id): id is string => !!id)),
+  ];
   const eligible = movementIds.length
     ? await tx
         .select({ id: movements.id })
@@ -422,7 +451,10 @@ export async function processInboxRow(db: DatabaseClient, rowId: number): Promis
             .limit(1)
         : [];
       if (!org) {
-        await markRow(tx, rowId, { processedAt: new Date(), processingError: "unknown companyKey" });
+        await markRow(tx, rowId, {
+          processedAt: new Date(),
+          processingError: "unknown companyKey",
+        });
         return { outcome: "unroutable", detail: "unknown companyKey" };
       }
 
@@ -479,22 +511,28 @@ export async function processInboxRow(db: DatabaseClient, rowId: number): Promis
         // the movement's row lock so two workers can never interleave a
         // read-modify-write on the same movement.
         const m = await lockMovement(tx, org.id, submission.movementId);
-        await applyStatusMessage(tx, { orgId: org.id, userId: null }, m, {
-          referenceNumber: submission.referenceNumber ?? parsed.tripNumber ?? "",
-          status: "rejected",
-          decision: "rejected",
-          message: parsed.message || `BorderConnect: ${parsed.status}`,
-          events: [
-            {
-              code: "import_error",
-              label: CUSTOMS_EVENT_LABELS.import_error,
-              occurredAt: new Date().toISOString(),
-              raw: parsed.raw,
-            },
-          ],
-          shipments: [],
-          raw: parsed.raw,
-        }, submission.id);
+        await applyStatusMessage(
+          tx,
+          { orgId: org.id, userId: null },
+          m,
+          {
+            referenceNumber: submission.referenceNumber ?? parsed.tripNumber ?? "",
+            status: "rejected",
+            decision: "rejected",
+            message: parsed.message || `BorderConnect: ${parsed.status}`,
+            events: [
+              {
+                code: "import_error",
+                label: CUSTOMS_EVENT_LABELS.import_error,
+                occurredAt: new Date().toISOString(),
+                raw: parsed.raw,
+              },
+            ],
+            shipments: [],
+            raw: parsed.raw,
+          },
+          submission.id,
+        );
         await markRow(tx, rowId, {
           organizationId: org.id,
           movementId: m.id,
@@ -505,7 +543,9 @@ export async function processInboxRow(db: DatabaseClient, rowId: number): Promis
       }
 
       // parsed.kind === "customs_status"
-      const submission = await resolveSubmission(tx, org.id, parsed.keys, { requireMovement: true });
+      const submission = await resolveSubmission(tx, org.id, parsed.keys, {
+        requireMovement: true,
+      });
       if (!submission?.movementId) {
         await markRow(tx, rowId, {
           organizationId: org.id,
@@ -600,7 +640,11 @@ async function markRow(
  */
 export async function drainBorderConnectInbox(
   db: DatabaseClient,
-  opts?: { transport?: BorderConnectTransport; limit?: number },
+  opts?: {
+    transport?: BorderConnectTransport;
+    limit?: number;
+    environment?: "sandbox" | "production";
+  },
 ): Promise<{
   received: number;
   stored: number;
@@ -609,10 +653,36 @@ export async function drainBorderConnectInbox(
   errors: number;
 }> {
   const transport = resolveTransport(opts);
+  const environment =
+    opts?.environment ??
+    (process.env.VERCEL_ENV === "production" || process.env.CORRIDOR_ENV === "production"
+      ? "production"
+      : "sandbox");
+  const spool = requiredSpool(environment);
+  let stored = 0;
+  let duplicates = 0;
+  const spoolBatches = spool ? await spool.read() : [];
+  for (const batch of spoolBatches) {
+    const result = await withServiceRole(db, (tx) => storeInboundMessages(tx, batch.messages));
+    stored += result.stored;
+    duplicates += result.duplicates;
+    await spool!.remove(batch.id);
+  }
+
   const messages = await transport.receive();
-  const { stored, duplicates } = await withServiceRole(db, (tx) =>
-    storeInboundMessages(tx, messages),
-  );
+  if (spool && messages.length > 0) {
+    const batch = await spool.write(messages);
+    const result = await withServiceRole(db, (tx) => storeInboundMessages(tx, messages));
+    stored += result.stored;
+    duplicates += result.duplicates;
+    // The encrypted batch remains on disk if the database write rejects. The
+    // job fails so the watchdog retries it, but no pop-on-read message is lost.
+    if (batch) await spool.remove(batch.id);
+  } else {
+    const result = await withServiceRole(db, (tx) => storeInboundMessages(tx, messages));
+    stored += result.stored;
+    duplicates += result.duplicates;
+  }
 
   const limit = opts?.limit ?? 200;
   const pending = await withServiceRole(db, (tx) =>
@@ -632,7 +702,91 @@ export async function drainBorderConnectInbox(
     if (result.detail?.startsWith("attempt=")) errors++;
   }
 
+  corridorMetrics.customsInbox({
+    received: messages.length,
+    stored,
+    processed: Object.values(processed).reduce((sum, count) => sum + count, 0),
+    duplicates,
+    unroutable: processed.unroutable ?? 0,
+    failed: errors,
+  });
   return { received: messages.length, stored, duplicates, processed, errors };
 }
 
 export type { CustomsInboxRow };
+
+/**
+ * Reset one poison/unroutable inbox row after an operator fixes its mapping.
+ * Ownership is checked against the row's tenant, the now-corrected company
+ * key, or the sole eligible ACI shipment for an RNS message. The payload is
+ * never returned to the caller and the reset is deliberately idempotent.
+ */
+export async function reprocessInboxRow(
+  db: DatabaseClient,
+  orgId: string,
+  rowId: number,
+): Promise<{ id: number }> {
+  return withServiceRole(db, async (tx) => {
+    const [row] = await tx
+      .select({
+        id: customsInbox.id,
+        organizationId: customsInbox.organizationId,
+        companyKey: customsInbox.companyKey,
+        payload: customsInbox.payload,
+        processedAt: customsInbox.processedAt,
+        processingError: customsInbox.processingError,
+      })
+      .from(customsInbox)
+      .where(eq(customsInbox.id, rowId))
+      .limit(1);
+    if (!row) throw new Error("customs inbox row not found");
+    if (
+      !row.processingError ||
+      !/unknown|ambiguous|no (matching )?movement/i.test(row.processingError)
+    ) {
+      throw new Error("only an unroutable or ambiguous inbox row can be reprocessed");
+    }
+
+    let owned = row.organizationId === orgId;
+    if (!owned && row.companyKey) {
+      const [org] = await tx
+        .select({ id: organizations.id })
+        .from(organizations)
+        .where(
+          and(
+            eq(organizations.id, orgId),
+            eq(organizations.borderConnectCompanyKey, row.companyKey),
+          ),
+        )
+        .limit(1);
+      owned = !!org;
+    }
+    if (!owned) {
+      const parsed = parseInbound(row.payload);
+      if (parsed.kind === "rns") {
+        const [candidate] = await tx
+          .select({ id: shipments.id })
+          .from(shipments)
+          .innerJoin(movements, eq(movements.id, shipments.movementId))
+          .where(
+            and(
+              eq(shipments.organizationId, orgId),
+              eq(shipments.controlNumber, parsed.cargoControlNumber),
+              eq(movements.organizationId, orgId),
+              eq(movements.regime, "ACI"),
+              inArray(movements.status, ["sent", "accepted", "held"]),
+            ),
+          )
+          .limit(1);
+        owned = !!candidate;
+      }
+    }
+    if (!owned) throw new Error("inbox row does not belong to this organization");
+
+    await tx
+      .update(customsInbox)
+      .set({ organizationId: orgId, processedAt: null, processingError: null })
+      .where(eq(customsInbox.id, rowId));
+    return { id: rowId };
+  });
+}

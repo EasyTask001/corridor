@@ -263,7 +263,7 @@ export function copilotTools(rls: RlsRunner, orgId: string): ToolSet {
 
     lookupHsCode: tool({
       description:
-        "Look up tariff classification info for an HS code, or search by keyword when the exact code isn't known. Returns description and general duty rates.",
+        "Search Corridor's synthetic tariff demo. Results are experimental, not live, and cannot be used as compliance evidence.",
       inputSchema: z.object({
         hsCode: z.string().optional().describe("Exact HS code, e.g. 7208.10"),
         keyword: z.string().optional().describe("Keyword to search when the HS code isn't known"),

@@ -414,6 +414,8 @@ export const shipments = pgTable(
     shipperId: uuid("shipper_id"),
     /** FK is composite — see shipments_consignee_org_fkey below. */
     consigneeId: uuid("consignee_id"),
+    /** 0049 — shipment-specific customs broker; role is guarded in the database. */
+    brokerId: uuid("broker_id"),
     destinationPortId: uuid("destination_port_id").references(() => ports.id),
     sublocationPortId: uuid("sublocation_port_id").references(() => ports.id),
     loadingCountry: text("loading_country"),
@@ -462,6 +464,9 @@ export const shipments = pgTable(
     index("shipments_org_consignee_idx")
       .on(t.organizationId, t.consigneeId)
       .where(sql`${t.consigneeId} is not null`),
+    index("shipments_org_broker_idx")
+      .on(t.organizationId, t.brokerId)
+      .where(sql`${t.brokerId} is not null`),
     index("shipments_org_import_batch_idx")
       .on(t.organizationId, t.importBatchId)
       .where(sql`${t.importBatchId} is not null`),
@@ -490,6 +495,11 @@ export const shipments = pgTable(
     /** 0031 — target for the composite keys on commodities, movement_events,
      * movement_amendments, in_bond_records, pars_rns_events. */
     uniqueIndex("shipments_id_organization_unique").on(t.id, t.organizationId),
+    foreignKey({
+      name: "shipments_broker_org_fkey",
+      columns: [t.brokerId, t.organizationId],
+      foreignColumns: [partners.id, partners.organizationId],
+    }).onDelete("restrict"),
     foreignKey({
       name: "shipments_consignee_org_fkey",
       columns: [t.consigneeId, t.organizationId],

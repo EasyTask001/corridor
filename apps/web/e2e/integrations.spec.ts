@@ -229,8 +229,19 @@ test.describe("BorderConnect filing mode (Task 13)", () => {
     await page.reload();
     await expect(card().getByLabel("Filing mode")).toHaveValue("border_connect");
 
+    // The internal monitor remains available, but BorderConnect QP messaging
+    // fails closed and offers no transport controls.
+    await page.goto("/in-bond");
+    const inBond = page.getByRole("row", { name: /PFTRPAPS90010/ });
+    await expect(
+      inBond.getByText("QP In-Bond customs messaging coming soon; tracking only."),
+    ).toBeVisible();
+    await expect(inBond.getByRole("button", { name: "Send arrival" })).toHaveCount(0);
+    await expect(inBond.getByRole("button", { name: "Check status" })).toHaveCount(0);
+
     // Restore both to their prior state so the seeded fixture and other specs
     // (which expect CBP ACE in mock mode) are unaffected by this run.
+    await page.goto("/settings/integrations");
     await card().getByLabel("Filing mode").selectOption("mock");
     await card().getByRole("button", { name: "Save" }).click();
     await expect(card().getByText("Saved.")).toBeVisible();

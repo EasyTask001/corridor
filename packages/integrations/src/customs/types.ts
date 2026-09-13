@@ -220,6 +220,23 @@ export interface CustomsCancelAck {
 
 export type CustomsClientMode = "mock" | "gateway" | "border_connect";
 
+export type CustomsCapabilityName = "transmit" | "amend" | "cancel" | "status" | "inBond";
+
+export interface CustomsCapabilities {
+  transmit: boolean;
+  amend: boolean;
+  cancel: boolean;
+  status: boolean;
+  inBond: boolean;
+  reasons: Partial<Record<CustomsCapabilityName, string>>;
+}
+
+export interface CustomsAmendOptions {
+  correlationId?: string;
+  reasonCode?: string;
+  scope?: "trip" | "shipment";
+}
+
 /** An in-bond move as CBP wants to hear about it (0026). */
 export interface InBondMessage {
   bondNumber: string;
@@ -260,13 +277,14 @@ export interface CustomsClient {
   readonly provider: "cbp_ace" | "cbsa_aci";
   readonly environment: "sandbox" | "production";
   readonly mode: CustomsClientMode;
+  readonly capabilities: CustomsCapabilities;
   /** Submit a manifest. Throws CustomsTransportError on gateway failure. */
   transmit(manifest: ManifestPayload, opts?: { correlationId?: string }): Promise<TransmitAck>;
   /** Re-file an accepted manifest with changes. */
   amend(
     manifest: ManifestPayload,
     referenceNumber: string,
-    opts?: { correlationId?: string },
+    opts?: CustomsAmendOptions,
   ): Promise<TransmitAck>;
   /** Withdraw a filed manifest. */
   cancel(referenceNumber: string, reason: string | null): Promise<CustomsCancelAck>;

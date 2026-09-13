@@ -1,12 +1,13 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { and, desc, eq, schema, sql, withServiceRole } from "@corridor/db";
+import { and, desc, eq, or, schema, sql, withServiceRole } from "@corridor/db";
 import { uuid } from "@corridor/domain";
 import { getBorderWait, lookupHsCode, searchTariff } from "@corridor/integrations";
-import { permissionProcedure, router } from "../trpc";
+import { anyPermissionProcedure, permissionProcedure, router } from "../trpc";
 import { isSafeGatewayBaseUrl } from "@corridor/integrations";
 import { writeAudit } from "../services/audit";
-import { customsClientFor } from "../services/customs";
+import { customsCapabilitiesFor, customsClientFor } from "../services/customs";
+import { reprocessInboxRow } from "../services/borderconnect";
 import { enqueueJob, processDueJobs } from "../services/jobs";
 
 const { integrationConfigs, integrationEvents, backgroundJobs, movements } = schema;
@@ -50,6 +51,12 @@ function cleanCredentials(input?: z.infer<typeof credentialsInput>) {
 }
 
 export const integrationsRouter = router({
+  customsCapabilities: anyPermissionProcedure("movement.read", "inbond.read")
+    .input(z.object({ regime: z.enum(["ACE", "ACI"]) }))
+    .query(({ ctx, input }) =>
+      ctx.rls((tx) => customsCapabilitiesFor(tx, ctx.orgId, input.regime)),
+    ),
+
   configs: router({
     list: permissionProcedure("integrations.manage").query(({ ctx }) =>
       ctx.rls((tx) =>
@@ -273,7 +280,7 @@ export const integrationsRouter = router({
             enqueueJob(tx, {
               orgId: null,
               jobType: "customs.borderconnect_drain",
-              payload: {},
+              payload: { environment: prepared.live ? "production" : "sandbox" },
               idempotencyKey: `bc-drain:${new Date().toISOString().slice(0, 16)}`,
               maxAttempts: 2,
             }),
@@ -432,6 +439,57 @@ export const integrationsRouter = router({
         return Object.fromEntries(rows.map((r) => [r.status, r.count]));
       }),
     ),
+  }),
+
+  inbox: router({
+    /** Redacted poison-queue rows visible to the owning organization only. */
+    list: permissionProcedure("integrations.manage").query(({ ctx }) =>
+      withServiceRole(ctx.db, async (tx) => {
+        const [org] = await tx
+          .select({ companyKey: schema.organizations.borderConnectCompanyKey })
+          .from(schema.organizations)
+          .where(eq(schema.organizations.id, ctx.orgId))
+          .limit(1);
+        const ownership = org?.companyKey
+          ? or(
+              eq(schema.customsInbox.organizationId, ctx.orgId),
+              eq(schema.customsInbox.companyKey, org.companyKey),
+            )!
+          : eq(schema.customsInbox.organizationId, ctx.orgId);
+        return tx
+          .select({
+            id: schema.customsInbox.id,
+            dataType: schema.customsInbox.dataType,
+            receivedAt: schema.customsInbox.receivedAt,
+            processedAt: schema.customsInbox.processedAt,
+            processingError: schema.customsInbox.processingError,
+          })
+          .from(schema.customsInbox)
+          .where(and(ownership, sql`${schema.customsInbox.processingError} is not null`))
+          .orderBy(desc(schema.customsInbox.receivedAt))
+          .limit(100);
+      }),
+    ),
+    /** Reset one unroutable row after the operator fixes its tenant mapping. */
+    reprocess: permissionProcedure("integrations.manage")
+      .input(z.object({ id: z.coerce.number().int().positive() }))
+      .mutation(async ({ ctx, input }) => {
+        const result = await reprocessInboxRow(ctx.db, ctx.orgId, input.id);
+        await ctx.rls((tx) =>
+          writeAudit(
+            tx,
+            ctx.orgId,
+            "integration.inbox_reprocess",
+            "customs_inbox",
+            String(input.id),
+            null,
+            {
+              reset: true,
+            },
+          ),
+        );
+        return result;
+      }),
   }),
 
   borderWait: permissionProcedure("movement.read")

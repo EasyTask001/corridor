@@ -179,6 +179,7 @@ const shipmentCommon = {
   isPars: z.boolean().default(false),
   shipperId: uuid.nullable().optional(),
   consigneeId: uuid.nullable().optional(),
+  brokerId: uuid.nullable().optional(),
   entryNumber: z.string().trim().max(40).nullable().optional(),
   entryPortId: uuid.nullable().optional(),
   inBondEntryType: inBondEntryType.nullable().optional(),

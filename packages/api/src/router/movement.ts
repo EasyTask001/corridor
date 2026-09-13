@@ -38,7 +38,13 @@ import {
   type OrgContext,
 } from "../trpc";
 import { ACI_RELEASING_RELEASE_CODES, simulateCustomsEvents } from "@corridor/integrations";
-import { cancelAtCustoms, transmitAmendment, transmitMovement } from "../services/customs";
+import {
+  cancelAtCustoms,
+  customsCapabilitiesFor,
+  customsPreflightIssues,
+  transmitAmendment,
+  transmitMovement,
+} from "../services/customs";
 import { enqueueJob } from "../services/jobs";
 import {
   acceptMovementSuggestion,
@@ -331,7 +337,10 @@ export const movementRouter = router({
     .query(({ ctx, input }) =>
       ctx.rls(async (tx) => {
         const full = await loadFull(tx, ctx.orgId, input.id);
-        const issues = validationFor(full);
+        const baseIssues = validationFor(full);
+        const issues = hasBlockingIssues(baseIssues)
+          ? baseIssues
+          : [...baseIssues, ...(await customsPreflightIssues(tx, ctx.orgId, full))];
         return { issues, canTransmit: !hasBlockingIssues(issues) };
       }),
     ),
@@ -891,6 +900,13 @@ export const movementRouter = router({
             message: "Only accepted manifests can be amended",
           });
         }
+        const capabilities = await customsCapabilitiesFor(tx, ctx.orgId, m.regime);
+        if (!capabilities.amend) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: capabilities.reasons.amend ?? "Customs amendment is not supported",
+          });
+        }
         const p = input.patch;
         const diff: Record<string, { before: unknown; after: unknown }> = {};
         const set: Partial<typeof movements.$inferInsert> = {};
@@ -977,7 +993,10 @@ export const movementRouter = router({
         });
         // Re-file with the gateway (0023). Throws on transport failure, which
         // rolls the amendment and the transition back.
-        await transmitAmendment(tx, actorOf(ctx), m.id, next);
+        await transmitAmendment(tx, actorOf(ctx), m.id, next, {
+          reasonCode: input.reasonCode,
+          scope: input.scope,
+        });
         await writeAudit(
           tx,
           ctx.orgId,

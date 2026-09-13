@@ -105,6 +105,9 @@ export async function shipmentsForMovement(tx: Tx, movementId: string) {
       consigneeCountry: sql<
         string | null
       >`(select p.address_country from public.partners p where p.id = ${shipments.consigneeId})`,
+      brokerName: sql<
+        string | null
+      >`(select name from public.partners p where p.id = ${shipments.brokerId})`,
       shipperAddress: partnerAddressJson(shipments.shipperId),
       consigneeAddress: partnerAddressJson(shipments.consigneeId),
       entryPortCode: sql<
@@ -172,5 +175,42 @@ export async function assertPartnersExist(tx: Tx, orgId: string, ids: Array<stri
     .where(and(eq(partners.organizationId, orgId), inArray(partners.id, wanted)));
   if (found.length !== new Set(wanted).size) {
     throw new TRPCError({ code: "NOT_FOUND", message: "Shipper or consignee not found" });
+  }
+}
+
+/** Broker assignments are tenant-scoped and accept only broker/dual partners. */
+export async function assertBrokerPartner(tx: Tx, orgId: string, brokerId: string | null) {
+  if (!brokerId) return;
+  const [partner] = await tx
+    .select({ type: partners.type })
+    .from(partners)
+    .where(and(eq(partners.organizationId, orgId), eq(partners.id, brokerId)))
+    .limit(1);
+  if (!partner) throw new TRPCError({ code: "NOT_FOUND", message: "Broker not found" });
+  if (partner.type !== "broker" && partner.type !== "both") {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Selected partner is not a broker" });
+  }
+}
+
+export async function assertShipmentPartners(
+  tx: Tx,
+  orgId: string,
+  input: { shipperId?: string | null; consigneeId?: string | null; brokerId?: string | null },
+) {
+  const wanted = [input.shipperId, input.consigneeId, input.brokerId].filter(
+    (id): id is string => !!id,
+  );
+  if (wanted.length === 0) return;
+  const found = await tx
+    .select({ id: partners.id, type: partners.type })
+    .from(partners)
+    .where(and(eq(partners.organizationId, orgId), inArray(partners.id, wanted)));
+  const byId = new Map(found.map((partner) => [partner.id, partner]));
+  if (wanted.some((id) => !byId.has(id))) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "Shipment partner not found" });
+  }
+  const broker = input.brokerId ? byId.get(input.brokerId) : null;
+  if (broker && broker.type !== "broker" && broker.type !== "both") {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Selected partner is not a broker" });
   }
 }

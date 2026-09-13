@@ -16,6 +16,7 @@ import { useTRPC } from "@/lib/trpc/client";
 type List = inferRouterOutputs<AppRouter>["inbond"]["records"]["list"];
 type Row = List["rows"][number];
 type Option = { id: string; label: string; regime: "ACE" | "ACI" };
+type Capabilities = inferRouterOutputs<AppRouter>["integrations"]["customsCapabilities"];
 
 const STATUS_VARIANT: Record<InBondStatus, "ok" | "neutral" | "muted" | "warn"> = {
   open: "neutral",
@@ -32,11 +33,13 @@ const fmt = (d: Date | string | null | undefined) =>
 export function InBondMonitor({
   initial,
   canWrite,
+  capabilities,
   inBondShipments,
   externalShipments,
 }: {
   initial: List;
   canWrite: boolean;
+  capabilities: Record<"ACE" | "ACI", Capabilities>;
   inBondShipments: Option[];
   externalShipments: Option[];
 }) {
@@ -107,6 +110,7 @@ export function InBondMonitor({
                   r={r}
                   expanded={isOpen}
                   canWrite={canWrite}
+                  capability={capabilities[r.regime]}
                   busy={busy}
                   onToggle={() => setOpen(isOpen ? null : r.id)}
                   onEdit={() => setEditing(r)}
@@ -149,6 +153,7 @@ function RecordRow({
   r,
   expanded,
   canWrite,
+  capability,
   busy,
   onToggle,
   onEdit,
@@ -160,6 +165,7 @@ function RecordRow({
   r: Row;
   expanded: boolean;
   canWrite: boolean;
+  capability: Capabilities;
   busy: boolean;
   onToggle: () => void;
   onEdit: () => void;
@@ -202,30 +208,38 @@ function RecordRow({
         <td className="px-3 py-2 text-right whitespace-nowrap">
           {canWrite && live && (
             <span className="inline-flex gap-2 text-xs">
-              {r.status === "open" && (
-                <button className="hover:underline" disabled={busy} onClick={onArrival}>
-                  Send arrival
-                </button>
-              )}
-              {r.status === "arrived" && (
-                <button className="hover:underline" disabled={busy} onClick={onExport}>
-                  Send export
-                </button>
-              )}
-              {r.bondNumber && (
-                <button className="hover:underline" disabled={busy} onClick={onStatus}>
-                  Check status
-                </button>
+              {capability.inBond ? (
+                <>
+                  {r.status === "open" && (
+                    <button className="hover:underline" disabled={busy} onClick={onArrival}>
+                      Send arrival
+                    </button>
+                  )}
+                  {r.status === "arrived" && (
+                    <button className="hover:underline" disabled={busy} onClick={onExport}>
+                      Send export
+                    </button>
+                  )}
+                  {r.bondNumber && (
+                    <button className="hover:underline" disabled={busy} onClick={onStatus}>
+                      Check status
+                    </button>
+                  )}
+                  <button
+                    className="text-status-danger hover:underline"
+                    disabled={busy}
+                    onClick={onCancel}
+                  >
+                    Cancel
+                  </button>
+                </>
+              ) : (
+                <span className="max-w-64 text-left text-status-warning">
+                  {capability.reasons.inBond}
+                </span>
               )}
               <button className="hover:underline" onClick={onEdit}>
                 Edit
-              </button>
-              <button
-                className="text-status-danger hover:underline"
-                disabled={busy}
-                onClick={onCancel}
-              >
-                Cancel
               </button>
             </span>
           )}

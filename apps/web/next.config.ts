@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs/config";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -8,6 +9,7 @@ const nextConfig: NextConfig = {
     "@corridor/db",
     "@corridor/domain",
     "@corridor/integrations",
+    "@corridor/observability",
     "@corridor/pdf",
     "@corridor/ui",
   ],
@@ -28,4 +30,10 @@ const nextConfig: NextConfig = {
     ]),
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  silent: true,
+  sourcemaps: { disable: !process.env.SENTRY_AUTH_TOKEN },
+});

@@ -48,7 +48,7 @@ export default function SignInScreen() {
           keyboardShouldPersistTaps="handled"
           automaticallyAdjustKeyboardInsets
         >
-          <Text style={styles.eyebrow}>Corridor driver</Text>
+          <Text style={styles.eyebrow}>Corridor driver · Beta</Text>
           <Text style={styles.h1}>Welcome back</Text>
           <Text style={styles.muted}>Sign in with the account your dispatcher set up for you.</Text>
 

@@ -99,7 +99,7 @@ export const updateOrganizationInput = createOrganizationInput.partial().extend(
    * filing mode; `null` clears it. Unique across organizations at the DB layer
    * (`packages/api/src/services/db-errors.ts` maps the violation to CONFLICT).
    */
-  borderConnectCompanyKey: z.string().trim().min(1).max(64).nullable().optional(),
+  borderConnectCompanyKey: z.string().trim().min(1).max(30).nullable().optional(),
 });
 export type UpdateOrganizationInput = z.infer<typeof updateOrganizationInput>;
 

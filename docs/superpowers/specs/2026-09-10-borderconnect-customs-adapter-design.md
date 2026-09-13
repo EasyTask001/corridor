@@ -6,9 +6,9 @@ Status: superseded 2026-09-12 — Service Provider mode, shared inbox; implement
 
 Corridor's customs integration (0023) supports `mock` (deterministic, in-process) and `gateway`
 (a generic certified-EDI-gateway REST client: `Authorization: Bearer <key>` against
-`/manifests`, `/manifests/{ref}`, `/in-bond/{bond}`, `/notices`). EasyTask AI Corp's
-BorderConnect eManifest API account is now credentialed (`.env.local`:
-`BORDERCONNECT_API_KEY`, `BORDERCONNECT_API_WEBSOCKET_URL`), but BorderConnect does not speak
+`/manifests`, `/manifests/{ref}`, `/in-bond/{bond}`, `/notices`). An approved
+BorderConnect eManifest API Service Provider account is configured only through
+the private environment (`BORDERCONNECT_API_KEY`, `BORDERCONNECT_API_URL_SUFFIX`), but BorderConnect does not speak
 that generic contract. Its protocol is message-oriented, not resource-oriented:
 
 - Auth is an `Api-Key` header, not `Authorization: Bearer`.
@@ -69,7 +69,7 @@ forcing a shared abstraction would blur both.
 
 ```ts
 interface BorderConnectTransportOptions {
-  apiUrlSuffix: string; // e.g. "EasyTask" — the account's assigned suffix
+  apiUrlSuffix: string; // the account's assigned suffix, supplied through the environment
   apiKey: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
@@ -124,8 +124,8 @@ transport?, now? })` implements `CustomsClient`:
 ### Service Provider identity
 
 - `organizations.border_connect_company_key: text | null` — each carrier organization's assigned
-  `companyKey` from BorderConnect (e.g., `c-9000-2bcd8ae5954e0c48`). EasyTask's own account
-  connects with a single API key and API URL suffix (from env: `BORDERCONNECT_API_KEY`,
+  `companyKey` from BorderConnect. The service-provider account connects with a single API key
+  and API URL suffix (from env: `BORDERCONNECT_API_KEY`,
   `BORDERCONNECT_API_URL_SUFFIX`), multiplexing all tenants through a shared queue. Outbound
   messages include the organization's `companyKey` on every trip and nested shipment.
 - Router: when `mode === "border_connect"` is selected, require `companyKey` to be set on the
@@ -213,18 +213,18 @@ an `autoSend: true` `ACE_TRIP`/`ACI_TRIP`. `recordSubmission` (unchanged) stores
 
 **Inbox drain (`customs.borderconnect_drain` cron job, global, every minute — replaces per-movement polling):**
 
-1. HTTP GET `/api/receive/[suffix]` drains every message currently queued for EasyTask's account.
+1. HTTP GET `/api/receive/[suffix]` drains every message currently queued for the service-provider account.
 2. For each message:
    a. Extract routing keys via `inboundKeys()`: `companyKey`, `sendId`, `tripNumber`,
-      `cargoControlNumber`, `shipmentControlNumber`.
+   `cargoControlNumber`, `shipmentControlNumber`.
    b. Compute `payload_sha256` and INSERT into `customs_inbox` (dedup on hash).
    c. Route by `companyKey → organizations.border_connect_company_key` to find `organization_id`.
    d. Route by `tripNumber` or `cargoControlNumber` to find `customs_submission_id` and
-      `movement_id`.
+   `movement_id`.
    e. UPDATE the `customs_inbox` row with `organization_id`, `customs_submission_id`, `movement_id`,
-      `processed_at: now()`.
+   `processed_at: now()`.
    f. If unroutable (missing `companyKey` mapping or no matching submission), write
-      `processing_error` and leave `organization_id` null.
+   `processing_error` and leave `organization_id` null.
 3. For each successfully routed message, call `parseInbound()` and `applyStatusMessage()` exactly
    as today — no difference from `mock`/`gateway` in how status events are recorded.
 
@@ -276,7 +276,7 @@ Mirrored in `packages/db/src/schema/` per the usual migration → schema → `db
 - `packages/api/src/services/customs.ts`:
   - `customsClientFor`: when `mode === "border_connect"`, read `organizations.border_connect_company_key`
     and pass `{apiUrlSuffix: process.env.BORDERCONNECT_API_URL_SUFFIX, apiKey: process.env.BORDERCONNECT_API_KEY,
-    companyKey}` to the client. Fail with `PRECONDITION_FAILED` in production if `companyKey` is
+companyKey}` to the client. Fail with `PRECONDITION_FAILED` in production if `companyKey` is
     not set.
   - `scheduleDecision`: for `border_connect` clients, do nothing (status arrives through the
     inbox drain, not per-movement polling).
@@ -285,7 +285,7 @@ Mirrored in `packages/db/src/schema/` per the usual migration → schema → `db
 - `packages/api/src/services/borderconnect.ts` (new): `drainAndApplyCustomsInbox()`
   implementing steps 1–5 of the inbox drain above. Called by the cron route.
 - `packages/api/src/services/jobs.ts`: `customs.borderconnect_drain` job type, callable only by
-  service role, with no organization-specific payload (global drain per EasyTask's account).
+  service role, with no organization-specific payload (global drain per service-provider account).
 - `packages/api/src/router/integrations.ts`: `mode` enum becomes `["mock", "gateway", "border_connect"]`;
   when `mode === "border_connect"` is selected, force `baseUrl: null` server-side (not exposed
   to the client).

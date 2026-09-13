@@ -21,11 +21,15 @@ export async function GET(req: Request) {
   if (denied) return denied;
 
   const db = getDb();
+  const environment =
+    process.env.VERCEL_ENV === "production" || process.env.CORRIDOR_ENV === "production"
+      ? "production"
+      : "sandbox";
   const job = await withServiceRole(db, (tx) =>
     enqueueJob(tx, {
       orgId: null,
       jobType: "customs.borderconnect_drain",
-      payload: {},
+      payload: { environment },
       idempotencyKey: `bc-drain:${new Date().toISOString().slice(0, 16)}`,
       maxAttempts: 2,
     }),

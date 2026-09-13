@@ -8,11 +8,15 @@
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:watchdog-alerts": "tsx scripts/test-watchdog-alerts.ts"
   },
   "dependencies": {
     "@corridor/api": "workspace:*",
     "@corridor/db": "workspace:*",
+    "@corridor/integrations": "workspace:*",
+    "@corridor/observability": "workspace:*",
+    "@sentry/node": "^10.74.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {

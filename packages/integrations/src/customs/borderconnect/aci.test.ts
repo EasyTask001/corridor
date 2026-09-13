@@ -67,7 +67,14 @@ function makeSource(): ManifestSource {
       seals: ["S9"],
     },
     trailers: [
-      { unitNumber: "TR-2", trailerType: "RT", plateNumber: "GH9", plateJurisdiction: "ON", plates: [], seals: ["S10"] },
+      {
+        unitNumber: "TR-2",
+        trailerType: "RT",
+        plateNumber: "GH9",
+        plateJurisdiction: "ON",
+        plates: [],
+        seals: ["S10"],
+      },
     ],
     shipments: [
       {
@@ -83,7 +90,13 @@ function makeSource(): ManifestSource {
         loadingProvince: "ON",
         loadingCity: "Hamilton",
         shipperName: "Acme Steel",
-        shipperAddress: { line1: "1 Mill Rd", city: "Hamilton", region: "ON", postalCode: "L8L1A1", country: "CA" },
+        shipperAddress: {
+          line1: "1 Mill Rd",
+          city: "Hamilton",
+          region: "ON",
+          postalCode: "L8L1A1",
+          country: "CA",
+        },
         consigneeName: "Depot Inc",
         consigneeAddress: {
           line1: "2 Depot Ave",
@@ -120,7 +133,12 @@ function makeSource(): ManifestSource {
   };
 }
 
-const opts: OutboundOptions = { companyKey: "CK1", sendId: "SID1", operation: "CREATE", autoSend: true };
+const opts: OutboundOptions = {
+  companyKey: "CK1",
+  sendId: "SID1",
+  operation: "CREATE",
+  autoSend: true,
+};
 
 describe("toAciTrip — full valid manifest", () => {
   it("produces the exact expected ACI_TRIP object", () => {
@@ -132,7 +150,7 @@ describe("toAciTrip — full valid manifest", () => {
       operation: "CREATE",
       autoSend: true,
       tripNumber: "PFTR00007",
-      estimatedArrivalDate: "2026-09-08 16:00:00",
+      estimatedArrivalDateTime: "2026-09-08 16:00:00",
       portOfEntry: "0409",
       truck: {
         number: "T-201",
@@ -145,7 +163,7 @@ describe("toAciTrip — full valid manifest", () => {
         {
           number: "TR-2",
           type: "RT",
-          licensePlates: [{ number: "GH9", stateProvince: "ON" }],
+          licensePlate: { number: "GH9", stateProvince: "ON" },
           sealNumbers: ["S10"],
         },
       ],
@@ -156,7 +174,7 @@ describe("toAciTrip — full valid manifest", () => {
           gender: "M",
           dateOfBirth: "1980-01-01",
           citizenshipCountry: "CA",
-          travelDocuments: [{ type: "ACW", number: "P999", issuingCountry: "CA", expiresOn: "2029-01-01" }],
+          travelDocuments: [{ type: "ACW", number: "P999", country: "CA" }],
         },
       ],
       shipments: [
@@ -171,7 +189,13 @@ describe("toAciTrip — full valid manifest", () => {
           cityOfLoading: { cityName: "Hamilton", stateProvince: "ON" },
           shipper: {
             name: "Acme Steel",
-            address: { addressLine: "1 Mill Rd", city: "Hamilton", postalCode: "L8L1A1", stateProvince: "ON", country: "CA" },
+            address: {
+              addressLine: "1 Mill Rd",
+              city: "Hamilton",
+              postalCode: "L8L1A1",
+              stateProvince: "ON",
+              country: "CA",
+            },
           },
           consignee: {
             name: "Depot Inc",
@@ -200,12 +224,9 @@ describe("toAciTrip — full valid manifest", () => {
               description: "Steel Coil",
               quantity: 2,
               packagingUnit: "SKD",
-              weight: 1000,
+              weight: "1000",
               weightUnit: "KG",
               marksAndNumbers: "LOT-1",
-              harmonizedCode: "7208.10",
-              value: { amount: 5000, currency: "USD" },
-              countryOfOrigin: "CA",
             },
           ],
         },
@@ -215,7 +236,10 @@ describe("toAciTrip — full valid manifest", () => {
 
   it("carries companyKey on the trip and on every nested shipment", () => {
     const m = buildManifest(makeSource());
-    const out = toAciTrip(m, opts) as { companyKey: string; shipments: Array<{ companyKey: string }> };
+    const out = toAciTrip(m, opts) as {
+      companyKey: string;
+      shipments: Array<{ companyKey: string }>;
+    };
     expect(out.companyKey).toBe("CK1");
     expect(out.shipments.every((s) => s.companyKey === "CK1")).toBe(true);
     expect(out.shipments[0]).not.toHaveProperty("operation");

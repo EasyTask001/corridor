@@ -41,6 +41,7 @@ export default async function MovementPage({
     throw e;
   }
   const options = await caller.movement.options();
+  const capabilities = await caller.integrations.customsCapabilities({ regime: movement.regime });
 
   const p = session.permissions;
   return (
@@ -48,6 +49,7 @@ export default async function MovementPage({
       initial={movement}
       initialValidation={validation}
       options={options}
+      initialCapabilities={capabilities}
       permissions={{
         write: p.has("movement.write"),
         transmit: p.has("movement.transmit_to_customs"),

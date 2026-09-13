@@ -28,6 +28,7 @@ import type {
   ManifestPayload,
   TransmitAck,
 } from "../types";
+import { resolveCustomsCapabilities } from "../capabilities";
 import { parseInboundMessage } from "./inbound";
 import {
   fromGatewayInBondStatus,
@@ -255,6 +256,14 @@ export function createGatewayCustomsClient(opts: GatewayClientOptions): CustomsC
     provider: opts.provider,
     environment: opts.environment ?? "sandbox",
     mode: "gateway",
+    capabilities: resolveCustomsCapabilities({
+      regime,
+      mode: "gateway",
+      environment: opts.environment ?? "sandbox",
+      credentials: opts.credentials,
+      baseUrl: opts.baseUrl,
+      apiKey,
+    }),
 
     async transmit(manifest: ManifestPayload, o) {
       const json = await transport.post("/manifests", {

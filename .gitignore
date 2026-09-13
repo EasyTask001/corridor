@@ -51,6 +51,8 @@ playwright-report/
 blob-report/
 test-results/
 playwright/.cache/
+artifacts/borderconnect-smoke/
+private-eval-corpus/
 
 # --- Logs -----------------------------------------------------------------------
 logs/

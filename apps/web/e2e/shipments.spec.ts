@@ -34,8 +34,14 @@ test.describe("shipments", () => {
     await form.getByLabel("Control reference").fill(reference);
     await form.getByLabel("Shipper").selectOption({ label: "Maple Ridge Steel Ltd" });
     await form.getByLabel("Consignee").selectOption({ label: "Great Lakes Fabrication Inc" });
+    await form.getByLabel("Customs broker").selectOption({ label: "Northgate Customs Brokers" });
     await form.getByRole("button", { name: "Save shipment" }).click();
     await expect(page.getByRole("button", { name: controlNumber })).toBeVisible();
+    await expect(
+      page
+        .getByRole("row", { name: new RegExp(controlNumber) })
+        .getByText("broker Northgate Customs Brokers"),
+    ).toBeVisible();
 
     // --- unassign: it leaves the movement but survives as a shipment
     await page.getByRole("button", { name: "Unassign" }).click();
@@ -75,6 +81,12 @@ test.describe("shipments", () => {
     await expect(page).toHaveURL(/\/shipments\/[0-9a-f-]{36}/);
     await expect(page.getByRole("heading", { name: new RegExp(controlNumber) })).toBeVisible();
 
+    await page.getByLabel("Customs broker").selectOption({ label: "Northgate Customs Brokers" });
+    await page.getByRole("button", { name: "Save shipment" }).click();
+    await expect(page.getByLabel("Customs broker").locator("option:checked")).toHaveText(
+      "Northgate Customs Brokers",
+    );
+
     await page.getByRole("button", { name: "Add commodity line" }).click();
     const line = page.getByRole("form", { name: "New commodity line" });
     await line.getByLabel("Commodity description").fill("Galvanized sheet, coils");
@@ -109,10 +121,11 @@ test.describe("shipments", () => {
     // Unique references so the file can be imported on every run.
     const suffix = Date.now().toString(36).toUpperCase();
     const csv = [
-      "regime,carrier_code,control_reference,shipment_type,cargo_type,shipper_name,consignee_name,entry_port,is_pars",
-      `ACE,PFTR,PAPS${suffix}A,regular_bill,,Maple Ridge Steel Ltd,Great Lakes Fabrication Inc,3801,false`,
-      `ACE,,PAPS${suffix}B,section_321,,Erie Produce Co,Great Lakes Fabrication Inc,3801,false`,
-      `ACE,PFTR,PAPS${suffix}C,bogus,,Nobody Inc,,3801,false`,
+      "regime,carrier_code,control_reference,shipment_type,cargo_type,shipper_name,consignee_name,broker_name,entry_port,is_pars",
+      `ACE,PFTR,PAPS${suffix}A,regular_bill,,Maple Ridge Steel Ltd,Great Lakes Fabrication Inc,Northgate Customs Brokers,3801,false`,
+      `ACE,,PAPS${suffix}B,section_321,,Erie Produce Co,Great Lakes Fabrication Inc,,3801,false`,
+      `ACE,PFTR,PAPS${suffix}C,regular_bill,,Maple Ridge Steel Ltd,Great Lakes Fabrication Inc,Maple Ridge Steel Ltd,3801,false`,
+      `ACE,PFTR,PAPS${suffix}D,bogus,,Nobody Inc,,,3801,false`,
     ].join("\n");
     await page.goto("/shipments/import");
     await page.getByLabel("CSV / TXT / DAT file").setInputFiles({
@@ -122,13 +135,17 @@ test.describe("shipments", () => {
     });
     await page.getByRole("button", { name: "Validate" }).click();
     const result = page.getByLabel("Validation result");
-    await expect(result.getByText("2 ok, 1 with errors")).toBeVisible();
+    await expect(result.getByText("2 ok, 2 with errors")).toBeVisible();
     await expect(result.getByText("shipment_type", { exact: true })).toBeVisible();
+    await expect(result.getByText("broker_name", { exact: true })).toBeVisible();
 
     await result.getByRole("button", { name: "Commit 2 rows" }).click();
     await expect(page.getByRole("status")).toHaveText(/Committed 2 rows/);
     await page.goto("/shipments?unassigned=1");
-    await expect(page.getByRole("link", { name: `PFTRPAPS${suffix}A` })).toBeVisible();
+    await page.getByRole("link", { name: `PFTRPAPS${suffix}A` }).click();
+    await expect(page.getByLabel("Customs broker").locator("option:checked")).toHaveText(
+      "Northgate Customs Brokers",
+    );
 
     await page.goto("/shipments/import");
     const batch = page
