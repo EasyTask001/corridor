@@ -416,6 +416,13 @@ export const shipments = pgTable(
     consigneeId: uuid("consignee_id"),
     /** 0049 — shipment-specific customs broker; role is guarded in the database. */
     brokerId: uuid("broker_id"),
+    /** 0051 — which unit the cargo rides on; null = unspecified (resolved at
+     * build time). FK is composite — see shipments_loaded_on_slot_fkey below. */
+    loadedOnType: text("loaded_on_type", { enum: ["TRUCK", "TRAILER"] }),
+    /** 0051 — the trailer slot (movement_trailers.id, not trailers.id) when
+     * loadedOnType is TRAILER. Same-movement invariant is enforced by the
+     * shipments_loaded_on_guard trigger, not by this FK alone. */
+    loadedOnMovementTrailerId: uuid("loaded_on_movement_trailer_id"),
     destinationPortId: uuid("destination_port_id").references(() => ports.id),
     sublocationPortId: uuid("sublocation_port_id").references(() => ports.id),
     loadingCountry: text("loading_country"),
@@ -495,11 +502,20 @@ export const shipments = pgTable(
     /** 0031 — target for the composite keys on commodities, movement_events,
      * movement_amendments, in_bond_records, pars_rns_events. */
     uniqueIndex("shipments_id_organization_unique").on(t.id, t.organizationId),
+    // 0051
+    index("shipments_loaded_on_slot_idx")
+      .on(t.loadedOnMovementTrailerId)
+      .where(sql`${t.loadedOnMovementTrailerId} is not null`),
     foreignKey({
       name: "shipments_broker_org_fkey",
       columns: [t.brokerId, t.organizationId],
       foreignColumns: [partners.id, partners.organizationId],
     }).onDelete("restrict"),
+    foreignKey({
+      name: "shipments_loaded_on_slot_fkey",
+      columns: [t.loadedOnMovementTrailerId, t.organizationId],
+      foreignColumns: [movementTrailers.id, movementTrailers.organizationId],
+    }).onDelete("set null"),
     foreignKey({
       name: "shipments_consignee_org_fkey",
       columns: [t.consigneeId, t.organizationId],
