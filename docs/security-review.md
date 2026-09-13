@@ -6,12 +6,19 @@ followed Task 11 and fixed in `eb72589`. Refreshed 2026-09-11 after the
 `docs/AUDIT-2026-09-11.md` remediation branch merged (migrations through
 `0045`) and issues #3–#5 closed the gaps it found in this doc's own claims
 (§6, §8, §9, F4 below) — those sections and finding were re-verified directly
-against `pg_proc`/`has_function_privilege` rather than carried forward. Every
-claim below is a file reference or a query you can re-run; nothing here is
-asserted from memory.
+against `pg_proc`/`has_function_privilege` rather than carried forward.
+Refreshed again 2026-09-13 for the pilot-readiness pass (migrations `0046`–
+`0052`): `0046` (SSO domain collision guard) and `0047`/`0048`/`0049`/`0050`
+(BorderConnect, job-id-scoped claiming, shipment broker role, production
+hardening guards) were already covered above; `0051` (`loadedOn` placement)
+and `0052` (regulation provenance) added no new RLS-bypassing path or definer
+function, so neither needed a new table row — verified by re-running the §4
+RLS query and the §9 `pg_proc` query below against both. This pass also added
+findings F7–F9 and §11 (response headers). Every claim below is a file
+reference or a query you can re-run; nothing here is asserted from memory.
 
 Scope: the Next.js app (`apps/web`), the tRPC API (`packages/api`), the database
-and its policies (`supabase/migrations/0001`–`0045`). Out of scope: the Expo app
+and its policies (`supabase/migrations/0001`–`0052`). Out of scope: the Expo app
 (`apps/mobile`), and the mock customs gateways, which never see a real
 credential.
 
@@ -426,6 +433,26 @@ check rather than a bypass of it.
 warning --fail-on warning` reports "No schema errors found", and it now runs in
   CI's `integration` job after the migrations apply.
 
+## 11. Response headers
+
+`apps/web/next.config.ts` sets `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: strict-origin-when-cross-origin`, a `Permissions-Policy` denying camera,
+microphone and geolocation, `Strict-Transport-Security: max-age=63072000; includeSubDomains`, and
+`X-DNS-Prefetch-Control: off`.
+
+`apps/web/src/proxy.ts` additionally generates a fresh nonce on every request and sets a
+Content-Security-Policy header (`apps/web/src/lib/csp.ts` builds the directive string): `default-src
+'self'`, `script-src 'self' 'nonce-<random>' 'strict-dynamic'`, `style-src 'self' 'unsafe-inline'`
+(nonces do not cover React's inline `style={{}}` attribute), `connect-src`/`img-src` scoped to
+`'self'` plus the Supabase origin, `frame-ancestors 'none'`, `object-src 'none'`, and
+`upgrade-insecure-requests` once enforced. It ships as `Content-Security-Policy-Report-Only`
+until the `CSP_ENFORCE` env var is `"true"` — see finding F8 and
+`docs/operations/customs-production-runbook.md`'s "Content Security Policy rollout" section for
+the rollout plan. Verified live: `apps/web/src/proxy.test.ts` and `apps/web/src/lib/csp.test.ts`
+cover the header logic, and a manual Playwright pass across login, dashboard, the movement
+wizard, copilot, and documents showed zero CSP console violations in both report-only and
+enforced mode.
+
 ---
 
 ## Findings
@@ -491,7 +518,49 @@ load-test session file holds real access tokens for demo users. It is git-ignore
 via `load/.gitignore` and the script refuses nothing but is documented as
 local-only; do not point `load/scripts/login.mjs` at a production project.
 
-**F6 — no automated dependency scanning (low).** There is no `pnpm audit`,
-Dependabot config, or SCA step in CI. Given the dependency surface (Next 16,
-tRPC 11, `ai`, Stripe, Supabase), a weekly `pnpm audit --audit-level=high` job
-would be cheap. Out of scope for this task; noted for the backlog.
+**F6 — no automated dependency scanning (low). RESOLVED.**
+`.github/workflows/security.yml` now runs `dependency-review-action` on every
+pull request (fails on a high-severity advisory), a weekly `pnpm audit --prod
+--audit-level high`, and a Gitleaks secret scan on every push and PR;
+`.github/dependabot.yml` opens weekly update PRs for both npm and GitHub
+Actions dependencies. CI is not dispatched from this environment (billing —
+see the project's own operating notes); these workflows have not yet had a
+live run, so "resolved" means the control exists and is correctly configured,
+not that it has caught anything yet.
+
+**F7 — `/api/ready` returned its full body (queue depth, provider-activity
+age, missing production variable names) to any caller, with no credential
+(low). RESOLVED.** `apps/web/src/app/api/ready/route.ts` now returns only
+`{ ok: true|false }` unless the caller presents `Authorization: Bearer
+$READINESS_SECRET`, checked by `readinessAuthFailure()` in
+`apps/web/src/lib/cron-auth.ts` (the same `bearerSecretFailure()` helper
+`cronAuthFailure()` uses: unset secret is a 503, wrong one a 401 under
+`timingSafeEqual`, no `NODE_ENV` branch). `READINESS_SECRET` is now in
+`REQUIRED_PRODUCTION_ENV` (`packages/api/src/services/readiness.ts`). Covered
+by `apps/web/src/app/api/ready/route.test.ts` (8 cases) and
+`packages/api/src/services/readiness.test.ts`'s redaction case.
+
+**F8 — no Content Security Policy (informational). MITIGATED, enforcement
+pending.** A nonce-based CSP now ships on every response (§11), but as
+`Content-Security-Policy-Report-Only` — the browser reports violations
+without blocking anything, which is deliberate: it lets one pilot week of
+real traffic surface a missed script/style/connect source before the policy
+can break a page in production. `CSP_ENFORCE=true` switches to the enforced
+header once that review is clean. Track the switch-over in the pilot log
+alongside the other deployment gates in
+`docs/operations/customs-production-runbook.md`.
+
+**F9 — no customer-facing legal, privacy, or AI-disclosure artifacts
+(low). RESOLVED.** There was no Terms of Service, Privacy Policy, data
+retention statement, or AI-use disclosure reachable from the product — a gap
+for a pilot handling driver PII (licence, date of birth, citizenship) and
+AI-assisted extraction/Copilot output. `apps/web/src/app/legal/[slug]/page.tsx`
+now serves `/legal/{terms,privacy,data-retention,ai-disclaimer,security}`,
+each marked "Draft for counsel review" until `NEXT_PUBLIC_LEGAL_REVIEWED_AT`
+is set, plus `/.well-known/security.txt` per RFC 9116. The four
+`NEXT_PUBLIC_LEGAL_*`/`NEXT_PUBLIC_{PRIVACY,SECURITY}_EMAIL` variables are in
+`REQUIRED_PRODUCTION_ENV`, so a production deploy cannot ship with the
+`(development)` placeholder identity. The data-retention page is generated
+from `packages/domain/src/retention.ts`'s `RETENTION_SCHEDULE`, which states
+what the code does today (no automatic background-job purge, no self-serve
+organization deletion) rather than an aspirational policy.

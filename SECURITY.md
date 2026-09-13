@@ -6,8 +6,11 @@ Nothing has been tagged or released yet. `main` is the only supported branch; fi
 
 ## Reporting a vulnerability
 
-**Do not open a public issue.** Email `security@<your-domain>` — **TODO: replace with the real
-address before this repository is made public or shipped to a customer.** Include:
+**Do not open a public issue.** Email the address published at `<deployment
+URL>/.well-known/security.txt` and on the `/legal/security` (Vulnerability Disclosure Policy)
+page — both are generated from the `NEXT_PUBLIC_SECURITY_EMAIL` deployment variable
+(`apps/web/src/lib/legal.ts`), so there is one real address, not a placeholder frozen in this
+file. Include:
 
 - a description of the vulnerability,
 - steps to reproduce,
@@ -102,7 +105,9 @@ tracked exception — and that file holds names, never values.
   | enterprise   | 600      | 120 |
 
 - The key is `${tier}:${orgId}`, so one tenant cannot spend another's budget.
-- The limiter **fails open** if Redis is unreachable — a deliberate trade, recorded as finding F2.
+- The limiter falls back to the per-instance in-memory sliding window if Redis is unreachable,
+  rather than failing open — a degraded cache lowers the ceiling to per-instance accuracy instead
+  of removing it (finding F2, resolved; see `docs/security-review.md`).
 
 ### Webhooks
 
@@ -122,6 +127,11 @@ Cron routes (`/api/jobs/process`, `/api/jobs/expiry-scan`, `/api/jobs/notices-sy
 `/api/jobs/borderconnect-drain`, `/api/jobs/customs-watchdog`) fail closed through
 `cronAuthFailure()`: an unset `CRON_SECRET` is a 503, a wrong one a 401 compared with
 `timingSafeEqual`.
+
+`GET /api/ready` shares the same `bearerSecretFailure()` helper (`readinessAuthFailure()`,
+checked against `READINESS_SECRET`): with no bearer, or the wrong one, it returns only
+`{ ok: true|false }`; the full body — queue depth, provider-activity age, missing production
+variable names — is returned only with the correct bearer. See finding F7.
 
 ### Audit logging
 
@@ -150,8 +160,17 @@ Cron routes (`/api/jobs/process`, `/api/jobs/expiry-scan`, `/api/jobs/notices-sy
 ### Response headers
 
 `apps/web/next.config.ts` sets `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
-`Referrer-Policy: strict-origin-when-cross-origin` and a `Permissions-Policy` denying camera,
-microphone and geolocation. There is no CSP or HSTS header yet.
+`Referrer-Policy: strict-origin-when-cross-origin`, a `Permissions-Policy` denying camera,
+microphone and geolocation, `Strict-Transport-Security` (`max-age=63072000; includeSubDomains`)
+and `X-DNS-Prefetch-Control: off`.
+
+Every response also carries a per-request nonce-based Content Security Policy
+(`apps/web/src/proxy.ts`, `apps/web/src/lib/csp.ts`): `script-src 'self' 'nonce-<random>'
+'strict-dynamic'`, shipped as `Content-Security-Policy-Report-Only` until `CSP_ENFORCE=true`
+switches it to the enforced header name. `style-src` keeps `'unsafe-inline'` because CSP nonces
+do not cover React's inline `style={{}}` attribute, only `<style>` tags. See finding F8 and
+`docs/operations/customs-production-runbook.md`'s "Content Security Policy rollout" section for
+the enforcement plan.
 
 ## Secure development practices
 
@@ -174,7 +193,11 @@ cross-tenant integration tests and review are for.
 
 - `pnpm-lock.yaml` is committed; updates are reviewed by hand.
 - `onlyBuiltDependencies` in `pnpm-workspace.yaml` limits which packages may run install scripts.
-- There is **no** automated dependency scanning in CI yet (finding F6).
+- `.github/workflows/security.yml` runs `dependency-review-action` on every pull request
+  (fails on a high-severity advisory), a weekly `pnpm audit --prod --audit-level high`, and a
+  Gitleaks secret scan on every push and PR. `.github/dependabot.yml` opens weekly update PRs for
+  both npm and GitHub Actions dependencies (finding F6, resolved). CI itself is not dispatched
+  from this environment (billing) — verify locally with the commands below until it is re-enabled.
 
 ### If something happens
 
