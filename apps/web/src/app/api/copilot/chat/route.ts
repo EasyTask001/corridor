@@ -116,10 +116,13 @@ export async function POST(req: Request) {
     return createUIMessageStreamResponse({ stream });
   }
   const contextBlock = buildContextBlock(
-    context.regulations.map(
-      (r: { source: string; title: string; content: string }) =>
-        `(${r.source} — ${r.title}) ${r.content}`,
-    ),
+    context.regulations.map((r) => ({
+      content: r.content,
+      source: r.source,
+      title: r.title,
+      authority: r.authority,
+      lastVerifiedAt: r.lastVerifiedAt,
+    })),
     context.orgKnowledge.map((k: { content: string }) => k.content),
   );
 

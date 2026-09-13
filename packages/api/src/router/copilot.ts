@@ -23,11 +23,24 @@ export const copilotRouter = router({
   capabilities: permissionProcedure("copilot.use").query(async ({ ctx }) => {
     const mode = embedderAvailable() ? "model" : "mock";
     const rows = await ctx.rls((tx) =>
-      tx.select({ count: sql<number>`count(*)::int` }).from(regulationDocuments),
+      tx
+        .select({
+          status: regulationDocuments.verificationStatus,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(regulationDocuments)
+        .groupBy(regulationDocuments.verificationStatus),
     );
+    const countOf = (status: string) => rows.find((r) => r.status === status)?.count ?? 0;
+    const regulationsVerified = countOf("verified");
+    const regulationsDraft = countOf("draft") + countOf("superseded");
     return {
       mode,
-      regulationsIngested: (rows[0]?.count ?? 0) > 0,
+      // Only a 'verified' row is ever retrievable (match_regulations, 0052) —
+      // this is the count that actually predicts whether a citation can appear.
+      regulationsIngested: regulationsVerified > 0,
+      regulationsVerified,
+      regulationsDraft,
       suggestedQuestions: SUGGESTED_QUESTIONS,
     };
   }),
@@ -45,6 +58,9 @@ export const copilotRouter = router({
               source: regulationDocuments.source,
               jurisdiction: regulationDocuments.jurisdiction,
               url: regulationDocuments.url,
+              authority: regulationDocuments.authority,
+              verificationStatus: regulationDocuments.verificationStatus,
+              lastVerifiedAt: regulationDocuments.lastVerifiedAt,
             })
             .from(regulationDocuments)
             .where(

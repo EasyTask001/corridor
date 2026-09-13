@@ -19,6 +19,10 @@ export interface RegulationMatch {
   chunkIndex: number;
   content: string;
   similarity: number;
+  /** 'CBP' | 'CBSA' | 'USTR' | ... (0052) */
+  authority: string | null;
+  /** ISO date this excerpt was last confirmed against its live source (0052). */
+  lastVerifiedAt: string | null;
 }
 
 export interface OrgKnowledgeMatch {

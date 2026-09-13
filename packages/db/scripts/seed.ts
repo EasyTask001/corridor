@@ -101,6 +101,54 @@ async function ensureUser(
   return data.user.id;
 }
 
+/**
+ * Copilot regulation corpus — global, not tenant-scoped. Idempotent:
+ * ingestRegulations upserts by (source, title) — a real unique constraint
+ * since 0052 — and replaces embeddings, tagged with the embedder that
+ * produced them. Runnable standalone via `pnpm db:seed:regulations`, so
+ * fixing a corpus entry doesn't require a full re-seed.
+ */
+export async function seedRegulationCorpus(sql: postgres.Sql) {
+  const ingestResult = await ingestRegulations({
+    async upsertDocument(doc) {
+      const [row] = await sql<{ id: string }[]>`
+        insert into public.regulation_documents
+          (source, title, jurisdiction, url, content, authority, version, effective_date,
+           retrieved_at, last_verified_at, verification_status)
+        values (${doc.source}, ${doc.title}, ${doc.jurisdiction}, ${doc.url}, ${doc.content},
+          ${doc.authority}, ${doc.version}, ${doc.effectiveDate},
+          ${doc.retrievedAt}, ${doc.lastVerifiedAt},
+          ${doc.lastVerifiedAt ? "verified" : "draft"})
+        on conflict (source, title) do update set
+          jurisdiction = excluded.jurisdiction,
+          url = excluded.url,
+          content = excluded.content,
+          authority = excluded.authority,
+          version = excluded.version,
+          effective_date = excluded.effective_date,
+          retrieved_at = excluded.retrieved_at,
+          last_verified_at = excluded.last_verified_at,
+          verification_status = excluded.verification_status
+        returning id`;
+      return row!.id;
+    },
+    async replaceEmbeddings(documentId, chunks, embedderName) {
+      await sql`delete from public.regulation_embeddings where regulation_document_id = ${documentId}`;
+      for (const c of chunks) {
+        const vectorLiteral = `[${c.embedding.join(",")}]`;
+        await sql`
+          insert into public.regulation_embeddings
+            (regulation_document_id, chunk_index, content, embedding, embedder)
+          values (${documentId}, ${c.chunkIndex}, ${c.content}, ${vectorLiteral}::vector, ${embedderName})`;
+      }
+    },
+  });
+  console.log(
+    `ingested ${ingestResult.documents} regulation(s) / ${ingestResult.chunks} chunk(s) via ${ingestResult.embedder}`,
+  );
+  return ingestResult;
+}
+
 export async function seed() {
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY!, {
     auth: { autoRefreshToken: false, persistSession: false },
@@ -945,38 +993,8 @@ export async function seed() {
     }
     console.log("seeded 2 source documents + 3 compliance alerts for the demo org");
 
-    // 5. copilot regulation corpus — global, not tenant-scoped. Idempotent:
-    //    ingestRegulations upserts by (source, title) and replaces embeddings.
-    const ingestResult = await ingestRegulations({
-      async upsertDocument(doc) {
-        const [existing] = await sql<{ id: string }[]>`
-          select id from public.regulation_documents where source = ${doc.source} and title = ${doc.title} limit 1`;
-        if (existing) {
-          await sql`
-            update public.regulation_documents
-            set jurisdiction = ${doc.jurisdiction}, url = ${doc.url}, content = ${doc.content}
-            where id = ${existing.id}`;
-          return existing.id;
-        }
-        const [row] = await sql<{ id: string }[]>`
-          insert into public.regulation_documents (source, title, jurisdiction, url, content)
-          values (${doc.source}, ${doc.title}, ${doc.jurisdiction}, ${doc.url}, ${doc.content})
-          returning id`;
-        return row!.id;
-      },
-      async replaceEmbeddings(documentId, chunks) {
-        await sql`delete from public.regulation_embeddings where regulation_document_id = ${documentId}`;
-        for (const c of chunks) {
-          const vectorLiteral = `[${c.embedding.join(",")}]`;
-          await sql`
-            insert into public.regulation_embeddings (regulation_document_id, chunk_index, content, embedding)
-            values (${documentId}, ${c.chunkIndex}, ${c.content}, ${vectorLiteral}::vector)`;
-        }
-      },
-    });
-    console.log(
-      `ingested ${ingestResult.documents} regulation(s) / ${ingestResult.chunks} chunk(s) via ${ingestResult.embedder}`,
-    );
+    // 5. copilot regulation corpus — global, not tenant-scoped.
+    await seedRegulationCorpus(sql);
 
     return { orgId, otherOrgId };
   } finally {

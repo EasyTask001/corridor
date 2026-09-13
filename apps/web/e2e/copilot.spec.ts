@@ -37,7 +37,7 @@ test.describe("compliance copilot", () => {
     // Citations arrive as a data part before the text, and render as a source list.
     await expect(assistant.getByText("Sources")).toBeVisible({ timeout: 90_000 });
     await expect(
-      assistant.getByRole("link", { name: /Advance Electronic Information for Truck Cargo/ }),
+      assistant.getByRole("link", { name: /Advance Electronic Truck Cargo Manifest/ }),
     ).toBeVisible();
 
     // …and an actual streamed answer, not just the citation block.

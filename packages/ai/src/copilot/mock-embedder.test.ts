@@ -34,15 +34,13 @@ describe("mockEmbed", () => {
    * so retrieval filtered out even the correct chunk.
    */
   it("ranks the right regulation first, but below the model citation gate", () => {
-    const question = mockEmbed("What documents are required for an ACE e-manifest?");
+    const question = mockEmbed("What cargo description does CBP require on a truck manifest?");
     const ranked = REGULATION_CORPUS.map((r) => ({
       title: r.title,
       similarity: cosine(question, mockEmbed(r.content)),
     })).sort((a, b) => b.similarity - a.similarity);
 
-    expect(ranked[0]!.title).toBe(
-      "Advance Electronic Information for Truck Cargo (ACE e-Manifest)",
-    );
+    expect(ranked[0]!.title).toBe("Advance Electronic Truck Cargo Manifest — Timing (ACE e-Manifest)");
     expect(ranked[0]!.similarity).toBeLessThan(MIN_CITATION_SIMILARITY);
     expect(ranked[0]!.similarity).toBeGreaterThanOrEqual(minCitationSimilarity("mock"));
   });

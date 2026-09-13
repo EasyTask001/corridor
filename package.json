@@ -21,6 +21,7 @@
     "db:stop": "supabase stop",
     "db:reset": "supabase db reset",
     "db:seed": "pnpm --filter @corridor/db seed",
+    "db:seed:regulations": "pnpm --filter @corridor/db seed:regulations",
     "db:types": "supabase gen types typescript --local > packages/db/src/supabase-types.ts",
     "db:lint": "supabase db lint --local --schema public --level warning --fail-on warning",
     "db:advisors": "supabase inspect db db-stats --local && supabase inspect db table-stats --local && supabase inspect db index-stats --local",

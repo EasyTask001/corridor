@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
+import { Alert } from "@corridor/ui";
 
 interface RegulationCitation {
   regulationDocumentId: string;
@@ -12,6 +13,8 @@ interface RegulationCitation {
   url: string | null;
   content: string;
   similarity: number;
+  authority: string | null;
+  lastVerifiedAt: string | null;
 }
 interface OrgCitation {
   id: string;
@@ -49,6 +52,11 @@ function CitationList({
           <span className="rounded bg-surface-sunken px-1.5 py-0.5 font-mono text-[10px] text-fg-primary">
             {r.jurisdiction}
           </span>{" "}
+          {r.authority && (
+            <span className="rounded bg-surface-sunken px-1.5 py-0.5 font-mono text-[10px] text-fg-primary">
+              {r.authority}
+            </span>
+          )}{" "}
           {r.url ? (
             <a
               href={r.url}
@@ -63,7 +71,10 @@ function CitationList({
               {r.source} — {r.title}
             </span>
           )}{" "}
-          <span className="text-fg-secondary/60">({Math.round(r.similarity * 100)}% match)</span>
+          <span className="text-fg-secondary/60">
+            ({Math.round(r.similarity * 100)}% match
+            {r.lastVerifiedAt ? `, verified ${r.lastVerifiedAt}` : ""})
+          </span>
         </div>
       ))}
       {orgKnowledge.map((k) => (
@@ -101,12 +112,18 @@ export function CopilotChat({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <Alert variant="info" className="mb-3">
+        Corridor Copilot gives operational guidance from paraphrased, dated regulatory summaries
+        and your organization&apos;s own notes. It is not legal or customs-broker advice — verify
+        anything border-critical against the linked primary source or your broker.
+      </Alert>
+
       {!regulationsIngested && (
-        <p className="mb-3 rounded-md bg-warn-500/10 px-3 py-2 text-sm text-status-warn">
+        <Alert variant="warn" className="mb-3">
           No regulations have been ingested yet — answers will rely only on tool lookups and
           organization notes. Run the ingestion step (part of <code>pnpm db:seed</code>) to enable
           citations.
-        </p>
+        </Alert>
       )}
 
       <div className="flex-1 space-y-4 overflow-y-auto rounded-lg border border-border-default bg-surface-raised p-4">

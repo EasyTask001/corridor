@@ -22,25 +22,24 @@ export default async function CopilotPage() {
   }
 
   const caller = await api();
-  const [capabilities, regulations] = await Promise.all([
-    caller.copilot.capabilities(),
-    caller.copilot.regulations.list({}),
-  ]);
+  const capabilities = await caller.copilot.capabilities();
 
   return (
     <div className="flex h-[calc(100vh-8rem)] flex-col">
       <header className="mb-4">
         <h1 className="text-2xl font-semibold tracking-tight">Compliance copilot</h1>
         <p className="text-sm text-fg-secondary">
-          Answers cite ingested CBP/CBSA guidance and your organization&apos;s own movement notes,
+          Answers cite verified CBP/CBSA guidance and your organization&apos;s own movement notes,
           and can look up live movement, driver and tariff data.
           {capabilities.mode === "mock" && " Running in mock mode (no AI provider configured)."}
+          {capabilities.regulationsDraft > 0 &&
+            ` ${capabilities.regulationsDraft} additional summar${capabilities.regulationsDraft === 1 ? "y is" : "ies are"} pending verification and not yet citable.`}
         </p>
       </header>
       <CopilotChat
         suggestedQuestions={[...capabilities.suggestedQuestions]}
         regulationsIngested={capabilities.regulationsIngested}
-        regulationCount={regulations.length}
+        regulationCount={capabilities.regulationsVerified}
       />
     </div>
   );

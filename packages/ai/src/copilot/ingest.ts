@@ -15,12 +15,18 @@ import { selectEmbedder } from "./embedder";
 import type { Embedder } from "./types";
 
 export interface IngestSink {
-  /** Insert or update a regulation_documents row by (source, title); return its id. */
+  /** Insert or update a regulation_documents row by (source, title); return its id.
+   * `doc.lastVerifiedAt` decides verification_status: null stays 'draft', a
+   * date makes it 'verified' — only 'verified' rows are ever retrieved
+   * (match_regulations, migration 0052). */
   upsertDocument(doc: Omit<RegulationSeed, "content"> & { content: string }): Promise<string>;
-  /** Replace all embeddings for a document with the given chunks. */
+  /** Replace all embeddings for a document with the given chunks, tagged with
+   * the embedder that produced them (match_regulations can filter on it —
+   * vectors from different models are not comparable). */
   replaceEmbeddings(
     documentId: string,
     chunks: Array<{ chunkIndex: number; content: string; embedding: number[] }>,
+    embedderName: string,
   ): Promise<void>;
 }
 
@@ -45,6 +51,7 @@ export async function ingestRegulations(
     await sink.replaceEmbeddings(
       documentId,
       chunks.map((content, i) => ({ chunkIndex: i, content, embedding: embeddings[i]!.embedding })),
+      embedder.name,
     );
     chunkCount += chunks.length;
   }

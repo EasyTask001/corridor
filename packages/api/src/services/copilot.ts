@@ -108,7 +108,8 @@ export async function retrieveContext(
   const minSimilarity = minCitationSimilarity(embedder.name);
 
   const [regulations, orgKnowledge] = await Promise.all([
-    cachedRegulations ?? matchRegulations(tx, vectorLiteral, jurisdiction, minSimilarity),
+    cachedRegulations ??
+      matchRegulations(tx, vectorLiteral, jurisdiction, minSimilarity, embedder.name),
     cachedOrgKnowledge ?? matchOrgKnowledge(tx, orgId, vectorLiteral, minSimilarity),
   ]);
 
@@ -129,6 +130,7 @@ async function matchRegulations(
   vectorLiteral: string,
   jurisdiction: "US" | "CA" | null,
   minSimilarity: number,
+  embedderName: string,
 ): Promise<RegulationMatch[]> {
   const rows = await tx.execute<{
     regulation_document_id: string;
@@ -139,8 +141,17 @@ async function matchRegulations(
     chunk_index: number;
     content: string;
     similarity: number;
+    authority: string | null;
+    // A raw tx.execute() row does not consistently deserialize timestamptz to
+    // a Date the way a typed Drizzle select does — handle whichever the
+    // driver hands back.
+    last_verified_at: Date | string | null;
   }>(
-    sql`select * from public.match_regulations(${vectorLiteral}::vector, 5, ${jurisdiction}::text)`,
+    // The 4th argument keeps a mock-embedded corpus and a real-model query (or
+    // vice versa) from ever being compared — the vectors are not comparable,
+    // and mixing them silently produces a meaningless similarity score
+    // instead of an error.
+    sql`select * from public.match_regulations(${vectorLiteral}::vector, 5, ${jurisdiction}::text, ${embedderName}::text)`,
   );
 
   return rows
@@ -154,6 +165,10 @@ async function matchRegulations(
       chunkIndex: r.chunk_index,
       content: r.content,
       similarity: r.similarity,
+      authority: r.authority,
+      lastVerifiedAt: r.last_verified_at
+        ? new Date(r.last_verified_at).toISOString().slice(0, 10)
+        : null,
     }));
 }
 
