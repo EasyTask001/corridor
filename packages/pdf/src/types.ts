@@ -62,6 +62,9 @@ export interface SheetShipment {
   shipper: string | null;
   consignee: string | null;
   inBond: string | null;
+  /** Resolved unit label (0051) — e.g. "TR-501" or "T-101"; null when it
+   * cannot be resolved (ambiguous or a stale explicit choice). */
+  loadedOn: string | null;
   commodities: SheetCommodity[];
 }
 

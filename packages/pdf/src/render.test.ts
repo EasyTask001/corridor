@@ -62,6 +62,7 @@ const sheet: DriverSheetData = {
       shipper: "Maple Ridge Steel Ltd",
       consignee: "Great Lakes Fabrication Inc",
       inBond: null,
+      loadedOn: "TR-501",
       commodities: [
         {
           line: 1,

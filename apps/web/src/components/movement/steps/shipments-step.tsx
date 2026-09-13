@@ -3,10 +3,35 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
+import { resolveLoadedOn, type LoadedOnUnits, type LoadedOnValue } from "@corridor/domain";
 import { CommodityForm, type CommodityFormValues } from "@/components/shipment/commodity-form";
 import { ShipmentForm, type ShipmentFormValues } from "@/components/shipment/shipment-form";
 import { useTRPC } from "@/lib/trpc/client";
-import { useMovementMutations, useWorkspace, type MovementShipment } from "../workspace-context";
+import {
+  useMovementMutations,
+  useWorkspace,
+  type Movement,
+  type MovementShipment,
+} from "../workspace-context";
+
+/** Same units[] shape seals-step.tsx builds: tractor first, then trailers in
+ * tow order — the resolver's own default follows that order too. */
+function loadedOnUnitsFor(m: Movement): LoadedOnUnits {
+  return {
+    truckUnitNumber: m.truck?.unitNumber ?? null,
+    trailers: m.trailers.map((t) => ({ id: t.id, unitNumber: t.unitNumber })),
+  };
+}
+
+function loadedOnValueOf(s: {
+  loadedOnType: "TRUCK" | "TRAILER" | null;
+  loadedOnMovementTrailerId: string | null;
+}): LoadedOnValue {
+  if (s.loadedOnType === "TRAILER")
+    return { type: "TRAILER", movementTrailerId: s.loadedOnMovementTrailerId! };
+  if (s.loadedOnType === "TRUCK") return { type: "TRUCK" };
+  return null;
+}
 
 const kindOf = (s: { shipmentType: string | null; cargoType: string | null }) =>
   (s.shipmentType ?? s.cargoType ?? "").replace(/_/g, " ");
@@ -32,10 +57,12 @@ export function ShipmentsStep() {
     upsertCommodity,
     removeCommodity,
     assignShipments,
+    setLoadedOn,
   } = useMovementMutations();
   const [expanded, setExpanded] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [assigning, setAssigning] = useState(false);
+  const units = loadedOnUnitsFor(m);
 
   return (
     <div className="space-y-4">
@@ -48,13 +75,14 @@ export function ShipmentsStep() {
               <th className="px-3 py-2 font-medium">Shipper → Consignee</th>
               <th className="px-3 py-2 text-right font-medium">Lines</th>
               <th className="px-3 py-2 font-medium">Status</th>
+              <th className="px-3 py-2 font-medium">Loaded on</th>
               <th />
             </tr>
           </thead>
           <tbody className="divide-y divide-border-default">
             {m.shipments.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-5 text-fg-secondary">
+                <td colSpan={7} className="px-3 py-5 text-fg-secondary">
                   No shipments on this movement yet.
                 </td>
               </tr>
@@ -63,6 +91,7 @@ export function ShipmentsStep() {
               <ShipmentRows
                 key={s.id}
                 shipment={s}
+                units={units}
                 expanded={expanded === s.id}
                 editable={editable}
                 onToggle={() => setExpanded((cur) => (cur === s.id ? null : s.id))}
@@ -73,6 +102,7 @@ export function ShipmentsStep() {
                 }
                 onRemoveCommodity={(id) => removeCommodity.mutate({ shipmentId: s.id, id })}
                 commodityPending={upsertCommodity.isPending}
+                onSetLoadedOn={(loadedOn) => setLoadedOn.mutate({ id: s.id, loadedOn })}
               />
             ))}
           </tbody>
@@ -125,6 +155,7 @@ export function ShipmentsStep() {
 
 function ShipmentRows({
   shipment: s,
+  units,
   expanded,
   editable,
   onToggle,
@@ -133,8 +164,10 @@ function ShipmentRows({
   onSaveCommodity,
   onRemoveCommodity,
   commodityPending,
+  onSetLoadedOn,
 }: {
   shipment: MovementShipment;
+  units: LoadedOnUnits;
   expanded: boolean;
   editable: boolean;
   onToggle: () => void;
@@ -143,8 +176,12 @@ function ShipmentRows({
   onSaveCommodity: (values: CommodityFormValues, id?: string) => void;
   onRemoveCommodity: (id: string) => void;
   commodityPending: boolean;
+  onSetLoadedOn: (loadedOn: LoadedOnValue) => void;
 }) {
   const [editingLine, setEditingLine] = useState<string | "new" | null>(null);
+  const resolved = resolveLoadedOn(units, loadedOnValueOf(s));
+  const selectValue =
+    s.loadedOnType === "TRAILER" ? s.loadedOnMovementTrailerId! : s.loadedOnType === "TRUCK" ? "truck" : "";
   return (
     <>
       <tr>
@@ -170,6 +207,44 @@ function ShipmentRows({
         </td>
         <td className="px-3 py-2 text-right font-mono">{s.commodities.length}</td>
         <td className="px-3 py-2 capitalize">{s.status}</td>
+        <td className="px-3 py-2">
+          {editable ? (
+            <select
+              aria-label={`Loaded on for ${s.controlNumber}`}
+              className="input py-1 text-xs"
+              value={selectValue}
+              aria-invalid={resolved.type === "ambiguous" || resolved.type === "stale"}
+              onChange={(e) => {
+                const v = e.target.value;
+                onSetLoadedOn(
+                  v === "" ? null : v === "truck" ? { type: "TRUCK" } : { type: "TRAILER", movementTrailerId: v },
+                );
+              }}
+            >
+              <option value="">
+                {resolved.type === "ambiguous"
+                  ? "Choose…"
+                  : resolved.type === "stale"
+                    ? "Choose…"
+                    : `Default (${resolved.unitNumber})`}
+              </option>
+              {units.truckUnitNumber && <option value="truck">{units.truckUnitNumber} · Truck</option>}
+              {units.trailers.map((t, i) => (
+                <option key={t.id} value={t.id}>
+                  {t.unitNumber} · Trailer {i + 1}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="font-mono text-xs">
+              {resolved.type === "ambiguous"
+                ? "— choose —"
+                : resolved.type === "stale"
+                  ? "— unit not on trip —"
+                  : resolved.unitNumber}
+            </span>
+          )}
+        </td>
         <td className="px-3 py-2 text-right whitespace-nowrap">
           <Link
             href={`/shipments/${s.id}`}
@@ -194,7 +269,7 @@ function ShipmentRows({
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={6} className="bg-surface-sunken/60 px-3 py-3">
+          <td colSpan={7} className="bg-surface-sunken/60 px-3 py-3">
             <ul className="space-y-1 text-xs">
               {s.commodities.length === 0 && (
                 <li className="text-fg-secondary">No commodity lines on this shipment.</li>

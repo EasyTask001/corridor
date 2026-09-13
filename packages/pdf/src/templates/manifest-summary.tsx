@@ -107,13 +107,13 @@ export function ManifestSummary({ data }: { data: DriverSheetData }) {
                 width: 12,
                 render: (s) => (s.kind ?? "").replace(/_/g, " "),
               },
-              { key: "shipper", label: "Shipper", width: 18 },
-              { key: "consignee", label: "Consignee", width: 18 },
-              { key: "inBond", label: "In-bond", width: 10 },
+              { key: "shipper", label: "Shipper", width: 15 },
+              { key: "consignee", label: "Consignee", width: 15 },
+              { key: "inBond", label: "In-bond", width: 8 },
               {
                 key: "entryNumber",
                 label: "Entry #",
-                width: 16,
+                width: 14,
                 mono: true,
                 render: (s) =>
                   s.entryNumber
@@ -121,6 +121,13 @@ export function ManifestSummary({ data }: { data: DriverSheetData }) {
                     : "",
               },
               { key: "status", label: "Status", width: 8 },
+              {
+                key: "loadedOn",
+                label: "Loaded on",
+                width: 10,
+                mono: true,
+                render: (s) => s.loadedOn ?? "—",
+              },
             ]}
             rows={data.shipments}
             emptyText={trip.isEmpty ? "Declared empty." : "No shipments."}

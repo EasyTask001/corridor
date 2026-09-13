@@ -356,6 +356,9 @@ export async function seed() {
         consignee: string;
         movementId: string | null;
         isPars?: boolean;
+        /** movement_trailers.id (0051) — set only when the trip has more
+         * than one trailer, so the seeded double isn't left ambiguous. */
+        movementTrailerId?: string | null;
         commodities: Array<{
           desc: string;
           hs: string;
@@ -369,11 +372,13 @@ export async function seed() {
       }) => {
         const [shipment] = await sql<{ id: string }[]>`
           insert into public.shipments (organization_id, regime, movement_id, carrier_code,
-            shipment_type, cargo_type, control_reference, is_pars, shipper_id, consignee_id, broker_id)
+            shipment_type, cargo_type, control_reference, is_pars, shipper_id, consignee_id, broker_id,
+            loaded_on_type, loaded_on_movement_trailer_id)
           values (${orgId}, ${spec.regime}, ${spec.movementId}, ${spec.carrierCode},
             ${spec.regime === "ACE" ? (spec.type ?? "regular_bill") : null},
             ${spec.regime === "ACI" ? (spec.type ?? "regular") : null},
-            ${spec.controlReference}, ${spec.isPars ?? false}, ${spec.shipper}, ${spec.consignee}, ${northgate})
+            ${spec.controlReference}, ${spec.isPars ?? false}, ${spec.shipper}, ${spec.consignee}, ${northgate},
+            ${spec.movementTrailerId ? "TRAILER" : null}, ${spec.movementTrailerId ?? null})
           returning id`;
         let line = 0;
         for (const c of spec.commodities) {
@@ -459,12 +464,16 @@ export async function seed() {
         await sql`
           insert into public.movement_events (movement_id, organization_id, event_type, from_status, to_status, actor_type, actor_id, payload)
           values (${id}, ${orgId}, 'status_change', null, 'draft', 'user', ${dispatcherId}, ${sql.json({ movementNumber: number })})`;
-        for (const spec_shipment of spec.shipments) {
+        for (const [i, spec_shipment] of spec.shipments.entries()) {
           await seedShipment({
             ...spec_shipment,
             regime: spec.regime,
             carrierCode,
             movementId: id,
+            // A double's first shipment gets an explicit placement (the first
+            // slot) so the seeded demo doesn't show the 0051 ambiguity
+            // blocker; a single trailer or bobtail needs no explicit choice.
+            movementTrailerId: i === 0 && spec.trailers.length > 1 ? slotIds[0] : undefined,
           });
         }
         for (const [i, numbers] of spec.seals.entries()) {

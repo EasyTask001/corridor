@@ -97,6 +97,7 @@ export function useMovementMutations() {
     removeShipment: useMutation(trpc.shipment.remove.mutationOptions(opts)),
     assignShipments: useMutation(trpc.shipment.assign.mutationOptions(opts)),
     unassignShipments: useMutation(trpc.shipment.unassign.mutationOptions(opts)),
+    setLoadedOn: useMutation(trpc.shipment.setLoadedOn.mutationOptions(opts)),
   };
 }
 

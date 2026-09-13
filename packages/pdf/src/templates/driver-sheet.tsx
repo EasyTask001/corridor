@@ -130,19 +130,26 @@ export function DriverSheet({ data }: { data: DriverSheetData }) {
                 width: 14,
                 render: (s) => (s.kind ?? "").replace(/_/g, " "),
               },
-              { key: "shipper", label: "Shipper", width: 20 },
-              { key: "consignee", label: "Consignee", width: 20 },
+              { key: "shipper", label: "Shipper", width: 17 },
+              { key: "consignee", label: "Consignee", width: 17 },
               {
                 key: "entryNumber",
                 label: "Entry #",
-                width: 16,
+                width: 14,
                 mono: true,
                 render: (s) =>
                   s.entryNumber
                     ? `${s.entryNumber}${s.entryPortCode ? ` @ ${s.entryPortCode}` : ""}`
                     : "",
               },
-              { key: "status", label: "Status", width: 8 },
+              { key: "status", label: "Status", width: 6 },
+              {
+                key: "loadedOn",
+                label: "Loaded on",
+                width: 10,
+                mono: true,
+                render: (s) => s.loadedOn ?? "—",
+              },
             ]}
             rows={data.shipments}
             emptyText={trip.isEmpty ? "Declared empty." : "No shipments on this movement."}

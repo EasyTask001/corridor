@@ -122,6 +122,40 @@ const timeline = (page: Page) => page.getByRole("list", { name: "Movement timeli
 const readinessPanel = (page: Page) => page.getByRole("region", { name: "Ready to cross" });
 
 test.describe("movement builder", () => {
+  test("loaded on: a single trailer defaults, a double must be chosen (0051)", async ({
+    page,
+  }) => {
+    await login(page, "dispatch@pathfinder.demo");
+    await buildReadyMovement(page);
+
+    await page.getByRole("button", { name: /^Shipments/ }).click();
+    const loadedOnSelect = page.getByLabel(/^Loaded on for PFTR/);
+    await expect(loadedOnSelect).toHaveValue("");
+    await expect(loadedOnSelect.locator("option:checked")).toHaveText(/Default \(TR-501\)/);
+
+    // Hitching a second trailer makes the default ambiguous.
+    await page.getByRole("button", { name: /^Trailers/ }).click();
+    await page
+      .getByLabel("Hitch trailer", { exact: true })
+      .selectOption({ label: "TR-502 · Controlled temperature trailer (reefer)" });
+    await page.getByRole("button", { name: "Hitch", exact: true }).click();
+    await expect(page.getByRole("cell", { name: /^TR-502/ })).toBeVisible();
+
+    await page.getByRole("button", { name: /^Review/ }).click();
+    const blocker = page.getByText(/two or more trailers are in tow/);
+    await expect(blocker).toBeVisible();
+    // Clicking a blocking issue routes back to the step that fixes it.
+    await blocker.click();
+    await expect(loadedOnSelect).toBeVisible();
+    await expect(loadedOnSelect.locator("option:checked")).toHaveText("Choose…");
+    await loadedOnSelect.selectOption({ label: "TR-502 · Trailer 2" });
+    await expect(loadedOnSelect.locator("option:checked")).toHaveText(/^TR-502/);
+
+    await page.getByRole("button", { name: /^Review/ }).click();
+    await expect(page.getByText(/two or more trailers are in tow/)).toHaveCount(0);
+  });
+
+
   test("board lists every status chip and filters by status", async ({ page }) => {
     await login(page, "dispatch@pathfinder.demo");
     await page.goto("/movements");

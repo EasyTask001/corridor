@@ -11,6 +11,7 @@ import {
   ACI_FLAG_KEYS,
   ACI_FLAG_LABELS,
   DRIVER_DOCUMENT_LABELS,
+  resolveLoadedOn,
   type BlankDriverSheetsInput,
   type GeneratedDocumentKind,
 } from "@corridor/domain";
@@ -25,6 +26,7 @@ import {
 } from "@corridor/pdf";
 import { DOCUMENTS_BUCKET } from "./documents";
 import { loadFull, loadOrganization, type Actor, type FullMovement } from "./movements";
+import { loadedOnOf } from "./shipments";
 
 const { generatedDocuments, movementEvents } = schema;
 
@@ -201,28 +203,39 @@ export async function driverSheetDataFor(
       plates: plates(t.plateNumber, t.plateJurisdiction, t.plates),
       seals: t.seals.map((s) => s.sealNumber),
     })),
-    shipments: full.shipments.map((s) => ({
-      controlNumber: s.controlNumber,
-      kind: s.shipmentType ?? s.cargoType,
-      entryNumber: s.entryNumber,
-      entryPortCode: s.entryPortCode,
-      status: s.status,
-      shipper: s.shipperName,
-      consignee: s.consigneeName,
-      inBond: s.inBondEntryType
-        ? `${s.inBondEntryType}${s.inBondNumber ? ` ${s.inBondNumber}` : ""}${s.inBondDestinationPortCode ? ` → ${s.inBondDestinationPortCode}` : ""}`
-        : null,
-      commodities: s.commodities.map((c) => ({
-        line: c.lineNumber,
-        description: c.commodityDescription,
-        hsCode: c.hsCode,
-        quantity: c.quantity,
-        quantityUnit: c.quantityUnit,
-        weightKg: c.weightKg,
-        countryOfOrigin: c.countryOfOrigin,
-        hazmat: c.hazmat.map((h) => h.unCode),
-      })),
-    })),
+    shipments: full.shipments.map((s) => {
+      const resolved = resolveLoadedOn(
+        {
+          truckUnitNumber: full.truck?.unitNumber ?? null,
+          trailers: full.trailers.map((t) => ({ id: t.id, unitNumber: t.unitNumber })),
+        },
+        loadedOnOf(s),
+      );
+      return {
+        controlNumber: s.controlNumber,
+        kind: s.shipmentType ?? s.cargoType,
+        entryNumber: s.entryNumber,
+        entryPortCode: s.entryPortCode,
+        status: s.status,
+        shipper: s.shipperName,
+        consignee: s.consigneeName,
+        inBond: s.inBondEntryType
+          ? `${s.inBondEntryType}${s.inBondNumber ? ` ${s.inBondNumber}` : ""}${s.inBondDestinationPortCode ? ` → ${s.inBondDestinationPortCode}` : ""}`
+          : null,
+        loadedOn:
+          resolved.type === "ambiguous" || resolved.type === "stale" ? null : resolved.unitNumber,
+        commodities: s.commodities.map((c) => ({
+          line: c.lineNumber,
+          description: c.commodityDescription,
+          hsCode: c.hsCode,
+          quantity: c.quantity,
+          quantityUnit: c.quantityUnit,
+          weightKg: c.weightKg,
+          countryOfOrigin: c.countryOfOrigin,
+          hazmat: c.hazmat.map((h) => h.unCode),
+        })),
+      };
+    }),
     customsEvents: customsRows.map((e) => {
       const p = e.payload ?? {};
       const detail = [
