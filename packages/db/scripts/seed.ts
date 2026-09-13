@@ -343,6 +343,7 @@ export async function seed() {
       const maple = await ids("partners", "name", "Maple Ridge Steel Ltd");
       const glf = await ids("partners", "name", "Great Lakes Fabrication Inc");
       const erie = await ids("partners", "name", "Erie Produce Co");
+      const northgate = await ids("partners", "name", "Northgate Customs Brokers");
 
       /** One shipment plus its commodity lines; `movementId` null = unassigned. */
       const seedShipment = async (spec: {
@@ -368,11 +369,11 @@ export async function seed() {
       }) => {
         const [shipment] = await sql<{ id: string }[]>`
           insert into public.shipments (organization_id, regime, movement_id, carrier_code,
-            shipment_type, cargo_type, control_reference, is_pars, shipper_id, consignee_id)
+            shipment_type, cargo_type, control_reference, is_pars, shipper_id, consignee_id, broker_id)
           values (${orgId}, ${spec.regime}, ${spec.movementId}, ${spec.carrierCode},
             ${spec.regime === "ACE" ? (spec.type ?? "regular_bill") : null},
             ${spec.regime === "ACI" ? (spec.type ?? "regular") : null},
-            ${spec.controlReference}, ${spec.isPars ?? false}, ${spec.shipper}, ${spec.consignee})
+            ${spec.controlReference}, ${spec.isPars ?? false}, ${spec.shipper}, ${spec.consignee}, ${northgate})
           returning id`;
         let line = 0;
         for (const c of spec.commodities) {
@@ -898,11 +899,27 @@ export async function seed() {
         severity: "warning",
         status: "acknowledged",
         source: "ai",
-        title: `Elevated hold risk on ${heldMovement.movement_number}`,
+        title: "Inspection Risk — 58 / 100 · Elevated",
         description:
-          "Perishable produce at a crossing with an above-average inspection rate for this commodity. Confirm the PGA data before the truck leaves.",
+          "High impact: This lane was rejected by customs within the last 90 days. Medium impact: Declared value is a statistical outlier for this lane.",
         movementId: heldMovement.id,
-        metadata: { holdProbability: 0.41, factors: ["commodity", "crossing_history"] },
+        metadata: {
+          score: 58,
+          factors: [
+            {
+              key: "rejectedRecently",
+              label: "This lane was rejected by customs within the last 90 days",
+              impact: "High",
+              present: true,
+            },
+            {
+              key: "valueOutlier",
+              label: "Declared value is a statistical outlier for this lane",
+              impact: "Medium",
+              present: true,
+            },
+          ],
+        },
       });
       await seedAlert({
         dedupeKey: `demo:hs_code_mismatch:${heldMovement.id}`,

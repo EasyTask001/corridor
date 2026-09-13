@@ -21,7 +21,12 @@ import {
   type InBondMessage,
   type InBondStatusMessage,
 } from "@corridor/integrations";
-import { customsClientFor, logIntegrationEvent, recordSubmission } from "./customs";
+import {
+  customsClientFor,
+  logIntegrationEvent,
+  recordSubmission,
+  requireCustomsCapability,
+} from "./customs";
 import type { Actor } from "./movements";
 
 const { inBondRecords, inBondEvents, externalShipments, shipments, ports } = schema;
@@ -264,6 +269,7 @@ export async function sendInBond(
   }
   const { regime, message } = await messageFor(tx, actor.orgId, r);
   const { client } = await customsClientFor(tx, actor.orgId, regime);
+  requireCustomsCapability(client, "inBond");
   const correlationId = randomUUID();
   const started = Date.now();
   try {
@@ -334,6 +340,7 @@ export async function requestInBondStatus(tx: RlsTransaction, actor: Actor, reco
     });
   const regime = await regimeFor(tx, actor.orgId, r);
   const { client } = await customsClientFor(tx, actor.orgId, regime);
+  requireCustomsCapability(client, "inBond");
   const started = Date.now();
   const status = await client.inBondStatus(r.bondNumber);
   await logIntegrationEvent(tx, {

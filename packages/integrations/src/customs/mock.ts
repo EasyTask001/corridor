@@ -24,6 +24,7 @@ import type {
   TransmitAck,
 } from "./types";
 import { CustomsTransportError, hasCustomsCredentials } from "./types";
+import { resolveCustomsCapabilities } from "./capabilities";
 import { mockBonds, mockFiled } from "./fixture-state";
 import { parseInboundMessage } from "./gateway/inbound";
 import { simulateCustomsEvents } from "./simulate";
@@ -110,6 +111,11 @@ export function createMockCustomsClient(opts: MockCustomsOptions): CustomsClient
     provider: opts.provider,
     environment: opts.environment ?? "sandbox",
     mode: "mock",
+    capabilities: resolveCustomsCapabilities({
+      regime: opts.provider === "cbp_ace" ? "ACE" : "ACI",
+      mode: "mock",
+      environment: opts.environment ?? "sandbox",
+    }),
 
     transmit(manifest, o) {
       const trip = hook(manifest);

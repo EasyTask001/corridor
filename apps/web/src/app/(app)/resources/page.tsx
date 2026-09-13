@@ -3,7 +3,7 @@ import { ResourcesPanel } from "./resources-panel";
 
 export const metadata: Metadata = { title: "Resources" };
 
-/** External reference links a dispatcher reaches for, with live widgets where a feed exists. */
+/** External authoritative links plus clearly labelled experimental demo widgets. */
 const LINKS: Array<{ group: string; items: Array<{ label: string; href: string; note: string }> }> =
   [
     {

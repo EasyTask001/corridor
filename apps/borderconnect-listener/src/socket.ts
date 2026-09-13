@@ -46,7 +46,7 @@ export interface BorderConnectSocketLike {
 export type BorderConnectWsFactory = (url: string) => BorderConnectSocketLike;
 
 export interface ConnectBorderConnectSocketOptions {
-  /** The account's assigned suffix, e.g. "EasyTask" (`BORDERCONNECT_API_URL_SUFFIX`). */
+  /** The account's assigned suffix (`BORDERCONNECT_API_URL_SUFFIX`). */
   suffix: string;
   apiKey: string;
   /** Called with every post-auth frame, normalised to an array of messages. */
@@ -65,6 +65,11 @@ export interface ConnectBorderConnectSocketOptions {
   maxBackoffMs?: number;
   /** Optional diagnostics hook — never throws, never required. */
   onLog?: (message: string) => void;
+  /** Structured exception hook for Sentry or another local reporter. */
+  onError?: (
+    error: unknown,
+    context: { operation: "socket" | "store_inbound"; messageCount?: number },
+  ) => void;
 }
 
 export interface BorderConnectSocketController {
@@ -135,6 +140,7 @@ export function connectBorderConnectSocket(
     initialBackoffMs = 1_000,
     maxBackoffMs = 60_000,
     onLog,
+    onError,
   } = opts;
   const url = `${baseUrl}/api/sockets/${suffix}`;
 
@@ -145,8 +151,19 @@ export function connectBorderConnectSocket(
   let authTimer: ReturnType<typeof setTimeout> | null = null;
   let pingTimer: ReturnType<typeof setInterval> | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let storeInFlight = false;
 
   const log = (message: string) => onLog?.(message);
+  const reportError = (
+    error: unknown,
+    context: { operation: "socket" | "store_inbound"; messageCount?: number },
+  ) => {
+    try {
+      onError?.(error, context);
+    } catch {
+      // Observability must never terminate the receive loop.
+    }
+  };
 
   /**
    * `onMessages` runs the caller's DB write (`index.ts`'s
@@ -166,12 +183,47 @@ export function connectBorderConnectSocket(
    * synchronous throw is caught directly.
    */
   function safeOnMessages(messages: Record<string, unknown>[]): void {
+    if (storeInFlight) {
+      // Do not let a later provider frame overtake a batch whose durable
+      // persistence result is still unknown. Closing the socket causes the
+      // provider to retain/replay unacknowledged frames while the spool-backed
+      // batch is replayed on restart.
+      log("inbound persistence still in flight; closing before accepting another batch");
+      stopped = true;
+      clearAuthTimer();
+      clearPingTimer();
+      try {
+        currentSocket?.close(1011, "inbound persistence still in flight");
+      } catch {
+        // The socket is already unusable; the durable spool owns recovery.
+      }
+      return;
+    }
+    storeInFlight = true;
     const onFailure = (err: unknown) => {
       const message = err instanceof Error ? err.message : String(err);
-      log(`onMessages failed for a batch of ${messages.length} message(s), dropping: ${message}`);
+      log(
+        `onMessages failed for a batch of ${messages.length} message(s); receive loop stopped and the durable spool must be replayed: ${message}`,
+      );
+      reportError(err, { operation: "store_inbound", messageCount: messages.length });
+      stopped = true;
+      clearAuthTimer();
+      clearPingTimer();
+      try {
+        currentSocket?.close(1011, "inbound persistence failed");
+      } catch {
+        // The socket is already unusable; the durable spool owns recovery.
+      }
     };
     try {
-      Promise.resolve(onMessages(messages)).catch(onFailure);
+      const result = onMessages(messages);
+      if (result && typeof result.then === "function") {
+        Promise.resolve(result).then(() => {
+          storeInFlight = false;
+        }, onFailure);
+      } else {
+        storeInFlight = false;
+      }
     } catch (err) {
       onFailure(err);
     }
@@ -275,6 +327,7 @@ export function connectBorderConnectSocket(
     socket.on("error", (err: unknown) => {
       const message = err instanceof Error ? err.message : String(err);
       log(`socket error: ${message}`);
+      reportError(err, { operation: "socket" });
       // The close handler (always fired by a real WebSocket after an error)
       // owns the reconnect decision — nothing to do here beyond logging.
     });

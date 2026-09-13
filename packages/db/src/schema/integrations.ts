@@ -140,6 +140,12 @@ export const backgroundJobs = pgTable(
     uniqueIndex("background_jobs_org_idempotency_unique")
       .on(t.organizationId, t.idempotencyKey)
       .where(sql`${t.idempotencyKey} is not null`),
+    // Queue-wide jobs have organization_id = NULL. PostgreSQL permits
+    // multiple NULLs in the tenant-scoped unique index above, so give those
+    // jobs their own conflict target as well (0050).
+    uniqueIndex("background_jobs_queue_idempotency_unique")
+      .on(t.jobType, t.idempotencyKey)
+      .where(sql`${t.organizationId} is null and ${t.idempotencyKey} is not null`),
   ],
 );
 

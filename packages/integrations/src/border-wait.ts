@@ -7,7 +7,9 @@ export interface BorderWait {
   crossingCode: string;
   lanes: { standard: number; fast: number; commercial: number };
   updatedAt: string;
-  source: "stub";
+  source: string;
+  dataQuality: "synthetic_demo" | "authoritative";
+  disclaimer: string | null;
 }
 
 export function getBorderWait(crossingCode: string, now: Date = new Date()): BorderWait {
@@ -24,6 +26,8 @@ export function getBorderWait(crossingCode: string, now: Date = new Date()): Bor
       commercial: Math.round(base * 0.8),
     },
     updatedAt: new Date(bucket * 600_000).toISOString(),
-    source: "stub",
+    source: "Corridor deterministic wait-time demo",
+    dataQuality: "synthetic_demo",
+    disclaimer: "Experimental — synthetic demo data, not live",
   };
 }

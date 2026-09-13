@@ -36,7 +36,9 @@ describe("predictHold", () => {
       "Declared value is a statistical outlier for this lane",
       "Declared HS code does not match the commodity description",
     ]);
-    expect(r.factors.find((f) => f.key === "rejectedRecently")!.present).toBe(false);
+    expect(r.factors.some((f) => f.key === "rejectedRecently")).toBe(false);
+    expect(r.factors.every((f) => f.present)).toBe(true);
+    expect(r.factors.map((f) => f.impact)).toEqual(["Medium", "High"]);
   });
 
   it("a single factor alone stays under the likely threshold", () => {

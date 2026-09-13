@@ -622,3 +622,84 @@ describe("movement.cancel", () => {
     });
   });
 });
+
+describe("movement.amend capabilities", () => {
+  it("rejects a live BorderConnect ACI amendment before writing amendment state", async () => {
+    process.env.BORDERCONNECT_API_URL_SUFFIX = "service-provider";
+    process.env.BORDERCONNECT_API_KEY = "secret";
+    delete process.env.BORDERCONNECT_ACI_AMEND_ENABLED;
+    const rows = transmittableRows(
+      movementRow({
+        regime: "ACI",
+        status: "accepted",
+        customsReferenceNumber: "1234123456",
+      }),
+    );
+    rows.organizations![0]!.borderConnectCompanyKey = "c-company";
+    rows.integrationConfigs = [
+      {
+        organizationId: TEST_ORG_ID,
+        provider: "cbsa_aci",
+        environment: "production",
+        status: "active",
+        mode: "border_connect",
+        credentialsRef: null,
+        settings: {},
+      },
+    ];
+    const { caller: api, db } = caller({
+      permissions: [...DISPATCHER, "movement.amend"],
+      rows,
+    });
+
+    await expect(
+      api.amend({
+        movementId: MOVEMENT_ID,
+        scope: "shipment",
+        reason: "Correct shipment details",
+        reasonCode: "20",
+        shipmentId: SHIPMENT_ID,
+        patch: { tripNumber: "1234123457" },
+      }),
+    ).rejects.toMatchObject({
+      code: "PRECONDITION_FAILED",
+      message: expect.stringContaining("BORDERCONNECT_ACI_AMEND_ENABLED"),
+    });
+    expect(db.table("movementAmendments")).toHaveLength(0);
+    expect(db.table("movementEvents")).toHaveLength(0);
+
+    delete process.env.BORDERCONNECT_API_URL_SUFFIX;
+    delete process.env.BORDERCONNECT_API_KEY;
+  });
+});
+
+describe("movement.validate provider capabilities", () => {
+  it("reports unsupported BorderConnect hazmat before transmission", async () => {
+    const rows = transmittableRows();
+    rows.integrationConfigs![0]!.mode = "border_connect";
+    rows.commodityHazmat = [
+      {
+        id: "abababab-abab-4bab-8bab-abababababab",
+        organizationId: TEST_ORG_ID,
+        commodityId: rows.commodities![0]!.id,
+        position: 1,
+        unCode: "UN1203",
+      },
+    ];
+    const { caller: api } = caller({ permissions: DISPATCHER, rows });
+
+    const result = await api.validate({ id: MOVEMENT_ID });
+
+    expect(result.canTransmit).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: expect.stringContaining("border_connect"),
+          severity: "blocking",
+          step: "commodity",
+          message: expect.stringContaining("hazmat"),
+        }),
+      ]),
+    );
+  });
+});

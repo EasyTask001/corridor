@@ -8,8 +8,9 @@ import { TRPCError } from "@trpc/server";
 import { and, eq, schema, sql, type RlsTransaction } from "@corridor/db";
 import { LOW_CONFIDENCE_THRESHOLD, isEditable, type ApplyExtractionInput } from "@corridor/domain";
 import { runExtractionPipeline } from "@corridor/ai";
+import { corridorMetrics } from "@corridor/observability";
 import { addEvent, requireMovement, type Actor } from "./movements";
-import { assertPartnersExist, defaultCarrierCode } from "./shipments";
+import { assertShipmentPartners, defaultCarrierCode } from "./shipments";
 import { notifyOrganization } from "./notifications";
 import { writeAudit } from "./audit";
 
@@ -45,106 +46,128 @@ export async function extractDocumentJob(tx: RlsTransaction, orgId: string, docu
   if (!doc) throw new Error(`source document ${documentId} not found`);
   if (doc.uploadStatus === "applied") return { skipped: true, reason: "already applied" };
 
-  await tx
-    .update(sourceDocuments)
-    .set({ uploadStatus: "processing", extractionStartedAt: new Date(), extractionError: null })
-    .where(eq(sourceDocuments.id, doc.id));
+  const metricStarted = Date.now();
+  let extractionOk = false;
+  let aiAttempted = false;
 
-  const { data: blob, error } = await adminStorage()
-    .from(DOCUMENTS_BUCKET)
-    .download(doc.storagePath);
-  if (error || !blob) {
-    const msg = `download failed: ${error?.message ?? "no data"}`;
+  try {
     await tx
       .update(sourceDocuments)
-      .set({ uploadStatus: "failed", extractionError: msg, extractionCompletedAt: new Date() })
+      .set({ uploadStatus: "processing", extractionStartedAt: new Date(), extractionError: null })
       .where(eq(sourceDocuments.id, doc.id));
-    throw new Error(msg);
-  }
 
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  const outcome = await runExtractionPipeline({
-    bytes,
-    mimeType: doc.mimeType,
-    filename: doc.originalFilename,
-    declaredType: doc.documentType,
-  });
+    const { data: blob, error } = await adminStorage()
+      .from(DOCUMENTS_BUCKET)
+      .download(doc.storagePath);
+    if (error || !blob) {
+      const msg = `download failed: ${error?.message ?? "no data"}`;
+      await tx
+        .update(sourceDocuments)
+        .set({ uploadStatus: "failed", extractionError: msg, extractionCompletedAt: new Date() })
+        .where(eq(sourceDocuments.id, doc.id));
+      throw new Error(msg);
+    }
 
-  if (!outcome.ok) {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    aiAttempted = true;
+    const outcome = await runExtractionPipeline({
+      bytes,
+      mimeType: doc.mimeType,
+      filename: doc.originalFilename,
+      declaredType: doc.documentType,
+    });
+    aiAttempted = false;
+
+    if (!outcome.ok) {
+      corridorMetrics.aiFailure({ operation: "document_extraction", provider: outcome.model });
+      await tx
+        .update(sourceDocuments)
+        .set({
+          uploadStatus: "failed",
+          extractionModel: outcome.model,
+          extractionError: [outcome.error, ...(outcome.issues ?? [])].join(" | ").slice(0, 2000),
+          extractionCompletedAt: new Date(),
+        })
+        .where(eq(sourceDocuments.id, doc.id));
+      // Not thrown: a validation failure is a terminal, reviewable outcome, not a retryable error.
+      return { ok: false, error: outcome.error };
+    }
+
+    extractionOk = true;
+
     await tx
       .update(sourceDocuments)
       .set({
-        uploadStatus: "failed",
+        uploadStatus: "extracted",
+        detectedType: outcome.detectedType,
+        extractedJson: outcome.document,
         extractionModel: outcome.model,
-        extractionError: [outcome.error, ...(outcome.issues ?? [])].join(" | ").slice(0, 2000),
+        extractionConfidence: outcome.confidence,
         extractionCompletedAt: new Date(),
       })
       .where(eq(sourceDocuments.id, doc.id));
-    // Not thrown: a validation failure is a terminal, reviewable outcome, not a retryable error.
-    return { ok: false, error: outcome.error };
-  }
 
-  await tx
-    .update(sourceDocuments)
-    .set({
-      uploadStatus: "extracted",
-      detectedType: outcome.detectedType,
-      extractedJson: outcome.document,
-      extractionModel: outcome.model,
-      extractionConfidence: outcome.confidence,
-      extractionCompletedAt: new Date(),
-    })
-    .where(eq(sourceDocuments.id, doc.id));
+    if (outcome.confidence < LOW_CONFIDENCE_THRESHOLD || outcome.lowConfidenceFields.length > 0) {
+      const dedupeKey = `document:${doc.id}:low_confidence`;
+      await tx
+        .insert(complianceAlerts)
+        .values({
+          organizationId: orgId,
+          movementId: doc.movementId,
+          alertType: "missing_data",
+          severity: outcome.confidence < 0.4 ? "warning" : "info",
+          source: "ai",
+          title: `Review needed: ${doc.originalFilename} extracted with ${Math.round(outcome.confidence * 100)}% confidence`,
+          description: `Fields needing attention: ${outcome.lowConfidenceFields.join(", ") || "overall confidence"}. Confirm or correct before applying to a manifest.`,
+          dedupeKey,
+          metadata: {
+            documentId: doc.id,
+            lowConfidenceFields: outcome.lowConfidenceFields,
+            model: outcome.model,
+          },
+        })
+        .onConflictDoNothing();
+      await notifyOrganization(tx, {
+        orgId,
+        eventType: "document.review_needed",
+        title: `Review needed: ${doc.originalFilename}`,
+        body: `Extracted with ${Math.round(outcome.confidence * 100)}% confidence. Fields needing attention: ${outcome.lowConfidenceFields.join(", ") || "overall confidence"}.`,
+        linkPath: `/documents/${doc.id}`,
+      });
+    }
 
-  if (outcome.confidence < LOW_CONFIDENCE_THRESHOLD || outcome.lowConfidenceFields.length > 0) {
-    const dedupeKey = `document:${doc.id}:low_confidence`;
-    await tx
-      .insert(complianceAlerts)
-      .values({
-        organizationId: orgId,
-        movementId: doc.movementId,
-        alertType: "missing_data",
-        severity: outcome.confidence < 0.4 ? "warning" : "info",
-        source: "ai",
-        title: `Review needed: ${doc.originalFilename} extracted with ${Math.round(outcome.confidence * 100)}% confidence`,
-        description: `Fields needing attention: ${outcome.lowConfidenceFields.join(", ") || "overall confidence"}. Confirm or correct before applying to a manifest.`,
-        dedupeKey,
-        metadata: {
+    if (doc.movementId) {
+      await addEvent(tx, { orgId, userId: null }, doc.movementId, {
+        eventType: "ai_flag",
+        actorType: "ai",
+        payload: {
+          title: `Extracted ${outcome.document.cargo.length} line(s) from ${doc.originalFilename}`,
           documentId: doc.id,
+          confidence: outcome.confidence,
           lowConfidenceFields: outcome.lowConfidenceFields,
           model: outcome.model,
         },
-      })
-      .onConflictDoNothing();
-    await notifyOrganization(tx, {
-      orgId,
-      eventType: "document.review_needed",
-      title: `Review needed: ${doc.originalFilename}`,
-      body: `Extracted with ${Math.round(outcome.confidence * 100)}% confidence. Fields needing attention: ${outcome.lowConfidenceFields.join(", ") || "overall confidence"}.`,
-      linkPath: `/documents/${doc.id}`,
+      });
+    }
+
+    return {
+      ok: true,
+      confidence: outcome.confidence,
+      lines: outcome.document.cargo.length,
+      model: outcome.model,
+    };
+  } catch (error) {
+    if (aiAttempted) {
+      corridorMetrics.aiFailure({ operation: "document_extraction", provider: "unknown" });
+    }
+    throw error;
+  } finally {
+    corridorMetrics.extraction({
+      documentType: doc.documentType,
+      durationMs: Date.now() - metricStarted,
+      ok: extractionOk,
     });
   }
-
-  if (doc.movementId) {
-    await addEvent(tx, { orgId, userId: null }, doc.movementId, {
-      eventType: "ai_flag",
-      actorType: "ai",
-      payload: {
-        title: `Extracted ${outcome.document.cargo.length} line(s) from ${doc.originalFilename}`,
-        documentId: doc.id,
-        confidence: outcome.confidence,
-        lowConfidenceFields: outcome.lowConfidenceFields,
-        model: outcome.model,
-      },
-    });
-  }
-
-  return {
-    ok: true,
-    confidence: outcome.confidence,
-    lines: outcome.document.cargo.length,
-    model: outcome.model,
-  };
 }
 
 /** Reviewer applies confirmed lines to a draft/rejected movement. */
@@ -178,7 +201,7 @@ export async function applyExtraction(
     });
   }
 
-  await assertPartnersExist(tx, actor.orgId, [input.shipperId ?? null, input.consigneeId ?? null]);
+  await assertShipmentPartners(tx, actor.orgId, input);
 
   // One document is one bill of lading, so the reviewed lines land on one new
   // draft shipment. A plain regular_bill / regular filing is the right default
@@ -195,6 +218,7 @@ export async function applyExtraction(
       controlReference: input.controlReference,
       shipperId: input.shipperId ?? null,
       consigneeId: input.consigneeId ?? null,
+      brokerId: input.brokerId ?? null,
       sourceDocumentId: doc.id,
     })
     .returning()

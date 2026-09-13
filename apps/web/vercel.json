@@ -16,6 +16,10 @@
     {
       "path": "/api/jobs/borderconnect-drain",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/jobs/customs-watchdog",
+      "schedule": "* * * * *"
     }
   ]
 }

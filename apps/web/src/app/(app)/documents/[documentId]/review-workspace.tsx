@@ -138,6 +138,9 @@ function ReviewForm({
   const [consigneeId, setConsigneeId] = useState(() =>
     matchPartner(extracted?.consignee.name, partners, ["consignee"]),
   );
+  const [brokerId, setBrokerId] = useState(() =>
+    matchPartner(extracted?.broker?.name, partners, ["broker"]),
+  );
   const [controlReference, setControlReference] = useState("");
   const [error, setError] = useState<string | null>(null);
   const apply = useMutation(
@@ -166,6 +169,7 @@ function ReviewForm({
       controlReference: controlReference.trim().toUpperCase(),
       shipperId: shipperId || null,
       consigneeId: consigneeId || null,
+      brokerId: brokerId || null,
       lines: lines.map((l) => ({
         commodityDescription: l.commodityDescription.trim(),
         hsCode: l.hsCode.trim() || null,
@@ -297,7 +301,28 @@ function ReviewForm({
                 <dt className="text-fg-secondary">Date</dt>
                 <dd className="font-mono">{extracted.documentDate ?? "—"}</dd>
                 <dt className="text-fg-secondary">Broker</dt>
-                <dd>{extracted.broker?.name ?? "—"}</dd>
+                <dd>
+                  <div>{extracted.broker?.name ?? "—"}</div>
+                  <label className="label mt-2" htmlFor="broker-partner">
+                    Match to broker
+                  </label>
+                  <select
+                    id="broker-partner"
+                    value={brokerId}
+                    onChange={(event) => setBrokerId(event.target.value)}
+                    disabled={!canReview}
+                    className="input"
+                  >
+                    <option value="">— unmatched —</option>
+                    {partners
+                      .filter((partner) => partner.type === "broker" || partner.type === "both")
+                      .map((partner) => (
+                        <option key={partner.id} value={partner.id}>
+                          {partner.label}
+                        </option>
+                      ))}
+                  </select>
+                </dd>
                 <dt className="text-fg-secondary">Totals</dt>
                 <dd className="font-mono text-xs">
                   {extracted.totals

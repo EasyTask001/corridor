@@ -62,16 +62,16 @@ Everything below is a claim you can check against the file it names, or a query 
 
 ### Secrets
 
-| Secret                                              | Storage                                                   | Reachable by                                                                                                                   |
-| --------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Supabase service-role key                           | deployment env                                            | server only — workers and webhooks (review §8)                                                                                 |
-| AI Gateway / OpenAI keys                            | deployment env                                            | server only, via the `@corridor/ai` resolver                                                                                   |
-| Stripe secret + webhook secret                      | deployment env                                            | server only (`@corridor/integrations`)                                                                                         |
-| Upstash Redis REST URL + token                      | deployment env                                            | server only                                                                                                                    |
-| Integration credentials (customs, …)                | **Supabase Vault**                                        | `read_integration_secret` is `service_role` only; writes go through `store_integration_secret`, gated on `integrations.manage` |
-| Supabase Auth webhook secret                        | deployment env                                            | the webhook handler only                                                                                                       |
-| Resend / Twilio / Expo push credentials             | deployment env                                            | server only (`@corridor/integrations`); unset = logged mock send                                                               |
-| Customs gateway base URL + API key + webhook secret | deployment env (fallback) or **Supabase Vault** (per-org) | server only (`@corridor/integrations`); unset = fixture replay, no live transmit                                               |
+| Secret                                              | Storage                                                                      | Reachable by                                                                                                                                                                                                                       |
+| --------------------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Supabase service-role key                           | deployment env                                                               | server only — workers and webhooks (review §8)                                                                                                                                                                                     |
+| AI Gateway / OpenAI keys                            | deployment env                                                               | server only, via the `@corridor/ai` resolver                                                                                                                                                                                       |
+| Stripe secret + webhook secret                      | deployment env                                                               | server only (`@corridor/integrations`)                                                                                                                                                                                             |
+| Upstash Redis REST URL + token                      | deployment env                                                               | server only                                                                                                                                                                                                                        |
+| Integration credentials (customs, …)                | **Supabase Vault**                                                           | `read_integration_secret` is `service_role` only; writes go through `store_integration_secret`, gated on `integrations.manage`                                                                                                     |
+| Supabase Auth webhook secret                        | deployment env                                                               | the webhook handler only                                                                                                                                                                                                           |
+| Resend / Twilio / Expo push credentials             | deployment env                                                               | server only (`@corridor/integrations`); unset = logged mock send                                                                                                                                                                   |
+| Customs gateway base URL + API key + webhook secret | deployment env (fallback) or **Supabase Vault** (per-org)                    | server only (`@corridor/integrations`); unset = fixture replay, no live transmit                                                                                                                                                   |
 | BorderConnect API URL suffix + API key              | deployment env (account-wide, one Service Provider account for every tenant) | server only (`@corridor/integrations`, `apps/borderconnect-listener`); unset = fixture replay. `BORDERCONNECT_TEST_COMPANY_KEY` is read only by `packages/integrations/scripts/borderconnect-smoke.ts`, never by application code. |
 
 Never committed: `.gitignore` ignores `.env` and `.env.*`, with `!.env.example` as the single
@@ -118,7 +118,8 @@ borderconnect_drain` (`/api/jobs/borderconnect-drain`, cron every minute) and th
 using the account's `Api-Key`, so there is nothing for an attacker to forge a signature against —
 see review §8 for how each writes to `customs_inbox` under `withServiceRole`.
 
-Cron routes (`/api/jobs/process`, `/api/jobs/expiry-scan`, `/api/jobs/notices-sync`) fail closed through
+Cron routes (`/api/jobs/process`, `/api/jobs/expiry-scan`, `/api/jobs/notices-sync`,
+`/api/jobs/borderconnect-drain`, `/api/jobs/customs-watchdog`) fail closed through
 `cronAuthFailure()`: an unset `CRON_SECRET` is a 503, a wrong one a 401 compared with
 `timingSafeEqual`.
 
@@ -142,6 +143,9 @@ Cron routes (`/api/jobs/process`, `/api/jobs/expiry-scan`, `/api/jobs/notices-sy
 - Transmitted customs manifests **are** retained, in `integration_events.request`/`response`,
   because the transmission record is the compliance artefact. They are tenant-scoped and readable
   only with `integrations.manage` or `movement.read`.
+- Sentry events pass through `@corridor/observability`'s fail-closed scrubber:
+  request bodies/headers, customs and document payloads, credentials, company
+  keys, identity fields, and frame variables are removed before export.
 
 ### Response headers
 

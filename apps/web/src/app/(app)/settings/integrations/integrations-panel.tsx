@@ -132,8 +132,7 @@ export function IntegrationsPanel({
   const [modeOverride, setModeOverride] = useState<Record<string, string>>({});
   const testCustoms = useMutation(
     trpc.integrations.testCustoms.mutationOptions({
-      onSuccess: (r, vars) =>
-        setTested((t) => ({ ...t, [vars.provider]: formatTestResult(r) })),
+      onSuccess: (r, vars) => setTested((t) => ({ ...t, [vars.provider]: formatTestResult(r) })),
       onError: (e, vars) => setTested((t) => ({ ...t, [vars.provider]: `Failed: ${e.message}` })),
     }),
   );

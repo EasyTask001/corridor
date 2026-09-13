@@ -20,6 +20,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Regime } from "@corridor/domain";
 import { borderConnectQueue } from "../fixture-state";
+import { resolveCustomsCapabilities } from "../capabilities";
 import { fixtureOutcomeFor } from "../gateway/client";
 import type { CustomsCancelAck, CustomsClient, ManifestPayload, TransmitAck } from "../types";
 import { CustomsTransportError } from "../types";
@@ -27,10 +28,8 @@ import { toAceTrip } from "./ace";
 import { toAciTrip } from "./aci";
 import type { OutboundOptions } from "./format";
 import { toCancelSendRequest } from "./send-request";
-import {
-  createBorderConnectHttpTransport,
-  type BorderConnectTransport,
-} from "./transport";
+import { createBorderConnectHttpTransport, type BorderConnectTransport } from "./transport";
+import { validateBorderConnectContract, type BorderConnectDocument } from "./contract";
 
 export interface BorderConnectClientOptions {
   provider: "cbp_ace" | "cbsa_aci";
@@ -51,6 +50,8 @@ export interface BorderConnectClientOptions {
    * `createCustomsClient` can pass the same shape to all three modes.
    */
   tenantKey: string;
+  /** Explicit post-validation feature gate; false by default. */
+  aciAmendEnabled?: boolean;
 }
 
 /**
@@ -90,7 +91,24 @@ const METHOD_NOT_SUPPORTED = (method: string): CustomsTransportError =>
     false,
   );
 
+const IN_BOND_NOT_SUPPORTED = (): CustomsTransportError =>
+  new CustomsTransportError("QP In-Bond customs messaging coming soon; tracking only.", 412, false);
+
 const here = dirname(fileURLToPath(import.meta.url));
+
+function validateOutboundContract(
+  document: BorderConnectDocument,
+  payload: Record<string, unknown>,
+): void {
+  const problems = validateBorderConnectContract(document, payload);
+  if (problems.length > 0) {
+    throw new CustomsTransportError(
+      `BorderConnect: emitted ${document} payload violates the contract: ${problems.join("; ")}`,
+      422,
+      false,
+    );
+  }
+}
 
 function loadOutcomeFixture(name: string): Record<string, unknown> {
   return JSON.parse(
@@ -144,7 +162,9 @@ export function createFixtureBorderConnectTransport(
       const tripNumber = typeof message.tripNumber === "string" ? message.tripNumber : null;
 
       if (dataType === "ACE_SEND_REQUEST" || dataType === "ACI_SEND_REQUEST") {
-        enqueue(stamp({ data: "API_RESPONSE", status: "TRANSMITTED" }, companyKey, sendId, tripNumber));
+        enqueue(
+          stamp({ data: "API_RESPONSE", status: "TRANSMITTED" }, companyKey, sendId, tripNumber),
+        );
         return Promise.resolve({ status: "OK" });
       }
 
@@ -159,7 +179,14 @@ export function createFixtureBorderConnectTransport(
       const outcome = fixtureOutcomeFor({ shipments: [{ controlNumber }] });
 
       enqueue(stamp({ data: "API_RESPONSE", status: "IMPORTED" }, companyKey, sendId, tripNumber));
-      enqueue(stamp(loadOutcomeFixture(`${isAce ? "ace" : "aci"}-${outcome}`), companyKey, sendId, tripNumber));
+      enqueue(
+        stamp(
+          loadOutcomeFixture(`${isAce ? "ace" : "aci"}-${outcome}`),
+          companyKey,
+          sendId,
+          tripNumber,
+        ),
+      );
 
       return Promise.resolve({ status: "OK" });
     },
@@ -177,6 +204,15 @@ export function createBorderConnectCustomsClient(
   const now = opts.now ?? (() => new Date());
   const regime: Regime = opts.provider === "cbp_ace" ? "ACE" : "ACI";
   const live = isBorderConnectLive(opts);
+  const capabilities = resolveCustomsCapabilities({
+    regime,
+    mode: "border_connect",
+    environment: opts.environment ?? "sandbox",
+    apiUrlSuffix: opts.apiUrlSuffix,
+    apiKey: opts.apiKey,
+    companyKey: opts.companyKey,
+    aciAmendEnabled: opts.aciAmendEnabled,
+  });
   const transport: BorderConnectTransport =
     opts.transport ??
     (live
@@ -215,6 +251,7 @@ export function createBorderConnectCustomsClient(
       opts.provider === "cbp_ace"
         ? toAceTrip(manifest, outboundOptions)
         : toAciTrip(manifest, outboundOptions);
+    validateOutboundContract(opts.provider === "cbp_ace" ? "ACE_TRIP" : "ACI_TRIP", body);
     const { status } = await transport.send(body);
     return {
       referenceNumber: body.tripNumber as string,
@@ -231,18 +268,30 @@ export function createBorderConnectCustomsClient(
     environment: opts.environment ?? "sandbox",
     mode: "border_connect",
     live,
+    capabilities,
 
     transmit: (manifest, o) => send(manifest, "CREATE", undefined, o?.correlationId),
 
     // Re-uploads under the trip number already on file, per BorderConnect's
     // amend rule (full re-upload, operation UPDATE, autoSend true).
-    amend: (manifest, referenceNumber, o) =>
-      send(manifest, "UPDATE", referenceNumber, o?.correlationId),
+    amend: (manifest, referenceNumber, o) => {
+      if (!capabilities.amend) {
+        return Promise.reject(
+          new CustomsTransportError(
+            capabilities.reasons.amend ?? "Amendment is unavailable",
+            412,
+            false,
+          ),
+        );
+      }
+      return send(manifest, "UPDATE", referenceNumber, o?.correlationId);
+    },
 
     async cancel(referenceNumber, _reason): Promise<CustomsCancelAck> {
       const companyKey = resolveCompanyKey();
       const sendId = randomUUID();
       const body = toCancelSendRequest(regime, referenceNumber, { companyKey, sendId });
+      validateOutboundContract(regime === "ACE" ? "ACE_SEND_REQUEST" : "ACI_SEND_REQUEST", body);
       const { status } = await transport.send(body);
       return {
         referenceNumber,
@@ -254,10 +303,10 @@ export function createBorderConnectCustomsClient(
     fetchStatus: () => Promise.reject(METHOD_NOT_SUPPORTED("fetchStatus")),
     fetchDecision: () => Promise.reject(METHOD_NOT_SUPPORTED("fetchDecision")),
     fetchNotices: () => Promise.reject(METHOD_NOT_SUPPORTED("fetchNotices")),
-    inBondArrival: () => Promise.reject(METHOD_NOT_SUPPORTED("inBondArrival")),
-    inBondExport: () => Promise.reject(METHOD_NOT_SUPPORTED("inBondExport")),
-    inBondCancel: () => Promise.reject(METHOD_NOT_SUPPORTED("inBondCancel")),
-    inBondStatus: () => Promise.reject(METHOD_NOT_SUPPORTED("inBondStatus")),
+    inBondArrival: () => Promise.reject(IN_BOND_NOT_SUPPORTED()),
+    inBondExport: () => Promise.reject(IN_BOND_NOT_SUPPORTED()),
+    inBondCancel: () => Promise.reject(IN_BOND_NOT_SUPPORTED()),
+    inBondStatus: () => Promise.reject(IN_BOND_NOT_SUPPORTED()),
 
     // No signed webhook in this mode — every status update arrives through
     // the shared inbox drain, not a per-request callback.
@@ -273,7 +322,12 @@ export function createBorderConnectCustomsClient(
      */
     async ping() {
       const messages = await transport.receive();
-      return { ok: true, mode: "border_connect" as const, live, detail: { messages: messages.length } };
+      return {
+        ok: true,
+        mode: "border_connect" as const,
+        live,
+        detail: { messages: messages.length },
+      };
     },
   };
 }

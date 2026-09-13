@@ -1,4 +1,5 @@
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
+import * as Sentry from "@sentry/nextjs";
 import { cookies } from "next/headers";
 import { ACTIVE_ORG_COOKIE, appRouter, createContext } from "@corridor/api";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -18,10 +19,13 @@ const handler = async (req: Request) => {
         supabase,
         activeOrgCookie: cookieStore.get(ACTIVE_ORG_COOKIE)?.value ?? null,
       }),
-    onError:
-      process.env.NODE_ENV === "development"
-        ? ({ path, error }) => console.error(`tRPC ${path ?? "<no-path>"}:`, error.message)
-        : undefined,
+    onError: ({ path, error }) => {
+      if (process.env.NODE_ENV === "development")
+        console.error(`tRPC ${path ?? "<no-path>"}:`, error.message);
+      Sentry.captureException(error, {
+        tags: { component: "trpc", procedure: path ?? "unknown" },
+      });
+    },
   });
   // Background work (customs decisions, scans) is processed right after the
   // response goes out: every request drains what is already due, and

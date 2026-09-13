@@ -71,6 +71,12 @@ export const IMPORT_TEMPLATES: Record<ImportKind, ImportColumn[]> = {
       example: "Great Lakes Fabrication Inc",
       note: "must match a partner name",
     },
+    {
+      key: "broker_name",
+      label: "Broker",
+      example: "Northgate Customs Brokers",
+      note: "must match a broker or dual-role partner name",
+    },
     { key: "entry_port", label: "Entry port", example: "3801", note: "CBP port code" },
     { key: "in_bond_entry_type", label: "In-bond entry type", example: "", note: "IT, TE or IE" },
     {
@@ -191,6 +197,7 @@ export const shipmentImportRow = z
       .transform((v) => (v === "" ? undefined : v)),
     shipper_name: blank,
     consignee_name: blank,
+    broker_name: blank,
     entry_port: upper,
     in_bond_entry_type: upper.pipe(inBondEntryType.optional()),
     in_bond_destination: upper,

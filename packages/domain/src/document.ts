@@ -172,6 +172,7 @@ export const applyExtractionInput = z.object({
   controlReference,
   shipperId: uuid.nullable().optional(),
   consigneeId: uuid.nullable().optional(),
+  brokerId: uuid.nullable().optional(),
   lines: z
     .array(commodityInput.omit({ sourceDocumentId: true, hazmat: true }))
     .min(1)

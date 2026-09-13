@@ -11,6 +11,7 @@ import { predictHold, type HoldPrediction } from "./hold-prediction";
 export interface TariffLookup {
   hsCode: string;
   description: string;
+  dataQuality: "synthetic_demo" | "authoritative";
 }
 
 export interface RiskCargoLine {
@@ -19,6 +20,8 @@ export interface RiskCargoLine {
   hsCode: string | null;
   weightKg: number | null;
   valueAmount: number | null;
+  /** Broker presence on this line's own shipment, never movement-wide. */
+  hasBroker: boolean;
 }
 
 export interface LaneHistory {
@@ -31,7 +34,6 @@ export interface LaneHistory {
 
 export interface RiskInput {
   movementId: string;
-  hasBroker: boolean;
   cargo: RiskCargoLine[];
   lane: LaneHistory;
   /** injected so the engine has no I/O of its own */
@@ -76,7 +78,10 @@ export function evaluateMovementRisk(input: RiskInput): RiskFinding[] {
 
     if (line.hsCode) {
       const tariff = input.lookupTariff(line.hsCode);
-      if (tariff && hsDescriptionMismatch(line.commodityDescription, tariff)) {
+      if (
+        tariff?.dataQuality === "authoritative" &&
+        hsDescriptionMismatch(line.commodityDescription, tariff)
+      ) {
         anyHsMismatch = true;
         findings.push({
           alertType: "hs_code_mismatch",
@@ -109,22 +114,23 @@ export function evaluateMovementRisk(input: RiskInput): RiskFinding[] {
     }
   }
 
-  const highValue = input.cargo.some((c) => (c.valueAmount ?? 0) > 25_000);
   const hold: HoldPrediction = predictHold({
     rejectedRecently: input.lane.rejectedRecently,
     weightOutlier: anyWeightOutlier,
     valueOutlier: anyValueOutlier,
-    missingBroker: highValue && !input.hasBroker,
+    missingBroker: input.cargo.some((c) => (c.valueAmount ?? 0) > 25_000 && !c.hasBroker),
     hsMismatch: anyHsMismatch,
   });
   if (hold.likely) {
     findings.push({
       alertType: "hold_prediction",
       severity: hold.score >= 0.75 ? "critical" : "warning",
-      title: `Elevated likelihood of secondary inspection (${Math.round(hold.score * 100)}%)`,
-      description: hold.reasons.join(" "),
+      title: `Inspection Risk — ${Math.round(hold.score * 100)} / 100 · Elevated`,
+      description: hold.factors
+        .map((factor) => `${factor.impact} impact: ${factor.label}.`)
+        .join(" "),
       dedupeKey: `movement:${input.movementId}:hold_prediction`,
-      metadata: { score: hold.score, factors: hold.factors },
+      metadata: { score: Math.round(hold.score * 100), factors: hold.factors },
     });
   }
 

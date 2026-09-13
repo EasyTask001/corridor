@@ -14,6 +14,10 @@ const ENTRY: TariffEntry = {
   description: "Flat-rolled iron/steel",
   usDutyRate: 0,
   caDutyRate: 0,
+  source: "test fixture",
+  dataQuality: "authoritative",
+  updatedAt: "2026-09-12T00:00:00.000Z",
+  disclaimer: null,
 };
 
 /** A source that counts calls, plus a clock the test moves by hand. */
@@ -90,7 +94,13 @@ describe("tariff cache", () => {
 
   it("still answers from the built-in table once reset", () => {
     resetTariffCache();
-    expect(lookupHsCode("7208.10")?.description).toMatch(/hot-rolled/i);
+    expect(lookupHsCode("7208.10")).toMatchObject({
+      description: expect.stringMatching(/hot-rolled/i),
+      source: "Corridor embedded tariff demo",
+      dataQuality: "synthetic_demo",
+      updatedAt: expect.any(String),
+      disclaimer: "Experimental — synthetic demo data, not live",
+    });
     expect(searchTariff("apples")[0]?.hsCode).toBe("0808.10");
   });
 });

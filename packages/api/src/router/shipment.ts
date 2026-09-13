@@ -28,7 +28,7 @@ import { writeAudit } from "../services/audit";
 import { requireMovement } from "../services/movements";
 import { syncMovementRiskAlerts } from "../services/risk";
 import {
-  assertPartnersExist,
+  assertShipmentPartners,
   commoditiesFor,
   defaultCarrierCode,
   requireShipment,
@@ -201,10 +201,7 @@ export const shipmentRouter = router({
             });
           }
         }
-        await assertPartnersExist(tx, ctx.orgId, [
-          input.shipperId ?? null,
-          input.consigneeId ?? null,
-        ]);
+        await assertShipmentPartners(tx, ctx.orgId, input);
         const [row] = await tx
           .insert(shipments)
           .values({
@@ -243,10 +240,11 @@ export const shipmentRouter = router({
       ctx.rls(async (tx) => {
         const { id, ...patch } = input;
         const before = await requireEditableShipment(tx, ctx.orgId, id);
-        await assertPartnersExist(tx, ctx.orgId, [
-          patch.shipperId ?? null,
-          patch.consigneeId ?? null,
-        ]);
+        await assertShipmentPartners(tx, ctx.orgId, {
+          shipperId: patch.shipperId === undefined ? before.shipperId : patch.shipperId,
+          consigneeId: patch.consigneeId === undefined ? before.consigneeId : patch.consigneeId,
+          brokerId: patch.brokerId === undefined ? before.brokerId : patch.brokerId,
+        });
         const [row] = await tx
           .update(shipments)
           .set(shipmentSetFrom(patch))

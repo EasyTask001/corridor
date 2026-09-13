@@ -1,6 +1,6 @@
 "use client";
 
-/** Live widgets: the wait at a chosen port, and a tariff search, both from the mock-or-cached feeds. */
+/** Explicitly experimental wait and tariff demos; authoritative links sit below. */
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Input, Label } from "@corridor/ui";
@@ -25,7 +25,7 @@ export function ResourcesPanel() {
     <div className="grid gap-4 lg:grid-cols-2">
       <section className="panel space-y-3 p-5" aria-label="Border wait">
         <h2 className="font-medium">Border wait at a port</h2>
-        <p className="text-xs text-status-warning">Simulated feed — not live border data.</p>
+        <p className="text-xs text-status-warning">Experimental — synthetic demo data, not live</p>
         <div>
           <Label htmlFor="waitPort">Port or office</Label>
           <PortPicker id="waitPort" onSelect={(p) => setPortId(p?.id ?? null)} />
@@ -37,27 +37,32 @@ export function ResourcesPanel() {
               {wait.data.port.code} {wait.data.port.name}
             </dd>
             <dt className="text-fg-secondary">Commercial lanes</dt>
-            <dd data-testid="border-wait-minutes">{wait.data.wait.lanes.commercial} min</dd>
+            <dd data-testid="border-wait-minutes">
+              {wait.data.wait.lanes.commercial} min
+              <span className="ml-2 text-xs text-status-warning">{wait.data.wait.disclaimer}</span>
+            </dd>
             <dt className="text-fg-secondary">FAST lanes</dt>
-            <dd>{wait.data.wait.lanes.fast} min</dd>
+            <dd>
+              {wait.data.wait.lanes.fast} min
+              <span className="ml-2 text-xs text-status-warning">{wait.data.wait.disclaimer}</span>
+            </dd>
             <dt className="text-fg-secondary">Updated</dt>
             <dd className="text-xs text-fg-secondary">
               {new Date(wait.data.wait.updatedAt).toLocaleTimeString("en-CA")}
+              <span className="ml-2 text-status-warning">{wait.data.wait.disclaimer}</span>
             </dd>
           </dl>
         )}
         {portId && wait.isLoading && <p className="text-sm text-fg-secondary">Checking…</p>}
         {!portId && (
           <p className="text-sm text-fg-secondary">
-            Pick a port to see the current wait. Refreshes every five minutes.
+            Pick a port to see a synthetic wait estimate. Refreshes every five minutes.
           </p>
         )}
       </section>
       <section className="panel space-y-3 p-5" aria-label="Tariff search">
         <h2 className="font-medium">HTS / tariff search</h2>
-        <p className="text-xs text-status-warning">
-          Embedded sample table — verify rates with CBP/CBSA.
-        </p>
+        <p className="text-xs text-status-warning">Experimental — synthetic demo data, not live</p>
         <div>
           <Label htmlFor="tariffQ">Description or code</Label>
           <Input
@@ -69,9 +74,10 @@ export function ResourcesPanel() {
         </div>
         <ul className="divide-y divide-border-default text-sm" aria-label="Tariff results">
           {tariff.data?.map((t) => (
-            <li key={t.hsCode} className="flex gap-3 py-1.5">
+            <li key={t.hsCode} className="flex flex-wrap gap-x-3 gap-y-1 py-1.5">
               <span className="w-24 shrink-0 font-mono text-xs">{t.hsCode}</span>
               <span className="min-w-0 flex-1 truncate">{t.description}</span>
+              <span className="w-full text-xs text-status-warning">{t.disclaimer}</span>
             </li>
           ))}
           {tariff.data?.length === 0 && <li className="py-1.5 text-fg-secondary">No matches.</li>}

@@ -239,7 +239,7 @@ describe("connectBorderConnectSocket", () => {
     expect(sockets.length).toBe(1);
   });
 
-  it("does not crash (no unhandled rejection) when onMessages rejects, and keeps delivering later frames", async () => {
+  it("stops after an inbound persistence failure so the durable spool can be replayed", async () => {
     // Proves the real failure mode this guards against: Node's default
     // `--unhandled-rejections=throw` terminates the process on an unhandled
     // rejection. If `onMessages`'s rejection here were ever left unhandled,
@@ -251,6 +251,7 @@ describe("connectBorderConnectSocket", () => {
 
     try {
       const onLog = vi.fn();
+      const onError = vi.fn();
       const onMessages = vi
         .fn()
         .mockRejectedValueOnce(new Error("db write failed"))
@@ -262,6 +263,7 @@ describe("connectBorderConnectSocket", () => {
         onMessages,
         wsFactory,
         onLog,
+        onError,
       });
       const socket = sockets[0]!;
       socket.emit("open");
@@ -278,20 +280,40 @@ describe("connectBorderConnectSocket", () => {
 
       expect(onMessages).toHaveBeenCalledTimes(1);
       expect(onMessages).toHaveBeenNthCalledWith(1, [firstFrame]);
-      expect(onLog).toHaveBeenCalledWith(expect.stringContaining("onMessages failed"));
+      expect(onLog).toHaveBeenCalledWith(expect.stringContaining("durable spool must be replayed"));
+      expect(onError).toHaveBeenCalledWith(expect.any(Error), {
+        operation: "store_inbound",
+        messageCount: 1,
+      });
       expect(unhandledRejections).not.toHaveBeenCalled();
 
-      // The listener keeps operating after the failed batch — a later
-      // frame is still delivered normally, not dropped or stuck.
+      // The listener stops after the failed batch. Accepting more frames would
+      // risk overtaking the durable spool and reordering provider messages.
       const secondFrame = { data: "RNS_SHIPMENT", cargoControlNumber: "1" };
       socket.emit("message", secondFrame);
       await Promise.resolve();
 
-      expect(onMessages).toHaveBeenCalledTimes(2);
-      expect(onMessages).toHaveBeenNthCalledWith(2, [secondFrame]);
+      expect(onMessages).toHaveBeenCalledTimes(1);
+      expect(socket.closed).toBe(true);
       expect(unhandledRejections).not.toHaveBeenCalled();
     } finally {
       process.off("unhandledRejection", unhandledRejections);
     }
+  });
+
+  it("reports socket errors through the structured error hook without including frames", () => {
+    const onError = vi.fn();
+    connectBorderConnectSocket({
+      suffix: "synthetic",
+      apiKey: "secret-key",
+      onMessages: vi.fn(),
+      wsFactory,
+      onError,
+    });
+
+    const error = new Error("connection failed");
+    sockets[0]!.emit("error", error);
+
+    expect(onError).toHaveBeenCalledWith(error, { operation: "socket" });
   });
 });

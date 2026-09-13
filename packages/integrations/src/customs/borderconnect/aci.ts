@@ -12,17 +12,16 @@ import { findAciPackagingUnit, mapTrailerType } from "./code-lists";
 import { validateForBorderConnect, resolveAciShipmentType } from "./validate";
 import { buildAddress, buildDriver, buildLicensePlates, buildParty } from "./ace";
 
-function buildAciCommodity(c: ManifestPayload["shipments"][number]["commodities"][number]): Record<string, unknown> {
+function buildAciCommodity(
+  c: ManifestPayload["shipments"][number]["commodities"][number],
+): Record<string, unknown> {
   return {
     description: c.description,
     quantity: c.quantity,
     packagingUnit: findAciPackagingUnit(c.packagingType ?? ""),
-    weight: c.weightKg,
+    weight: String(c.weightKg),
     weightUnit: "KG",
     ...(c.marksAndNumbers ? { marksAndNumbers: c.marksAndNumbers } : {}),
-    ...(c.hsCode ? { harmonizedCode: c.hsCode } : {}),
-    ...(c.value ? { value: { amount: c.value.amount, currency: c.value.currency } } : {}),
-    ...(c.countryOfOrigin ? { countryOfOrigin: c.countryOfOrigin } : {}),
   };
 }
 
@@ -73,7 +72,7 @@ export function toAciTrip(m: ManifestPayload, o: OutboundOptions): Record<string
 
   const tripNumber = o.tripNumberOverride ?? tripNumberFor(m);
   const portOfEntry = m.trip.portOfEntry.padStart(4, "0");
-  const estimatedArrivalDate = bcDateTime(m.trip.estimatedArrival, m.carrier.timezone);
+  const estimatedArrivalDateTime = bcDateTime(m.trip.estimatedArrival, m.carrier.timezone);
 
   return {
     data: "ACI_TRIP",
@@ -82,7 +81,7 @@ export function toAciTrip(m: ManifestPayload, o: OutboundOptions): Record<string
     operation: o.operation,
     autoSend: o.autoSend,
     tripNumber,
-    estimatedArrivalDate,
+    estimatedArrivalDateTime,
     portOfEntry,
     truck: {
       number: m.conveyance.unitNumber,
@@ -95,12 +94,17 @@ export function toAciTrip(m: ManifestPayload, o: OutboundOptions): Record<string
     trailers: m.equipment.map((t) => ({
       number: t.unitNumber,
       type: mapTrailerType(t.type),
-      licensePlates: buildLicensePlates({ plate: t.plate, plateJurisdiction: t.plateJurisdiction }, t.plates),
+      licensePlate: buildLicensePlates(
+        { plate: t.plate, plateJurisdiction: t.plateJurisdiction },
+        t.plates,
+      )[0],
       sealNumbers: t.seals,
     })),
     drivers: m.crew
       .filter((c) => c.role === "person_in_charge" || c.role === "crew_member")
       .map(buildDriver),
-    shipments: m.shipments.map((s) => buildAciShipment(s, o.companyKey, portOfEntry, estimatedArrivalDate)),
+    shipments: m.shipments.map((s) =>
+      buildAciShipment(s, o.companyKey, portOfEntry, estimatedArrivalDateTime),
+    ),
   };
 }

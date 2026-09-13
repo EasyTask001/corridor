@@ -10,6 +10,7 @@ import type {
 } from "./types";
 
 export * from "./types";
+export { resolveCustomsCapabilities } from "./capabilities";
 export * from "./manifest";
 export { clearCustomsFixtureState, createFixtureStore, type FixtureStore } from "./fixture-state";
 export { createMockCustomsClient, MOCK_CARRIER_NOTICE } from "./mock";
@@ -32,12 +33,14 @@ export {
 } from "./borderconnect/client";
 export { toAceTrip } from "./borderconnect/ace";
 export { toAciTrip } from "./borderconnect/aci";
+export { validateForBorderConnect } from "./borderconnect/validate";
 export { toCancelSendRequest } from "./borderconnect/send-request";
 export {
   createBorderConnectHttpTransport,
   normaliseReceiveBody,
   type BorderConnectTransport,
 } from "./borderconnect/transport";
+export { createBorderConnectSpool, type BorderConnectSpool } from "./borderconnect/spool";
 export { parseInbound, inboundKeys, type BorderConnectInbound } from "./borderconnect/inbound";
 export {
   isAciReleaseCode,
@@ -67,6 +70,8 @@ export function createCustomsClient(input: {
   apiUrlSuffix?: string | null;
   /** BorderConnect's Service Provider company key (`mode: "border_connect"` only). */
   companyKey?: string | null;
+  /** Disabled until an end-to-end live CBSA amendment round trip is validated. */
+  aciAmendEnabled?: boolean;
   /** Owner of the fixture state (the organization id in production); never sent to a live gateway. */
   tenantKey: string;
 }): CustomsClient {
@@ -89,6 +94,7 @@ export function createCustomsClient(input: {
       apiUrlSuffix: input.apiUrlSuffix ?? null,
       apiKey: input.apiKey ?? null,
       companyKey: input.companyKey ?? null,
+      aciAmendEnabled: input.aciAmendEnabled,
       tenantKey: input.tenantKey,
     });
   }

@@ -19,11 +19,13 @@ export default async function InBondPage({
   const tab = (await searchParams).tab === "external" ? "external" : "monitor";
 
   const caller = await api();
-  const [records, external, shipments] = await Promise.all([
+  const [records, external, shipments, aceCapabilities, aciCapabilities] = await Promise.all([
     caller.inbond.records.list({ limit: 100, offset: 0 }),
     caller.inbond.external.list({ limit: 100, offset: 0 }),
     // In-bond shipments of ours that have no record yet can be put on the monitor.
     caller.shipment.list({ limit: 200, offset: 0 }),
+    caller.integrations.customsCapabilities({ regime: "ACE" }),
+    caller.integrations.customsCapabilities({ regime: "ACI" }),
   ]);
 
   const chip = (active: boolean) =>
@@ -50,6 +52,7 @@ export default async function InBondPage({
         <InBondMonitor
           initial={records}
           canWrite={canWrite}
+          capabilities={{ ACE: aceCapabilities, ACI: aciCapabilities }}
           inBondShipments={shipments.rows
             .filter((s) => s.shipmentType === "in_bond")
             .map((s) => ({ id: s.id, label: s.controlNumber, regime: s.regime }))}

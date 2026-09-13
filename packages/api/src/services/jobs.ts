@@ -64,8 +64,31 @@ export async function enqueueJob(
       runAt: job.runAt ?? new Date(),
       maxAttempts: job.maxAttempts ?? 3,
     })
+    .onConflictDoNothing()
     .returning({ id: backgroundJobs.id, runAt: backgroundJobs.runAt });
-  return row!;
+  if (row) return row;
+
+  // Both tenant-scoped and queue-wide jobs have a unique idempotency index.
+  // PostgreSQL's normal NULL semantics mean the queue-wide index is a separate
+  // `(job_type, idempotency_key)` constraint (0050), so a concurrent producer
+  // that lost the insert race can safely return the committed row instead of
+  // creating a duplicate drain.
+  if (!job.idempotencyKey) throw new Error("job insert conflicted without an idempotency key");
+  const [existing] = await tx
+    .select({ id: backgroundJobs.id, runAt: backgroundJobs.runAt })
+    .from(backgroundJobs)
+    .where(
+      and(
+        eq(backgroundJobs.jobType, job.jobType),
+        eq(backgroundJobs.idempotencyKey, job.idempotencyKey),
+        job.orgId === null
+          ? sql`${backgroundJobs.organizationId} is null`
+          : eq(backgroundJobs.organizationId, job.orgId),
+      ),
+    )
+    .limit(1);
+  if (!existing) throw new Error("job insert conflicted but the existing job was not found");
+  return existing;
 }
 
 type Job = typeof backgroundJobs.$inferSelect;
@@ -283,9 +306,11 @@ export const detachedJobHandlers: Partial<Record<JobType, DetachedHandler>> = {
    * row each open their own short transaction (services/borderconnect.ts),
    * so no transaction may span the HTTP poll itself.
    */
-  "customs.borderconnect_drain": async (db) => {
+  "customs.borderconnect_drain": async (db, job) => {
     const { drainBorderConnectInbox } = await import("./borderconnect");
-    return drainBorderConnectInbox(db);
+    return drainBorderConnectInbox(db, {
+      environment: job.payload.environment === "production" ? "production" : "sandbox",
+    });
   },
 };
 

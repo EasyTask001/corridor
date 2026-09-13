@@ -3,7 +3,6 @@ import { evaluateMovementRisk, hsDescriptionMismatch, type RiskInput } from "./r
 
 const baseInput: RiskInput = {
   movementId: "m1",
-  hasBroker: true,
   cargo: [
     {
       lineNumber: 1,
@@ -11,6 +10,7 @@ const baseInput: RiskInput = {
       hsCode: "7208.10",
       weightKg: 21000,
       valueAmount: 48000,
+      hasBroker: true,
     },
   ],
   lane: {
@@ -20,7 +20,11 @@ const baseInput: RiskInput = {
   },
   lookupTariff: (code) =>
     code === "7208.10"
-      ? { hsCode: "7208.10", description: "Flat-rolled iron/steel, hot-rolled, in coils" }
+      ? {
+          hsCode: "7208.10",
+          description: "Flat-rolled iron/steel, hot-rolled, in coils",
+          dataQuality: "authoritative",
+        }
       : null,
 };
 
@@ -30,6 +34,7 @@ describe("hsDescriptionMismatch", () => {
       hsDescriptionMismatch("Hot-rolled steel coils", {
         hsCode: "x",
         description: "Flat-rolled iron/steel, hot-rolled, in coils",
+        dataQuality: "authoritative",
       }),
     ).toBe(false);
   });
@@ -38,6 +43,7 @@ describe("hsDescriptionMismatch", () => {
       hsDescriptionMismatch("Fresh apples, bulk bins", {
         hsCode: "x",
         description: "Flat-rolled iron/steel, hot-rolled, in coils",
+        dataQuality: "authoritative",
       }),
     ).toBe(true);
   });
@@ -66,6 +72,19 @@ describe("evaluateMovementRisk", () => {
     expect(findings.some((f) => f.alertType === "hs_code_mismatch")).toBe(true);
   });
 
+  it("does not use synthetic tariff data for compliance or inspection risk", () => {
+    const findings = evaluateMovementRisk({
+      ...baseInput,
+      cargo: [{ ...baseInput.cargo[0]!, commodityDescription: "Fresh apples, bulk bins" }],
+      lookupTariff: () => ({
+        hsCode: "7208.10",
+        description: "Flat-rolled iron/steel",
+        dataQuality: "synthetic_demo",
+      }),
+    });
+    expect(findings.some((f) => f.alertType === "hs_code_mismatch")).toBe(false);
+  });
+
   it("does not false-positive when the tariff lookup has no entry", () => {
     const findings = evaluateMovementRisk({ ...baseInput, lookupTariff: () => null });
     expect(findings.some((f) => f.alertType === "hs_code_mismatch")).toBe(false);
@@ -74,7 +93,6 @@ describe("evaluateMovementRisk", () => {
   it("raises hold_prediction when enough risk factors combine, with reasons attached", () => {
     const findings = evaluateMovementRisk({
       ...baseInput,
-      hasBroker: false,
       cargo: [
         {
           lineNumber: 1,
@@ -82,6 +100,7 @@ describe("evaluateMovementRisk", () => {
           hsCode: "7208.10",
           weightKg: 95000,
           valueAmount: 90000,
+          hasBroker: false,
         },
       ],
       lane: { ...baseInput.lane, rejectedRecently: true },
@@ -91,6 +110,37 @@ describe("evaluateMovementRisk", () => {
     expect(hold!.severity).toBe("critical");
     expect(hold!.description).toMatch(/rejected by customs/i);
     expect(hold!.description).toMatch(/no customs broker/i);
+    expect(hold!.description).toMatch(/High impact:/);
+    expect(hold!.description).toMatch(/Low impact:/);
+    expect(hold!.title).toMatch(/^Inspection Risk — \d+ \/ 100 · Elevated$/);
+    expect(hold!.title).not.toMatch(/%|likelihood/i);
+    expect(hold!.metadata.factors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ impact: expect.stringMatching(/High|Medium|Low/) }),
+      ]),
+    );
+    expect(hold!.metadata.factors).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ present: false })]),
+    );
+  });
+
+  it("checks broker presence on the high-value line's own shipment", () => {
+    const findings = evaluateMovementRisk({
+      ...baseInput,
+      cargo: [
+        {
+          ...baseInput.cargo[0]!,
+          lineNumber: 1,
+          commodityDescription: "Fresh apples, bulk bins",
+          valueAmount: 90_000,
+          hasBroker: true,
+        },
+        { ...baseInput.cargo[0]!, lineNumber: 2, valueAmount: 500, hasBroker: false },
+      ],
+      lane: { ...baseInput.lane, rejectedRecently: true },
+    });
+    const hold = findings.find((f) => f.alertType === "hold_prediction");
+    expect(hold?.description).not.toMatch(/no customs broker/i);
   });
 
   it("does not raise hold_prediction for a single minor factor", () => {
