@@ -20,6 +20,7 @@ const shipment: ShipmentForValidation = {
   inBondEntryType: null,
   inBondDestinationPortId: null,
   destinationPortId: null,
+  loadedOn: null,
   commodities: [
     {
       commodityDescription: "Steel coils",
@@ -52,6 +53,7 @@ const ready: MovementForValidation = {
   scheduledCrossingAt: "2026-09-08T14:00:00Z",
   crew: [pic],
   truck: {
+    unitNumber: "T-101",
     registrationExpiry: "2027-01-01",
     insuranceExpiry: "2027-01-01",
     plateNumber: "A",
@@ -61,6 +63,7 @@ const ready: MovementForValidation = {
   aciInTransit: false,
   trailers: [
     {
+      id: "mt-1",
       unitNumber: "TR-501",
       registrationExpiry: "2027-01-01",
       plateNumber: "B",
@@ -342,8 +345,17 @@ describe("validateForTransmit", () => {
         ...ready,
         trailers: [
           ready.trailers[0]!,
-          { ...ready.trailers[0]!, unitNumber: "TR-502", registrationExpiry: "2020-01-01" },
+          {
+            ...ready.trailers[0]!,
+            id: "mt-2",
+            unitNumber: "TR-502",
+            registrationExpiry: "2020-01-01",
+          },
         ],
+        // Two trailers would otherwise also raise shipment_0_loaded_on
+        // (covered on its own below); pin the placement so this test stays
+        // about the trailer-expiry check alone.
+        shipments: [{ ...shipment, loadedOn: { type: "TRAILER", movementTrailerId: "mt-1" } }],
       },
       TODAY,
     );
@@ -378,5 +390,52 @@ describe("validateForTransmit", () => {
 
   it("an empty trip that still carries shipments is blocked", () => {
     expect(codes({ ...ready, isEmpty: true })).toContain("empty_with_shipments");
+  });
+
+  describe("loaded_on (0051)", () => {
+    const secondTrailer = {
+      ...ready.trailers[0]!,
+      id: "mt-2",
+      unitNumber: "TR-502",
+    };
+
+    it("a single trailer needs no explicit choice", () => {
+      expect(codes(ready)).not.toContain("shipment_0_loaded_on");
+    });
+
+    it("blocks when two trailers are in tow and nothing is chosen", () => {
+      expect(
+        codes({ ...ready, trailers: [ready.trailers[0]!, secondTrailer] }),
+      ).toContain("shipment_0_loaded_on");
+    });
+
+    it("an explicit choice on a double clears the block", () => {
+      expect(
+        codes({
+          ...ready,
+          trailers: [ready.trailers[0]!, secondTrailer],
+          shipments: [{ ...shipment, loadedOn: { type: "TRAILER", movementTrailerId: "mt-2" } }],
+        }),
+      ).not.toContain("shipment_0_loaded_on");
+    });
+
+    it("blocks a choice that names a trailer no longer on the trip", () => {
+      expect(
+        codes({
+          ...ready,
+          shipments: [{ ...shipment, loadedOn: { type: "TRAILER", movementTrailerId: "gone" } }],
+        }),
+      ).toContain("shipment_0_loaded_on_stale");
+    });
+
+    it("skips the check entirely when the truck itself is missing", () => {
+      const codesWithoutTruck = codes({
+        ...ready,
+        truck: null,
+        trailers: [ready.trailers[0]!, secondTrailer],
+      });
+      expect(codesWithoutTruck).toContain("truck_missing");
+      expect(codesWithoutTruck).not.toContain("shipment_0_loaded_on");
+    });
   });
 });

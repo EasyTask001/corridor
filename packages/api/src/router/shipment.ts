@@ -15,6 +15,7 @@ import {
   commodityUpsertInput,
   isEditable,
   nestAddress,
+  setLoadedOnInput,
   shipmentInput,
   shipmentBulkRemoveInput,
   shipmentListInput,
@@ -36,7 +37,8 @@ import {
   writeHazmat,
 } from "../services/shipments";
 
-const { shipments, commodities, movements, partners, ports, parsRnsEvents } = schema;
+const { shipments, commodities, movements, movementTrailers, partners, ports, parsRnsEvents } =
+  schema;
 
 const shipmentIdsInput = z.object({ shipmentIds: z.array(uuid).min(1).max(100) });
 
@@ -252,6 +254,55 @@ export const shipmentRouter = router({
           .returning();
         await writeAudit(tx, ctx.orgId, "shipment.update", "shipment", id, before, row!);
         return nestAddress("delivery", "deliveryAddress", row!);
+      }),
+    ),
+
+  /** Which unit (truck or a specific trailer) the cargo rides on (0051). The
+   * database enforces the invariant (shipments_loaded_on_guard, migration
+   * 0051); this procedure exists to turn a bad request into a clear tRPC
+   * error rather than a raw Postgres one. */
+  setLoadedOn: permissionProcedure("shipment.write")
+    .input(setLoadedOnInput)
+    .mutation(({ ctx, input }) =>
+      ctx.rls(async (tx) => {
+        const before = await requireEditableShipment(tx, ctx.orgId, input.id);
+        if (!before.movementId) {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: "Assign the shipment to a movement before choosing its unit",
+          });
+        }
+        let loadedOnType: "TRUCK" | "TRAILER" | null = null;
+        let loadedOnMovementTrailerId: string | null = null;
+        if (input.loadedOn?.type === "TRAILER") {
+          const [slot] = await tx
+            .select({ id: movementTrailers.id })
+            .from(movementTrailers)
+            .where(
+              and(
+                eq(movementTrailers.id, input.loadedOn.movementTrailerId),
+                eq(movementTrailers.movementId, before.movementId),
+              ),
+            )
+            .limit(1);
+          if (!slot) {
+            throw new TRPCError({
+              code: "NOT_FOUND",
+              message: "That trailer is not on this shipment's movement",
+            });
+          }
+          loadedOnType = "TRAILER";
+          loadedOnMovementTrailerId = slot.id;
+        } else if (input.loadedOn?.type === "TRUCK") {
+          loadedOnType = "TRUCK";
+        }
+        const [row] = await tx
+          .update(shipments)
+          .set({ loadedOnType, loadedOnMovementTrailerId })
+          .where(eq(shipments.id, input.id))
+          .returning();
+        await writeAudit(tx, ctx.orgId, "shipment.set_loaded_on", "shipment", input.id, before, row!);
+        return row!;
       }),
     ),
 
@@ -473,7 +524,10 @@ export const shipmentRouter = router({
         }
         const rows = await tx
           .update(shipments)
-          .set({ movementId: null })
+          // shipments_loaded_on_guard (0051) clears these two on a real DB
+          // whenever movement_id changes; set them explicitly too so a fake
+          // test double (which runs no triggers) sees the same result.
+          .set({ movementId: null, loadedOnType: null, loadedOnMovementTrailerId: null })
           .where(
             and(
               eq(shipments.organizationId, ctx.orgId),

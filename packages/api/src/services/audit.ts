@@ -143,6 +143,7 @@ export const AUDITED_MUTATIONS: Record<string, string> = {
   "shipment.commodities.remove": "shipment.commodity_remove",
   "shipment.assign": "shipment.assign",
   "shipment.unassign": "shipment.unassign",
+  "shipment.setLoadedOn": "shipment.set_loaded_on",
 
   "organization.updateMe": "user.profile_update",
 

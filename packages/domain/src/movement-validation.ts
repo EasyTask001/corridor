@@ -4,6 +4,7 @@
  * Mirrors the data CBP ACE / CBSA ACI reject a manifest for when missing.
  */
 import { daysBetween, todayIso } from "./compliance";
+import { resolveLoadedOn, type LoadedOnValue } from "./loaded-on";
 import type { Regime } from "./movement";
 import type { CrewRole } from "./movement-inputs";
 import {
@@ -55,6 +56,8 @@ export interface ShipmentForValidation {
   /** ACI destination office; every shipment on an in-transit trip needs one. */
   destinationPortId: string | null;
   commodities: CommodityForValidation[];
+  /** Which unit (truck or a specific trailer) the cargo rides on (0051). */
+  loadedOn: LoadedOnValue;
 }
 
 /** One person on the crossing, as `movement_crew` joined to `drivers` stores it. */
@@ -79,6 +82,8 @@ export interface MovementForValidation {
   scheduledCrossingAt: string | null;
   crew: CrewForValidation[];
   truck: {
+    /** null only mid-onboarding, before the truck row itself carries one. */
+    unitNumber: string | null;
     registrationExpiry: string | null;
     insuranceExpiry: string | null;
     plateNumber: string;
@@ -96,6 +101,8 @@ export interface MovementForValidation {
 }
 
 export interface TrailerForValidation {
+  /** movement_trailers.id — the slot, matched against ShipmentForValidation.loadedOn. */
+  id: string;
   unitNumber: string;
   registrationExpiry: string | null;
   plateNumber: string;
@@ -253,6 +260,28 @@ export function validateForTransmit(
 
     if (s.commodities.length === 0)
       block(at("commodities"), `${label}: add at least one commodity line.`, "commodity");
+
+    // A missing truck is already blocking (truck_missing, below) — skip
+    // loaded-on until that is fixed, rather than raising a second, confusing
+    // issue about a unit that cannot yet be resolved either way.
+    if (m.truck) {
+      const resolved = resolveLoadedOn(
+        { truckUnitNumber: m.truck.unitNumber, trailers: m.trailers },
+        s.loadedOn,
+      );
+      if (resolved.type === "ambiguous")
+        block(
+          at("loaded_on"),
+          `${label}: two or more trailers are in tow — pick which one it is loaded on.`,
+          "shipment",
+        );
+      else if (resolved.type === "stale")
+        block(
+          at("loaded_on_stale"),
+          `${label}: is loaded on a unit that is no longer on this trip.`,
+          "shipment",
+        );
+    }
 
     s.commodities.forEach((c, j) => {
       const line = `${label} line ${j + 1}`;

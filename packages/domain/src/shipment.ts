@@ -269,6 +269,9 @@ export const shipmentSchema = z.object({
   controlReference: z.string(),
   controlNumber: z.string(),
   status: shipmentStatus,
+  /** Which unit the cargo rides on (0051); null = unspecified. */
+  loadedOnType: z.enum(["TRUCK", "TRAILER"]).nullable(),
+  loadedOnMovementTrailerId: uuid.nullable(),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
 });

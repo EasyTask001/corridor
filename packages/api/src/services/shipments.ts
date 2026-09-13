@@ -19,6 +19,7 @@ import {
   nestAddress,
   type Address,
   type CommodityInput,
+  type LoadedOnValue,
   type ShipmentPatch,
 } from "@corridor/domain";
 
@@ -32,6 +33,18 @@ const partnerAddressJson = (partnerId: PgColumn) =>
     from public.partners p where p.id = ${partnerId})`;
 
 export type Tx = RlsTransaction;
+
+/** The two `loaded_on_*` columns as the domain's `LoadedOnValue` — the one
+ * place that pairing is decoded, shared by `manifestFor` and `validationFor`. */
+export function loadedOnOf(row: {
+  loadedOnType: "TRUCK" | "TRAILER" | null;
+  loadedOnMovementTrailerId: string | null;
+}): LoadedOnValue {
+  if (row.loadedOnType === "TRAILER")
+    return { type: "TRAILER", movementTrailerId: row.loadedOnMovementTrailerId! };
+  if (row.loadedOnType === "TRUCK") return { type: "TRUCK" };
+  return null;
+}
 
 export async function requireShipment(tx: Tx, orgId: string, id: string) {
   const [s] = await tx

@@ -12,7 +12,7 @@ import {
   type CustomsShipmentMessage,
 } from "@corridor/integrations";
 import { platesFor, trailersForMovement } from "./equipment";
-import { shipmentsForMovement } from "./shipments";
+import { loadedOnOf, shipmentsForMovement } from "./shipments";
 import {
   actorMayTransition,
   cascadedShipmentStatus,
@@ -629,6 +629,7 @@ export function validationFor(full: FullMovement) {
     })),
     truck: full.truck
       ? {
+          unitNumber: full.truck.unitNumber,
           registrationExpiry: full.truck.registrationExpiry,
           insuranceExpiry: full.truck.insuranceExpiry,
           plateNumber: full.truck.plateNumber,
@@ -638,6 +639,7 @@ export function validationFor(full: FullMovement) {
     isEmpty: full.isEmpty,
     aciInTransit: full.aciInTransit,
     trailers: full.trailers.map((t) => ({
+      id: t.id,
       unitNumber: t.unitNumber,
       registrationExpiry: t.registrationExpiry,
       plateNumber: t.plateNumber,
@@ -654,6 +656,7 @@ export function validationFor(full: FullMovement) {
       inBondEntryType: s.inBondEntryType,
       inBondDestinationPortId: s.inBondDestinationPortId,
       destinationPortId: s.destinationPortId,
+      loadedOn: loadedOnOf(s),
       commodities: s.commodities.map((c) => ({
         commodityDescription: c.commodityDescription,
         hsCode: c.hsCode,
