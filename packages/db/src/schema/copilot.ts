@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   customType,
   date,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -29,18 +30,42 @@ const vector = (dimensions: number) =>
 
 export const EMBEDDING_DIMENSIONS = 1536;
 
-export const regulationDocuments = pgTable("regulation_documents", {
-  id: uuid("id")
-    .primaryKey()
-    .default(sql`gen_random_uuid()`),
-  source: text("source").notNull(),
-  title: text("title").notNull(),
-  jurisdiction: text("jurisdiction", { enum: ["US", "CA"] }).notNull(),
-  effectiveDate: date("effective_date"),
-  url: text("url"),
-  content: text("content").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const regulationDocuments = pgTable(
+  "regulation_documents",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    source: text("source").notNull(),
+    title: text("title").notNull(),
+    jurisdiction: text("jurisdiction", { enum: ["US", "CA"] }).notNull(),
+    effectiveDate: date("effective_date"),
+    url: text("url"),
+    content: text("content").notNull(),
+    /** 0052 — 'CBP' | 'CBSA' | 'USTR' | ... */
+    authority: text("authority"),
+    /** 0052 — edition/notice identifier, e.g. 'CN 24-27', 'eCFR 2026-09-13'. */
+    version: text("version"),
+    retrievedAt: timestamp("retrieved_at", { withTimezone: true }),
+    lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
+    /** 0052 — match_regulations only ever retrieves 'verified' rows. */
+    verificationStatus: text("verification_status", {
+      enum: ["draft", "verified", "superseded"],
+    })
+      .notNull()
+      .default("draft"),
+    supersededBy: uuid("superseded_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("regulation_documents_source_title_unique").on(t.source, t.title),
+    foreignKey({
+      name: "regulation_documents_superseded_by_fkey",
+      columns: [t.supersededBy],
+      foreignColumns: [t.id],
+    }).onDelete("set null"),
+  ],
+);
 
 export const regulationEmbeddings = pgTable(
   "regulation_embeddings",
@@ -55,6 +80,9 @@ export const regulationEmbeddings = pgTable(
     content: text("content").notNull(),
     embedding: vector(EMBEDDING_DIMENSIONS)("embedding").notNull(),
     metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+    /** 0052 — which model produced this vector; vectors from different
+     * models are not comparable, so match_regulations can filter on it. */
+    embedder: text("embedder"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

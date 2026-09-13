@@ -6,7 +6,7 @@
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { createClient } from "@supabase/supabase-js";
-import { eq, sql } from "drizzle-orm";
+import { eq, like, sql } from "drizzle-orm";
 import { mockEmbed, MOCK_DIMENSIONS } from "@corridor/ai";
 import { createDb } from "./client";
 import { withRls } from "./rls";
@@ -83,17 +83,28 @@ const TEST_SOURCE = "TEST-COPILOT-FIXTURE";
 // regulation_documents/regulation_embeddings are only writable by the
 // service role (ingestion) — see 0007_copilot.sql — so fixtures go in through
 // the raw `db` connection (superuser, bypasses RLS), never `withRls`.
-async function seedTestRegulation() {
+async function seedTestRegulation(
+  overrides: Partial<{
+    verificationStatus: "draft" | "verified" | "superseded";
+    embedder: string | null;
+    source: string;
+  }> = {},
+) {
   const content = "The quick brown fox jumps over the lazy dog at the border crossing.";
   const embedding = mockEmbed(content);
   const [doc] = await db
     .insert(regulationDocuments)
     .values({
-      source: TEST_SOURCE,
+      source: overrides.source ?? TEST_SOURCE,
       title: "Fixture regulation",
       jurisdiction: "US",
       url: null,
       content,
+      // match_regulations (0052) only ever returns a 'verified' row — every
+      // existing test here is about cosine similarity/RLS, not verification
+      // status, so the fixture defaults to verified unless a test overrides it.
+      verificationStatus: overrides.verificationStatus ?? "verified",
+      lastVerifiedAt: overrides.verificationStatus === "draft" ? null : new Date(),
     })
     .returning({ id: regulationDocuments.id });
   await db.insert(regulationEmbeddings).values({
@@ -101,12 +112,13 @@ async function seedTestRegulation() {
     chunkIndex: 0,
     content,
     embedding,
+    embedder: overrides.embedder,
   });
   return doc!.id;
 }
 
 afterEach(async () => {
-  await db.delete(regulationDocuments).where(eq(regulationDocuments.source, TEST_SOURCE));
+  await db.delete(regulationDocuments).where(like(regulationDocuments.source, `${TEST_SOURCE}%`));
   await db.execute(
     sql`delete from public.organization_knowledge_embeddings where content like 'TEST-FIXTURE:%'`,
   );
@@ -136,6 +148,54 @@ describe("match_regulations", () => {
     );
     expect(rows.every((r) => r.jurisdiction === "CA")).toBe(true);
     expect(rows.find((r) => r.source === TEST_SOURCE)).toBeUndefined();
+  });
+
+  it("never returns a draft (unverified) row (0052)", async () => {
+    const draftSource = `${TEST_SOURCE}-DRAFT`;
+    await seedTestRegulation({ source: draftSource, verificationStatus: "draft" });
+    const queryEmbedding = mockEmbed("quick brown fox jumps over lazy dog border crossing");
+    const rows = await withRls(db, as(dispatcherA), (tx) =>
+      tx.execute<{ source: string }>(
+        sql`select * from public.match_regulations(${vectorLiteral(queryEmbedding)}::vector, 20, null)`,
+      ),
+    );
+    expect(rows.find((r) => r.source === draftSource)).toBeUndefined();
+  });
+
+  it("never returns a superseded row (0052)", async () => {
+    const supersededSource = `${TEST_SOURCE}-SUPERSEDED`;
+    await seedTestRegulation({ source: supersededSource, verificationStatus: "verified" });
+    await db
+      .update(regulationDocuments)
+      .set({ verificationStatus: "superseded" })
+      .where(eq(regulationDocuments.source, supersededSource));
+    const queryEmbedding = mockEmbed("quick brown fox jumps over lazy dog border crossing");
+    const rows = await withRls(db, as(dispatcherA), (tx) =>
+      tx.execute<{ source: string }>(
+        sql`select * from public.match_regulations(${vectorLiteral(queryEmbedding)}::vector, 20, null)`,
+      ),
+    );
+    expect(rows.find((r) => r.source === supersededSource)).toBeUndefined();
+  });
+
+  it("filters by embedder when requested — vectors from different models are not comparable (0052)", async () => {
+    const embedderSource = `${TEST_SOURCE}-EMBEDDER`;
+    await seedTestRegulation({ source: embedderSource, embedder: "some-other-model" });
+    const queryEmbedding = mockEmbed("quick brown fox jumps over lazy dog border crossing");
+
+    const wrongEmbedder = await withRls(db, as(dispatcherA), (tx) =>
+      tx.execute<{ source: string }>(
+        sql`select * from public.match_regulations(${vectorLiteral(queryEmbedding)}::vector, 20, null, 'mock')`,
+      ),
+    );
+    expect(wrongEmbedder.find((r) => r.source === embedderSource)).toBeUndefined();
+
+    const rightEmbedder = await withRls(db, as(dispatcherA), (tx) =>
+      tx.execute<{ source: string }>(
+        sql`select * from public.match_regulations(${vectorLiteral(queryEmbedding)}::vector, 20, null, 'some-other-model')`,
+      ),
+    );
+    expect(rightEmbedder.find((r) => r.source === embedderSource)).toBeDefined();
   });
 });
 
