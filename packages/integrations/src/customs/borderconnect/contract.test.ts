@@ -194,4 +194,30 @@ describe("BorderConnect contract matrix", () => {
       expect.arrayContaining(["aceTrip.drivers: required"]),
     );
   });
+
+  // Both the ACE and ACI JSON reference manuals cap trailers[].number at 15
+  // characters (not 17, which is the limit for the sibling loadedOn.number
+  // field) — a discrepancy the matrix used to carry. Guard it explicitly so
+  // it can't silently drift back.
+  it("caps trailers[].number at 15 characters for both regimes", async () => {
+    const { validateBorderConnectContract } = await import("./contract");
+    const trailer = {
+      number: "TOOLONGTRAILER16", // 16 chars
+      type: "DT",
+      licensePlates: [{ number: "ABC123", stateProvince: "MB" }],
+      sealNumbers: [],
+    };
+
+    const acePayload = toAceTrip(manifest("ACE"), opts);
+    acePayload.trailers = [trailer];
+    expect(validateBorderConnectContract("ACE_TRIP", acePayload)).toEqual(
+      expect.arrayContaining(["aceTrip.trailers[].number: must be at most 15 characters"]),
+    );
+
+    const aciPayload = toAciTrip(manifest("ACI"), opts);
+    aciPayload.trailers = [{ ...trailer, licensePlate: trailer.licensePlates[0] }];
+    expect(validateBorderConnectContract("ACI_TRIP", aciPayload)).toEqual(
+      expect.arrayContaining(["aciTrip.trailers[].number: must be at most 15 characters"]),
+    );
+  });
 });
