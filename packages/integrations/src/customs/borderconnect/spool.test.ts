@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createBorderConnectSpool } from "./spool";
 
-const KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const KEY = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"; // gitleaks:allow
 const dirs: string[] = [];
 
 afterEach(async () => {

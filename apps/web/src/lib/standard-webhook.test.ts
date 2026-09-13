@@ -8,7 +8,7 @@ import {
 // A fixed vector: this signature was computed out-of-band from the secret,
 // id, timestamp and body below, so the test pins the wire format itself
 // rather than just round-tripping through our own signer.
-const SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw";
+const SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"; // gitleaks:allow
 const ID = "msg_2xY3zQ7aBcDeFgHiJkLmNo";
 const TIMESTAMP = 1700000000; // seconds
 const NOW = TIMESTAMP * 1000;

@@ -1,0 +1,7 @@
+# Historical false positives — confirmed test fixtures, not real credentials.
+# New occurrences of these values are also covered by inline `gitleaks:allow`
+# comments at the current lines; these fingerprints only baseline the frozen
+# commits already in history (gitleaks scans full git log by default).
+68e104b9bd47bc7765e04165c8c9c26ba6934614:packages/integrations/src/customs/borderconnect/spool.test.ts:generic-api-key:7
+3bdb3c82dcc54aad399cc7f6e0da60519571a1b1:apps/web/src/lib/standard-webhook.test.ts:generic-api-key:11
+9de117b335c71a6631d1d108d154bef97236b842:apps/web/src/lib/auth-webhook.test.ts:generic-api-key:10

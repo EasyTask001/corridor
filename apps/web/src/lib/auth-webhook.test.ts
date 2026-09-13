@@ -7,7 +7,7 @@ import {
 } from "./auth-webhook";
 import { signStandardWebhook } from "./standard-webhook";
 
-const SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw";
+const SECRET = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw"; // gitleaks:allow
 const USER_ID = "6d1c8a2e-1c3a-4b6f-9a5e-2f7d0b3c4e51";
 
 /** The shape a Database Webhook on `auth.users` actually POSTs. */
