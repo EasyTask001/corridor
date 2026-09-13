@@ -98,6 +98,7 @@ function makeSource(): ManifestSource {
     },
     trailers: [
       {
+        movementTrailerId: "mt-1",
         unitNumber: "TR-1",
         trailerType: "TF",
         plateNumber: "GH4",
@@ -142,6 +143,7 @@ function makeSource(): ManifestSource {
           postalCode: "60601",
           country: "US",
         },
+        loadedOn: null,
         commodities: [
           {
             commodityDescription: "Steel Coil",
@@ -609,5 +611,42 @@ describe("toAceTrip — 422 validation", () => {
         "trip.tripNumber: must start with the carrier code and be 8–25 alphanumerics",
       );
     }
+  });
+});
+
+describe("toAceTrip — loadedOn (0051)", () => {
+  it("is absent when nothing is explicit (the single trailer default is left for BorderConnect)", () => {
+    const m = buildManifest(makeSource());
+    expect(toAceTrip(m, opts).shipments as Array<Record<string, unknown>>).toSatisfy(
+      (shipments: Array<{ commodities: Array<Record<string, unknown>> }>) =>
+        shipments[0]!.commodities.every((c) => !("loadedOn" in c)),
+    );
+  });
+
+  it("fans an explicit trailer choice onto every commodity on the shipment", () => {
+    const src = makeSource();
+    src.shipments[0]!.commodities.push({ ...src.shipments[0]!.commodities[0]! });
+    src.shipments[0]!.loadedOn = { type: "TRAILER", movementTrailerId: "mt-1" };
+    const trip = toAceTrip(buildManifest(src), opts) as { shipments: Array<Record<string, unknown>> };
+    const commodities = trip.shipments[0]!.commodities as Array<Record<string, unknown>>;
+    expect(commodities).toHaveLength(2);
+    for (const c of commodities) {
+      expect(c.loadedOn).toEqual({ type: "TRAILER", number: "TR-1" });
+    }
+  });
+
+  it("resolves an explicit TRUCK choice to the conveyance unit number", () => {
+    const src = makeSource();
+    src.shipments[0]!.loadedOn = { type: "TRUCK" };
+    const trip = toAceTrip(buildManifest(src), opts) as { shipments: Array<Record<string, unknown>> };
+    const commodities = trip.shipments[0]!.commodities as Array<Record<string, unknown>>;
+    expect(commodities[0]!.loadedOn).toEqual({ type: "TRUCK", number: "T-101" });
+  });
+
+  it("422s when a unit number does not match BorderConnect's pattern", () => {
+    const src = makeSource();
+    src.trailers[0]!.unitNumber = "tr-1"; // lowercase — invalid on the wire
+    src.shipments[0]!.loadedOn = { type: "TRAILER", movementTrailerId: "mt-1" };
+    expect(() => toAceTrip(buildManifest(src), opts)).toThrow(/A-Z 0-9 space/);
   });
 });

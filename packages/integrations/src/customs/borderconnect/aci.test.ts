@@ -68,6 +68,7 @@ function makeSource(): ManifestSource {
     },
     trailers: [
       {
+        movementTrailerId: "mt-2",
         unitNumber: "TR-2",
         trailerType: "RT",
         plateNumber: "GH9",
@@ -112,6 +113,7 @@ function makeSource(): ManifestSource {
           postalCode: "60601",
           country: "US",
         },
+        loadedOn: null,
         commodities: [
           {
             commodityDescription: "Steel Coil",
@@ -346,5 +348,30 @@ describe("toAciTrip — ACI trip-flag 422s", () => {
           "shipments[0].loading.province: required (cityOfLoading.stateProvince)",
       );
     }
+  });
+});
+
+describe("toAciTrip — loadedOn (0051)", () => {
+  it("is absent when nothing is explicit", () => {
+    const m = buildManifest(makeSource());
+    const trip = toAciTrip(m, opts) as { shipments: Array<Record<string, unknown>> };
+    expect("loadedOn" in trip.shipments[0]!).toBe(false);
+  });
+
+  it("sits on the shipment (not the commodity) once explicit", () => {
+    const src = makeSource();
+    src.shipments[0]!.loadedOn = { type: "TRAILER", movementTrailerId: "mt-2" };
+    const trip = toAciTrip(buildManifest(src), opts) as {
+      shipments: Array<{ loadedOn?: unknown; commodities: Array<Record<string, unknown>> }>;
+    };
+    expect(trip.shipments[0]!.loadedOn).toEqual({ type: "TRAILER", number: "TR-2" });
+    expect(trip.shipments[0]!.commodities.every((c) => !("loadedOn" in c))).toBe(true);
+  });
+
+  it("resolves an explicit TRUCK choice to the conveyance unit number", () => {
+    const src = makeSource();
+    src.shipments[0]!.loadedOn = { type: "TRUCK" };
+    const trip = toAciTrip(buildManifest(src), opts) as { shipments: Array<Record<string, unknown>> };
+    expect(trip.shipments[0]!.loadedOn).toEqual({ type: "TRUCK", number: "T-201" });
   });
 });

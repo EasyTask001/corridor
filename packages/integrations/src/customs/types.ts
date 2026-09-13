@@ -7,6 +7,14 @@ import type {
   ShipmentStatus,
 } from "@corridor/domain";
 
+/** The resolved unit a shipment's cargo rides on (0051) — present only when
+ * explicit; an implicit default (BorderConnect's own "first trailer, else
+ * truck") is left unset so the mapper never emits an unverified guess. */
+export interface ManifestLoadedOn {
+  type: "TRUCK" | "TRAILER";
+  unitNumber: string;
+}
+
 /** A shipper/consignee as it is printed on the manifest. */
 export interface ManifestParty {
   name: string;
@@ -119,6 +127,9 @@ export interface ManifestPayload {
     loading: { country: string | null; province: string | null; city: string | null };
     /** Final delivery place, structured — distinct from the consignee's own address. */
     delivery: ManifestParty["postal"];
+    /** Explicit placement only (0051) — null lets the provider apply its own
+     * documented default. See ManifestLoadedOn. */
+    loadedOn: ManifestLoadedOn | null;
     shipper: ManifestParty | null;
     consignee: ManifestParty | null;
     commodities: Array<{

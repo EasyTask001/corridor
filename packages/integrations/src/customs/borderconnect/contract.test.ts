@@ -68,6 +68,7 @@ const manifest = (regime: "ACE" | "ACI"): ManifestPayload => ({
       inBond: null,
       loading: { country: regime === "ACE" ? "CA" : "US", province: "ND", city: "Pembina" },
       delivery: null,
+      loadedOn: null,
       shipper: {
         name: "Shipper",
         address: null,
@@ -219,5 +220,43 @@ describe("BorderConnect contract matrix", () => {
     expect(validateBorderConnectContract("ACI_TRIP", aciPayload)).toEqual(
       expect.arrayContaining(["aciTrip.trailers[].number: must be at most 15 characters"]),
     );
+  });
+
+  describe("loadedOn (0051)", () => {
+    it("accepts an explicit loadedOn on ACE (commodity) and ACI (shipment)", async () => {
+      const { validateBorderConnectContract } = await import("./contract");
+
+      const aceSrc = manifest("ACE");
+      aceSrc.shipments[0]!.loadedOn = { type: "TRUCK", unitNumber: "T1" };
+      expect(validateBorderConnectContract("ACE_TRIP", toAceTrip(aceSrc, opts))).toEqual([]);
+
+      const aciSrc = manifest("ACI");
+      aciSrc.shipments[0]!.loadedOn = { type: "TRUCK", unitNumber: "T1" };
+      expect(validateBorderConnectContract("ACI_TRIP", toAciTrip(aciSrc, opts))).toEqual([]);
+    });
+
+    it("rejects CONTAINER on ACE (a wire-shape check independent of the mapper)", async () => {
+      const { validateBorderConnectContract } = await import("./contract");
+      const payload = toAceTrip(manifest("ACE"), opts) as {
+        shipments: Array<{ commodities: Array<Record<string, unknown>> }>;
+      };
+      payload.shipments[0]!.commodities[0]!.loadedOn = { type: "CONTAINER", number: "X" };
+      expect(validateBorderConnectContract("ACE_TRIP", payload)).toEqual(
+        expect.arrayContaining([
+          "aceTrip.shipments[].commodities[].loadedOn.type: must match ^(TRUCK|TRAILER)$",
+        ]),
+      );
+    });
+
+    it("rejects loadedOn at the ACE shipment level — the manual puts it on the commodity", async () => {
+      const { validateBorderConnectContract } = await import("./contract");
+      const payload = toAceTrip(manifest("ACE"), opts) as { shipments: Array<Record<string, unknown>> };
+      payload.shipments[0]!.loadedOn = { type: "TRAILER", number: "TR-1" };
+      expect(validateBorderConnectContract("ACE_TRIP", payload)).toEqual(
+        expect.arrayContaining([
+          "aceTrip.shipments[].loadedOn: field is not in ACE eManifest manual 1.0.7",
+        ]),
+      );
+    });
   });
 });

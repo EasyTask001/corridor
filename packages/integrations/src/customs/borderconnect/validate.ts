@@ -15,6 +15,7 @@ import {
   mappedDriverDocuments,
   mapTrailerType,
 } from "./code-lists";
+import { LOADED_ON_NUMBER } from "./loaded-on";
 
 const ACE_CONTROL_NUMBER = /^[A-Z]{4}[A-Z0-9]{4,12}$/;
 
@@ -123,6 +124,30 @@ export function validateForBorderConnect(m: ManifestPayload): string[] {
 
     validateParty(`shipments[${i}].shipper`, s.shipper, problems);
     validateParty(`shipments[${i}].consignee`, s.consignee, problems);
+
+    // 0051 — loadedOn. buildManifest already refuses to build a payload that
+    // is ambiguous or names a unit off the trip, so this mainly guards a
+    // ManifestPayload assembled without going through it (as several tests
+    // do) and the one thing buildManifest cannot check: whether the wire
+    // string itself is shaped the way BorderConnect's manuals require.
+    if (!s.loadedOn && m.equipment.length > 1) {
+      problems.push(`shipments[${i}].loadedOn: required when more than one trailer is attached`);
+    } else if (s.loadedOn) {
+      const known =
+        s.loadedOn.type === "TRUCK"
+          ? s.loadedOn.unitNumber === m.conveyance.unitNumber
+          : m.equipment.some((t) => t.unitNumber === s.loadedOn!.unitNumber);
+      if (!known) {
+        problems.push(
+          `shipments[${i}].loadedOn.number: ${s.loadedOn.unitNumber} is not a unit on this trip`,
+        );
+      }
+      if (!LOADED_ON_NUMBER.test(s.loadedOn.unitNumber)) {
+        problems.push(
+          `shipments[${i}].loadedOn.number: must be 1-17 characters of A-Z 0-9 space - / \\`,
+        );
+      }
+    }
 
     s.commodities.forEach((c, j) => {
       if (c.quantity == null) problems.push(`shipments[${i}].commodities[${j}].quantity: required`);

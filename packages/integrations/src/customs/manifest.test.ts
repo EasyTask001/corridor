@@ -94,6 +94,7 @@ function makeSource(overrides: Partial<ManifestSource> = {}): ManifestSource {
           postalCode: "60601",
           country: "US",
         },
+        loadedOn: null,
         commodities: [
           {
             commodityDescription: "Steel",
@@ -234,5 +235,58 @@ describe("buildManifest — fields BorderConnect needs", () => {
     expect(() =>
       buildManifest({ ...src, movement: { ...src.movement, isEmpty: true } }),
     ).toThrow(/empty trip/);
+  });
+});
+
+describe("buildManifest — loadedOn (0051)", () => {
+  const trailer = (movementTrailerId: string, unitNumber: string) => ({
+    movementTrailerId,
+    unitNumber,
+    trailerType: "TF",
+    plateNumber: "TR1",
+    plateJurisdiction: "ON",
+    plates: [],
+    seals: [],
+  });
+
+  it("is null on the payload when nothing is chosen (the provider applies its own default)", () => {
+    const m = buildManifest(makeSource({ trailers: [trailer("mt-1", "TR-501")] }));
+    expect(m.shipments[0]?.loadedOn).toBeNull();
+  });
+
+  it("resolves an explicit trailer id to its unit number", () => {
+    const src = makeSource({ trailers: [trailer("mt-1", "TR-501"), trailer("mt-2", "TR-502")] });
+    const m = buildManifest({
+      ...src,
+      shipments: [
+        { ...src.shipments[0]!, loadedOn: { type: "TRAILER", movementTrailerId: "mt-2" } },
+      ],
+    });
+    expect(m.shipments[0]?.loadedOn).toEqual({ type: "TRAILER", unitNumber: "TR-502" });
+  });
+
+  it("resolves an explicit TRUCK choice to the conveyance unit number", () => {
+    const src = makeSource({ trailers: [trailer("mt-1", "TR-501")] });
+    const m = buildManifest({
+      ...src,
+      shipments: [{ ...src.shipments[0]!, loadedOn: { type: "TRUCK" } }],
+    });
+    expect(m.shipments[0]?.loadedOn).toEqual({ type: "TRUCK", unitNumber: "T-101" });
+  });
+
+  it("throws when more than one trailer is attached and nothing is chosen", () => {
+    const src = makeSource({ trailers: [trailer("mt-1", "TR-501"), trailer("mt-2", "TR-502")] });
+    expect(() => buildManifest(src)).toThrow(/more than one trailer/);
+  });
+
+  it("throws when the chosen trailer id is not on this trip", () => {
+    const src = makeSource({ trailers: [trailer("mt-1", "TR-501")] });
+    const stale = {
+      ...src,
+      shipments: [
+        { ...src.shipments[0]!, loadedOn: { type: "TRAILER" as const, movementTrailerId: "gone" } },
+      ],
+    };
+    expect(() => buildManifest(stale)).toThrow(/not on this trip/);
   });
 });

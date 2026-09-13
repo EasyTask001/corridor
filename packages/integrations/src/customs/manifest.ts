@@ -1,4 +1,5 @@
-import type { CrewRole, DriverDocumentType, Gender, Regime } from "@corridor/domain";
+import type { CrewRole, DriverDocumentType, Gender, LoadedOnValue, Regime } from "@corridor/domain";
+import { resolveLoadedOn } from "@corridor/domain";
 import type { ManifestPayload, ManifestParty, ManifestPlate } from "./types";
 
 /** Minimal structural input — the API passes its loaded movement + org. */
@@ -63,6 +64,8 @@ export interface ManifestSource {
   } | null;
   /** In tow order, each with the seals recorded on it. */
   trailers: Array<{
+    /** movement_trailers.id — the slot, matched against shipments[].loadedOn. */
+    movementTrailerId: string;
     unitNumber: string;
     trailerType: string;
     plateNumber: string;
@@ -87,6 +90,8 @@ export interface ManifestSource {
     shipperAddress: PostalAddress | null;
     consigneeName: string | null;
     consigneeAddress: PostalAddress | null;
+    /** Which unit the cargo rides on (0051) — null = unspecified/default. */
+    loadedOn: LoadedOnValue;
     commodities: Array<{
       commodityDescription: string;
       hsCode: string | null;
@@ -171,6 +176,11 @@ export function buildManifest(src: ManifestSource): ManifestPayload {
   if (src.shipments.length > 0 && src.movement.isEmpty)
     throw new Error("an empty trip cannot carry shipments");
 
+  const loadedOnUnits = {
+    truckUnitNumber: src.truck.unitNumber,
+    trailers: src.trailers.map((t) => ({ id: t.movementTrailerId, unitNumber: t.unitNumber })),
+  };
+
   const eta =
     typeof src.movement.scheduledCrossingAt === "string"
       ? src.movement.scheduledCrossingAt
@@ -250,43 +260,57 @@ export function buildManifest(src: ManifestSource): ManifestPayload {
       plates: plates(t.plates),
       seals: t.seals,
     })),
-    shipments: src.shipments.map((s) => ({
-      controlNumber: s.controlNumber,
-      shipmentType: s.shipmentType,
-      cargoType: s.cargoType,
-      entryNumber: s.entryNumber,
-      entryPort: s.entryPortCode,
-      inBond: s.inBondEntryType
-        ? {
-            entryType: s.inBondEntryType,
-            destinationPort: s.inBondDestinationPortCode,
-            number: s.inBondNumber,
-          }
-        : null,
-      loading: {
-        country: s.loadingCountry,
-        province: s.loadingProvince,
-        city: s.loadingCity,
-      },
-      delivery: postalOf(s.deliveryAddress),
-      shipper: party(s.shipperName, s.shipperAddress),
-      consignee: party(s.consigneeName, s.consigneeAddress),
-      commodities: s.commodities.map((c) => ({
-        description: c.commodityDescription,
-        hsCode: c.hsCode,
-        quantity: c.quantity,
-        quantityUnit: c.quantityUnit,
-        weightKg: c.weightKg,
-        weightUnit: c.weightUnit,
-        packagingType: c.packagingType,
-        marksAndNumbers: c.marksAndNumbers,
-        hazmat: c.hazmat.map((h) => ({ unCode: h.unCode, description: h.description })),
-        countryOfOrigin: c.countryOfOrigin,
-        value:
-          c.valueAmount != null && c.valueCurrency
-            ? { amount: c.valueAmount, currency: c.valueCurrency }
-            : null,
-      })),
-    })),
+    shipments: src.shipments.map((s) => {
+      const resolved = resolveLoadedOn(loadedOnUnits, s.loadedOn);
+      if (resolved.type === "ambiguous")
+        throw new Error(
+          `shipment ${s.controlNumber}: more than one trailer is attached and loadedOn is not set`,
+        );
+      if (resolved.type === "stale")
+        throw new Error(
+          `shipment ${s.controlNumber}: loadedOn names a unit that is not on this trip`,
+        );
+      return {
+        controlNumber: s.controlNumber,
+        shipmentType: s.shipmentType,
+        cargoType: s.cargoType,
+        entryNumber: s.entryNumber,
+        entryPort: s.entryPortCode,
+        inBond: s.inBondEntryType
+          ? {
+              entryType: s.inBondEntryType,
+              destinationPort: s.inBondDestinationPortCode,
+              number: s.inBondNumber,
+            }
+          : null,
+        loading: {
+          country: s.loadingCountry,
+          province: s.loadingProvince,
+          city: s.loadingCity,
+        },
+        delivery: postalOf(s.deliveryAddress),
+        shipper: party(s.shipperName, s.shipperAddress),
+        consignee: party(s.consigneeName, s.consigneeAddress),
+        // Only ever the filer's explicit choice — an implicit default is left
+        // unset so the mapper never emits a guess (see loaded-on.ts in ace.ts).
+        loadedOn: resolved.explicit ? { type: resolved.type, unitNumber: resolved.unitNumber } : null,
+        commodities: s.commodities.map((c) => ({
+          description: c.commodityDescription,
+          hsCode: c.hsCode,
+          quantity: c.quantity,
+          quantityUnit: c.quantityUnit,
+          weightKg: c.weightKg,
+          weightUnit: c.weightUnit,
+          packagingType: c.packagingType,
+          marksAndNumbers: c.marksAndNumbers,
+          hazmat: c.hazmat.map((h) => ({ unCode: h.unCode, description: h.description })),
+          countryOfOrigin: c.countryOfOrigin,
+          value:
+            c.valueAmount != null && c.valueCurrency
+              ? { amount: c.valueAmount, currency: c.valueCurrency }
+              : null,
+        })),
+      };
+    }),
   };
 }

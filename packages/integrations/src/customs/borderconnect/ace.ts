@@ -19,6 +19,7 @@ import {
   mappedDriverDocuments,
   mapTrailerType,
 } from "./code-lists";
+import { loadedOnWireField } from "./loaded-on";
 import { validateForBorderConnect } from "./validate";
 
 const FAST_CARD_NUMBER = /^4270[0-9]{8}0[12]$/;
@@ -114,6 +115,7 @@ function iitBondField(
 
 function buildAceCommodity(
   c: ManifestPayload["shipments"][number]["commodities"][number],
+  loadedOn: { type: "TRUCK" | "TRAILER"; number: string } | undefined,
 ): Record<string, unknown> {
   return {
     description: c.description,
@@ -125,6 +127,9 @@ function buildAceCommodity(
     ...(c.hsCode ? { harmonizedCode: c.hsCode.replace(/\D/g, "") } : {}),
     ...(c.value?.currency === "USD" ? { value: String(c.value.amount) } : {}),
     ...(c.countryOfOrigin ? { countryOfOrigin: c.countryOfOrigin } : {}),
+    // ACE puts loadedOn on the commodity (1.0.7 §1.15.1.16.1.13), not the
+    // shipment — every commodity on this shipment gets the same placement.
+    ...(loadedOn ? { loadedOn } : {}),
   };
 }
 
@@ -132,6 +137,7 @@ function buildAceShipment(
   s: ManifestPayload["shipments"][number],
   companyKey: string,
 ): Record<string, unknown> {
+  const loadedOn = loadedOnWireField(s);
   return {
     data: "ACE_SHIPMENT",
     companyKey,
@@ -140,7 +146,7 @@ function buildAceShipment(
     provinceOfLoading: s.loading.province,
     shipper: buildParty(s.shipper),
     consignee: buildParty(s.consignee),
-    commodities: s.commodities.map(buildAceCommodity),
+    commodities: s.commodities.map((c) => buildAceCommodity(c, loadedOn)),
   };
 }
 

@@ -72,6 +72,7 @@ function makeAceSource(): ManifestSource {
     },
     trailers: [
       {
+        movementTrailerId: "mt-1",
         unitNumber: "TR-1",
         trailerType: "TF",
         plateNumber: "GH4",
@@ -94,6 +95,7 @@ function makeAceSource(): ManifestSource {
         loadingProvince: "ON",
         loadingCity: "Hamilton",
         deliveryAddress: null,
+        loadedOn: null,
         shipperName: "Acme Steel",
         shipperAddress: {
           line1: "1 Mill Rd",
@@ -195,6 +197,7 @@ function makeAciSource(): ManifestSource {
     },
     trailers: [
       {
+        movementTrailerId: "mt-2",
         unitNumber: "TR-2",
         trailerType: "RT",
         plateNumber: "GH9",
@@ -217,6 +220,7 @@ function makeAciSource(): ManifestSource {
         loadingProvince: "ON",
         loadingCity: "Hamilton",
         deliveryAddress: null,
+        loadedOn: null,
         shipperName: "Acme Steel",
         shipperAddress: {
           line1: "1 Mill Rd",

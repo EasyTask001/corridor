@@ -130,6 +130,19 @@ const ACE_TRIP = fields("ACE_TRIP", "aceTrip", "1.0.7", "ace.ts", [
   ["shipments[].commodities[].harmonizedCode", "string", false, 6, 10, "^[0-9]{6,10}$"],
   ["shipments[].commodities[].value", "string", false, 1, 9, "^[0-9.]{1,9}$"],
   ["shipments[].commodities[].countryOfOrigin", "string", false, 2, 2, "^[A-Z]{2}$"],
+  // 0051 — commodity.loadedOn (1.0.7 §1.15.1.16.1.13): optional; when
+  // present, both fields are required. Number pattern/length matches the
+  // manual's loadedOn.number, distinct from trailers[].number's 15-char cap.
+  ["shipments[].commodities[].loadedOn", "object", false],
+  ["shipments[].commodities[].loadedOn.type", "string", true, 5, 7, "^(TRUCK|TRAILER)$"],
+  [
+    "shipments[].commodities[].loadedOn.number",
+    "string",
+    true,
+    1,
+    17,
+    "^[A-Z0-9\\s\\-/\\\\]{1,17}$",
+  ],
 ] as const);
 
 const ACI_TRIP = fields("ACI_TRIP", "aciTrip", "1.0.6", "aci.ts", [
@@ -214,6 +227,12 @@ const ACI_TRIP = fields("ACI_TRIP", "aciTrip", "1.0.6", "aci.ts", [
   ["shipments[].commodities[].weight", "string", true, 1],
   ["shipments[].commodities[].weightUnit", "string", true, 1, 3],
   ["shipments[].commodities[].marksAndNumbers", "string", false, 1, 35],
+  // 0051 — shipment.loadedOn (1.0.6 §1.16.1.6): optional at the shipment, but
+  // unlike ACE both fields are required once the object is present, and
+  // CONTAINER is a third valid type this regime accepts.
+  ["shipments[].loadedOn", "object", false],
+  ["shipments[].loadedOn.type", "string", true, 5, 9, "^(TRUCK|TRAILER|CONTAINER)$"],
+  ["shipments[].loadedOn.number", "string", true, 1, 17, "^[A-Z0-9\\s\\-/\\\\]{1,17}$"],
 ] as const);
 
 const ACE_SEND_REQUEST = fields("ACE_SEND_REQUEST", "aceSendRequest", "1.0.2", "send-request.ts", [

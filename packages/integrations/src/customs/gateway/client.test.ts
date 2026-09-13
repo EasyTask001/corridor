@@ -48,6 +48,7 @@ const manifest: ManifestPayload = {
       inBond: null,
       loading: { country: null, province: null, city: null },
       delivery: null,
+      loadedOn: null,
       shipper: null,
       consignee: null,
       commodities: [],

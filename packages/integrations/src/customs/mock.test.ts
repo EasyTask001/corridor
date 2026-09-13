@@ -79,6 +79,7 @@ const src: ManifestSource = {
   },
   trailers: [
     {
+      movementTrailerId: "mt-1",
       unitNumber: "TR-501",
       trailerType: "TF",
       plateNumber: "TRL1",
@@ -87,6 +88,7 @@ const src: ManifestSource = {
       seals: ["S1", "S2"],
     },
     {
+      movementTrailerId: "mt-2",
       unitNumber: "TR-502",
       trailerType: "RT",
       plateNumber: "TRL2",
@@ -113,6 +115,9 @@ const src: ManifestSource = {
       shipperAddress: { line1: "1 Mill Rd", city: "Hamilton", region: "ON", country: "CA" },
       consigneeName: "B",
       consigneeAddress: null,
+      // Two trailers are attached (above); an explicit choice keeps this
+      // fixture's manifest buildable without making the test about loadedOn.
+      loadedOn: { type: "TRAILER", movementTrailerId: "mt-1" },
       commodities: [
         {
           commodityDescription: "Steel",

@@ -56,6 +56,7 @@ import {
   type Actor,
   type FullMovement,
 } from "./movements";
+import { loadedOnOf } from "./shipments";
 
 const { integrationConfigs, integrationEvents, customsSubmissions, organizations } = schema;
 
@@ -502,6 +503,7 @@ export function manifestFor(
         }
       : null,
     trailers: full.trailers.map((t) => ({
+      movementTrailerId: t.id,
       unitNumber: t.unitNumber,
       trailerType: t.trailerType,
       plateNumber: t.plateNumber,
@@ -522,6 +524,7 @@ export function manifestFor(
       loadingProvince: s.loadingProvince,
       loadingCity: s.loadingCity,
       deliveryAddress: s.deliveryAddress,
+      loadedOn: loadedOnOf(s),
       shipperName: s.shipperName,
       shipperAddress: s.shipperAddress,
       consigneeName: s.consigneeName,

@@ -798,6 +798,7 @@ describe("fixture transmit → drain round trip (no BorderConnect credentials)",
             country: "US",
           },
           deliveryAddress: null,
+          loadedOn: null,
           commodities: [
             {
               commodityDescription: "Steel Coil",

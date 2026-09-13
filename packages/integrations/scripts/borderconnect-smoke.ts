@@ -217,6 +217,7 @@ function makeSource(regime: Regime): ManifestSource {
           postalCode: "60601",
           country: "US",
         },
+        loadedOn: null,
         commodities: [
           {
             commodityDescription: "Steel Coil",

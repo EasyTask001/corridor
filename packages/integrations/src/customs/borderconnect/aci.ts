@@ -9,6 +9,7 @@ import type { ManifestPayload } from "../types";
 import { CustomsTransportError } from "../types";
 import { bcDateTime, tripNumberFor, type OutboundOptions } from "./format";
 import { findAciPackagingUnit, mapTrailerType } from "./code-lists";
+import { loadedOnWireField } from "./loaded-on";
 import { validateForBorderConnect, resolveAciShipmentType } from "./validate";
 import { buildAddress, buildDriver, buildLicensePlates, buildParty } from "./ace";
 
@@ -33,6 +34,7 @@ function buildAciShipment(
 ): Record<string, unknown> {
   // Guaranteed resolvable — validateForBorderConnect already 422s otherwise.
   const resolved = resolveAciShipmentType(s)!;
+  const loadedOn = loadedOnWireField(s);
   return {
     data: "ACI_SHIPMENT",
     companyKey,
@@ -52,6 +54,8 @@ function buildAciShipment(
           ],
         }
       : {}),
+    // ACI puts loadedOn on the shipment (1.0.6 §1.16.1.6), not the commodity.
+    ...(loadedOn ? { loadedOn } : {}),
     commodities: s.commodities.map(buildAciCommodity),
   };
 }
