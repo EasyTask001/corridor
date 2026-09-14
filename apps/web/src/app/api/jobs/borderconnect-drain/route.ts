@@ -7,7 +7,9 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * Every minute (vercel.json): drain BorderConnect's shared inbox — durably
+ * Once daily (vercel.json — downgraded from every minute for the Vercel
+ * Hobby plan's once-a-day cron limit, commit 0402c68): drain BorderConnect's
+ * shared inbox — durably
  * store every message, then route and apply whatever is unprocessed
  * (services/borderconnect.ts). Queued as a `customs.borderconnect_drain` job
  * (queue-wide, no organization — `background_jobs_insert` refuses this job

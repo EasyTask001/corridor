@@ -16,7 +16,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  *    `budgetMs`, sleeping until each upcoming job is due. Gives sub-second
  *    latency for the first customs decision without a resident worker.
  *
- * Vercel Cron (`/api/jobs/process`, every minute) remains the safety net.
+ * Vercel Cron (`/api/jobs/process`, once daily — the Hobby plan's cron
+ * expressions cannot run more than once a day, commit 0402c68) remains a
+ * backstop, but is far too infrequent to be a "safety net" for jobs that
+ * never see a request tail; the request-tail worker below is what actually
+ * carries production job throughput.
  * `claim_jobs` uses FOR UPDATE SKIP LOCKED, so overlapping tails are safe.
  */
 export function drainDueJobs() {

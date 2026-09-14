@@ -216,7 +216,9 @@ export const integrationsRouter = router({
    * fixture / mock) — except in `border_connect` mode, where there is no
    * synchronous ping to make (BorderConnect answers through the shared
    * inbox, not a request/response round trip): this drains it instead, the
-   * same job `customs.borderconnect_drain` runs every minute.
+   * same job `customs.borderconnect_drain` a once-daily cron also runs
+   * (downgraded from every minute for the Vercel Hobby plan's once-a-day
+   * cron limit, commit 0402c68).
    *
    * The drain is NOT called directly here. BorderConnect's inbox is one queue
    * shared by every tenant, and `processInboxRow` writes `customs_event` and

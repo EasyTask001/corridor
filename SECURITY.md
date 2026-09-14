@@ -118,7 +118,8 @@ tracked exception — and that file holds names, never values.
 | Customs gateway | HMAC-SHA256 over the raw body, hex in `X-Corridor-Signature`, with `CUSTOMS_GATEWAY_WEBHOOK_SECRET`. Unset = every delivery refused with 401. |
 
 BorderConnect has no inbound webhook to verify: it never pushes to Corridor. `customs.
-borderconnect_drain` (`/api/jobs/borderconnect-drain`, cron every minute) and the standalone
+borderconnect_drain` (`/api/jobs/borderconnect-drain`, cron once daily — the Vercel Hobby
+plan rejects cron expressions that run more than once a day) and the standalone
 `apps/borderconnect-listener` WebSocket process both pull from BorderConnect's own shared inbox
 using the account's `Api-Key`, so there is nothing for an attacker to forge a signature against —
 see review §8 for how each writes to `customs_inbox` under `withServiceRole`.

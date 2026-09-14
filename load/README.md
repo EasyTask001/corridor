@@ -130,6 +130,17 @@ run that hit the limiter says so rather than quietly reporting bad latency.
 production) or the request-tail worker in `apps/web/src/lib/jobs.ts`, which runs
 locally on every tRPC POST.
 
+**Vercel Cron for `/api/jobs/process` runs once daily in production, not every
+minute** — `apps/web/vercel.json` was downgraded to once-a-day schedules
+(commit `0402c68`) because Hobby-tier Vercel rejects cron expressions that run
+more than once per day. In production, job throughput is actually carried by
+the request-tail worker (`drainDueJobs()` / `scheduleJobTail()`), which only
+fires on live tRPC traffic; the cron is a once-a-day backstop, not a
+per-minute safety net. This means the baseline's `while sleep 60; do curl
+.../api/jobs/process; done` loop below is a *more generous* stand-in than what
+production actually has — a bulk-import burst with no other concurrent app
+traffic would drain far slower in production than in this baseline.
+
 ## Baseline (2026-09-12, first real run — ISSUE-010)
 
 These three scripts existed since 2026-09-07 but had never actually been run.
@@ -169,11 +180,13 @@ narrowly misses its own bar. This needed two attempts to measure honestly:
   reading taken without a clean `pnpm exec supabase db reset && pnpm db:seed`
   immediately before the run.
 - The clean run above also ran a script polling `/api/jobs/process` once a
-  minute for the run's duration, standing in for the Vercel Cron safety net
-  that exists in production but not in a bare local dev server — without it,
-  extraction only advances as a side effect of incoming HTTP traffic
-  (`drainDueJobs()` in `apps/web/src/lib/jobs.ts`), which the k6 script's own
-  request traffic provides unevenly. Reproduce with:
+  minute for the run's duration, standing in for a per-minute cron safety net.
+  **Production's actual `/api/jobs/process` cron runs once daily, not once a
+  minute** (Vercel Hobby plan limit, see "Vercel Cron" note above) — this
+  baseline's polling loop is therefore more generous than production, where
+  extraction advances almost entirely as a side effect of incoming HTTP
+  traffic (`drainDueJobs()` in `apps/web/src/lib/jobs.ts`), which the k6
+  script's own request traffic provides unevenly. Reproduce with:
   ```sh
   CRON_SECRET=<something> pnpm --filter web start   # in addition to CORRIDOR_RATELIMIT_MULTIPLIER
   while sleep 60; do curl -s localhost:3000/api/jobs/process -H "authorization: Bearer <something>"; done &
@@ -184,8 +197,16 @@ inspection of `background_jobs` during the run showed individual
 `document.extract` jobs completing in ~4s on average, consistent with the
 org's 2-concurrent-extraction cap being the throttle, not an error. A slightly
 longer window would very likely clear the rest; this wasn't re-verified to
-avoid burning more real OpenAI API calls on the same measurement. Whether a
-100-document single-tenant burst missing its bar by a small margin is worth
-raising `p_org_cap` for bulk-import scenarios, or whether 5 minutes was
-always an optimistic bar for the default cap, is a product call — not made
-here.
+avoid burning more real OpenAI API calls on the same measurement.
+
+**Decision (2026-09-14):** raise the app-level default org cap from 2 to 4 —
+`jobOrgCap()` in `packages/api/src/services/jobs.ts` (env override
+`CORRIDOR_JOB_ORG_CAP`, no migration needed; `public.claim_jobs`'s own SQL
+default stays 2 for any direct caller that omits the argument). Cap 4 halves
+the theoretical drain time for a 100-doc single-tenant burst (~200s → ~100s
+at ~4s/doc), well inside the 5-minute bar, at the cost of doubling per-org
+concurrent OpenAI extraction calls. This wasn't re-run against a clean
+baseline to confirm 100/100 — do that before relying on the number in a
+release checklist. The cron cadence finding above is a separate, non-optional
+fix: without it, a bulk-import burst with no concurrent app traffic drains
+far slower in production than this local baseline measured.

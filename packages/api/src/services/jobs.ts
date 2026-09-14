@@ -324,10 +324,21 @@ export interface ProcessResult {
 /**
  * How many jobs one organization may have running at once. Keeps a tenant with
  * a large AI backlog from starving every other tenant's queue.
+ *
+ * Default raised from 2 to 4 (2026-09-14, load/README.md baseline): at cap 2
+ * a 100-document single-tenant bulk-upload burst missed its 5-minute drain
+ * bar (91/100 in 300s, ~4s/doc average extraction time). Cap 4 halves the
+ * theoretical drain time for that burst (~200s → ~100s) at the cost of 2x
+ * the concurrent per-org OpenAI extraction calls. This is app-level only —
+ * `public.claim_jobs`'s own SQL default (`p_org_cap default 2`) is
+ * unaffected and still applies to any direct caller that omits the
+ * argument, which is exactly what
+ * `packages/db/src/jobs.integration.test.ts`'s "caps how many jobs one
+ * organization may have running at once" test exercises.
  */
 function jobOrgCap(): number {
   const configured = Number(process.env.CORRIDOR_JOB_ORG_CAP);
-  return Number.isInteger(configured) && configured > 0 ? configured : 2;
+  return Number.isInteger(configured) && configured > 0 ? configured : 4;
 }
 
 /**

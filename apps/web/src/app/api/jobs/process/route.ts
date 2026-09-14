@@ -7,7 +7,12 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * Background job worker. Triggered by Vercel Cron every minute (vercel.json)
+ * Background job worker. Triggered once daily by Vercel Cron (vercel.json —
+ * downgraded from every minute; Hobby-tier Vercel rejects cron expressions
+ * that run more than once per day, see commit 0402c68). The request-tail
+ * worker (`drainDueJobs()` / `scheduleJobTail()` in `lib/jobs.ts`) is the
+ * real driver of job progress in production; this cron is only a once-a-day
+ * backstop for jobs that never rode a request tail (e.g. no traffic).
  * and by the request-tail worker (lib/jobs.ts) for low latency.
  * Claims with FOR UPDATE SKIP LOCKED, so overlapping invocations are safe.
  *

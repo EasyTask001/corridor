@@ -7,7 +7,9 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * Hourly (vercel.json): pull CBP/CBSA service notices and tell every
+ * Once daily (vercel.json — downgraded from hourly for the Vercel Hobby
+ * plan's once-a-day cron limit, commit 0402c68): pull CBP/CBSA service
+ * notices and tell every
  * organization with an enabled customs config. Queued as a
  * `customs.notices_sync` job (queue-wide, no organization) so a failed pull
  * is retried by the worker like any other job, then run right away.

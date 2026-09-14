@@ -4,8 +4,10 @@
  * ACI notice, RNS release, system alert) lands in one shared queue behind
  * `GET /api/receive/{suffix}`, tagged with the filing org's `companyKey`
  * rather than delivered to it directly. `drainBorderConnectInbox` is the
- * job body (`customs.borderconnect_drain`, run every minute by
- * `apps/web/src/app/api/jobs/borderconnect-drain/route.ts`): pull the
+ * job body (`customs.borderconnect_drain`, run once daily by
+ * `apps/web/src/app/api/jobs/borderconnect-drain/route.ts` — downgraded
+ * from every minute for the Vercel Hobby plan's once-a-day cron limit,
+ * commit 0402c68): pull the
  * queue, store every message durably in `customs_inbox` BEFORE
  * interpreting any of it (so a bug in routing can never lose a message —
  * only delay it), then route and apply each unprocessed row.

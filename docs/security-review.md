@@ -248,7 +248,8 @@ adapter — `api/jobs/borderconnect-drain` and `api/jobs/customs-watchdog`) and
 `packages/api/src/services/jobs.ts`. Readiness and watchdog queries return only
 aggregate counts, ages, and status labels.
 
-`api/jobs/borderconnect-drain` (cron, every minute) enqueues and immediately runs
+`api/jobs/borderconnect-drain` (cron, once daily — downgraded from every minute for the
+Vercel Hobby plan's once-a-day cron limit) enqueues and immediately runs
 `customs.borderconnect_drain`: `services/borderconnect.ts`'s `drainBorderConnectInbox`
 calls `withServiceRole` to store every message BorderConnect's shared `GET /api/receive`
 queue returns into `customs_inbox` (queue-wide, no `organization_id` yet), then
