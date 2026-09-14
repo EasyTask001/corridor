@@ -44,7 +44,7 @@ jobs:
           AI_GATEWAY_API_KEY: ${{ secrets.AI_GATEWAY_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: pnpm --filter @corridor/ai exec vitest run src/eval
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: extraction-${{ inputs.extraction_gate }}-report
           path: extraction-${{ inputs.extraction_gate }}.json
