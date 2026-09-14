@@ -32,3 +32,46 @@ It covers sign-in, assigned-load navigation, document upload, proof-of-delivery
 signature upload, and sign-out. Its header is intentionally truthful about its
 current execution status; update the matrix and remove that warning only after
 recording real-device runs.
+
+**First run note:** `apps/mobile/.maestro/smoke.yaml`'s own header says it was
+written without device access and nothing in it has been run — expect to fix
+element selectors and timing on the first real device pass, then delete that
+warning from the file once it goes green.
+
+## Running the pilot gate
+
+`.github/workflows/release-gates.yml`'s `mobile` job downloads a signed
+evidence file from `CORRIDOR_MOBILE_QA_EVIDENCE_URL` (bearer
+`CORRIDOR_MOBILE_QA_EVIDENCE_TOKEN`) and runs
+`apps/mobile/scripts/verify-device-qa.mjs` against it. That script requires
+this exact shape:
+
+```json
+{
+  "recordedAt": "2026-10-01T00:00:00Z",
+  "commit": "<git sha the runs were performed against>",
+  "maestro": { "status": "passed" },
+  "cases": [
+    { "scenario": "Sign in and restore session after cold launch", "device": "iPhone", "status": "passed" },
+    { "scenario": "Sign in and restore session after cold launch", "device": "Android", "status": "passed" }
+  ]
+}
+```
+
+- `cases` needs at least `REQUIRED_DEVICE_QA_CASES` (28 — the 14 rows above ×
+  iPhone + Android) entries, every one `status: "passed"`.
+- `maestro.status` must be `"passed"`.
+- `recordedAt` and `commit` are required so a stale evidence file cannot be
+  replayed against a newer release without someone noticing the mismatch.
+
+Host the file wherever `CORRIDOR_MOBILE_QA_EVIDENCE_URL` can reach it with the
+bearer token — this repository never stores it, since it is proof a specific
+human ran specific tests on specific hardware, not something to regenerate.
+
+## On failure
+
+`verify-device-qa.mjs` throws on the first problem it finds: too few cases, a
+case not marked `passed`, a missing/failed Maestro run, or missing
+`recordedAt`/`commit`. Fix the underlying scenario on the physical device, not
+the evidence file — a JSON edit to make the gate pass without a fresh run
+defeats the point of a physical-device gate entirely.

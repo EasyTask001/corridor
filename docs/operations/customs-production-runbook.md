@@ -34,6 +34,12 @@ Before the first customer filing:
   persistence, tenant routing, duplicate handling, and application timeline.
 - Exercise ACE amend/cancel, rejection, and unroutable-message cases.
 
+See `docs/operations/borderconnect-live-validation.md` for the full
+step-by-step procedure behind the two items above, including the empty-trip
+and multi-trailer runs that gate `BORDERCONNECT_EMPTY_TRIP_ENABLED` and
+`BORDERCONNECT_MULTI_TRAILER_ENABLED`, and the evidence-recording templates
+under `docs/operations/evidence/`.
+
 Pilot commands:
 
 ```bash

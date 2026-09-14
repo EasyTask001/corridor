@@ -43,13 +43,31 @@
  *   source .env.local && pnpm --filter @corridor/integrations smoke:borderconnect -- --regime=ACI
  *   source .env.local && pnpm --filter @corridor/integrations smoke:borderconnect -- --cleanup
  *   source .env.local && pnpm --filter @corridor/integrations smoke:borderconnect -- --drain-shared-queue
+ *   source .env.local && pnpm --filter @corridor/integrations smoke:borderconnect -- \
+ *     --regime=ACE --drain-shared-queue --record-fixtures=artifacts/borderconnect-smoke/fixtures
+ *   source .env.local && pnpm --filter @corridor/integrations smoke:borderconnect -- --two-trailers
+ *
+ * `--two-trailers` hitches a second trailer and sets an explicit `loadedOn`
+ * on the shipment, so the outbound payload carries the field
+ * BORDERCONNECT_MULTI_TRAILER_ENABLED gates on — see
+ * docs/operations/borderconnect-live-validation.md.
+ *
+ * `--record-fixtures=<dir>` writes one `sanitizeInboundForFixture()`-sanitized
+ * copy of every message `--drain-shared-queue` receives into `<dir>` (mode
+ * 0600), alongside the existing redacted evidence file. These are candidates,
+ * not fixtures yet: a human reviews each one and promotes it into
+ * `fixtures/inbound/live/` — see `docs/operations/borderconnect-live-validation.md`.
+ * Without `--drain-shared-queue` there is nothing to record, so this flag has
+ * no effect (a warning is printed).
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildManifest, type ManifestSource } from "../src/customs/manifest";
 import { toAceTrip } from "../src/customs/borderconnect/ace";
 import { toAciTrip } from "../src/customs/borderconnect/aci";
+import { parseInbound } from "../src/customs/borderconnect/inbound";
+import { sanitizeInboundForFixture } from "../src/customs/borderconnect/sanitize";
 import {
   createBorderConnectHttpTransport,
   normaliseReceiveBody,
@@ -117,9 +135,15 @@ function refuseIfAutoSendOverrideIsSet(): void {
  * Every optional BorderConnect field is filled in to minimise the chance of
  * an avoidable `DATA_ERROR` unrelated to what this script is trying to
  * observe (the receive envelope shape).
+ *
+ * `twoTrailers` hitches a second trailer and sets an explicit `loadedOn` on
+ * the shipment — the one live run this smoke test cannot otherwise cover,
+ * needed to validate the field before `BORDERCONNECT_MULTI_TRAILER_ENABLED`
+ * can go on in production (see docs/operations/borderconnect-live-validation.md).
  */
-function makeSource(regime: Regime): ManifestSource {
+function makeSource(regime: Regime, opts: { twoTrailers?: boolean } = {}): ManifestSource {
   const aci = regime === "ACI";
+  const twoTrailers = opts.twoTrailers ?? false;
   return {
     organization: {
       name: "Corridor Smoke Test",
@@ -180,7 +204,28 @@ function makeSource(regime: Regime): ManifestSource {
       plates: [],
       seals: ["S1"],
     },
-    trailers: [],
+    trailers: twoTrailers
+      ? [
+          {
+            movementTrailerId: "smoke-trailer-1",
+            unitNumber: "TR-501",
+            trailerType: "TF",
+            plateNumber: "SMK501",
+            plateJurisdiction: "ON",
+            plates: [],
+            seals: ["S1"],
+          },
+          {
+            movementTrailerId: "smoke-trailer-2",
+            unitNumber: "TR-502",
+            trailerType: "TF",
+            plateNumber: "SMK502",
+            plateJurisdiction: "ON",
+            plates: [],
+            seals: ["S2"],
+          },
+        ]
+      : [],
     shipments: [
       {
         controlNumber: aci ? "PFTRPARSSMOKE1" : "PFTRSMOKE0001",
@@ -217,7 +262,7 @@ function makeSource(regime: Regime): ManifestSource {
           postalCode: "60601",
           country: "US",
         },
-        loadedOn: null,
+        loadedOn: twoTrailers ? { type: "TRAILER", movementTrailerId: "smoke-trailer-1" } : null,
         commodities: [
           {
             commodityDescription: "Steel Coil",
@@ -293,6 +338,28 @@ async function rawReceive(
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Writes one sanitized fixture candidate per call, named from the date and
+ * the `parseInbound()` kind the sanitized message resolves to (a sequence
+ * number breaks ties within one run). Never writes the original message —
+ * only `sanitizeInboundForFixture()`'s output ever reaches disk here.
+ */
+function makeFixtureWriter(dir: string): (message: Record<string, unknown>) => void {
+  let seq = 0;
+  return (message) => {
+    const sanitized = sanitizeInboundForFixture(message);
+    const kind = parseInbound(sanitized).kind;
+    seq += 1;
+    const date = new Date().toISOString().slice(0, 10);
+    const basename = `${date}-${kind}-${String(seq).padStart(3, "0")}`;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${basename}.json`), `${JSON.stringify(sanitized, null, 2)}\n`, {
+      mode: 0o600,
+    });
+    console.log(`[smoke] wrote fixture candidate ${basename}.json — review before promoting`);
+  };
+}
+
 async function main(): Promise<void> {
   refuseIfAutoSendOverrideIsSet();
   loadDotEnvLocal();
@@ -305,6 +372,18 @@ async function main(): Promise<void> {
 
   const cleanup = process.argv.includes("--cleanup");
   const receiveRequested = receiveAllowed();
+  const recordFixturesArg = process.argv
+    .find((arg) => arg.startsWith("--record-fixtures="))
+    ?.slice("--record-fixtures=".length);
+  if (recordFixturesArg && !receiveRequested) {
+    console.warn(
+      "[smoke] --record-fixtures has no effect without --drain-shared-queue — nothing is received to record.",
+    );
+  }
+  const writeFixture =
+    recordFixturesArg && receiveRequested
+      ? makeFixtureWriter(resolve(process.cwd(), recordFixturesArg))
+      : null;
   const outputArg = process.argv.find((arg) => arg.startsWith("--output="))?.slice(9);
   const startedAt = new Date();
   const outputPath = outputArg
@@ -341,7 +420,8 @@ async function main(): Promise<void> {
     console.log(`[smoke] redacted evidence written to ${outputPath}`);
   };
 
-  const manifest = buildManifest(makeSource(regime));
+  const twoTrailers = process.argv.includes("--two-trailers");
+  const manifest = buildManifest(makeSource(regime, { twoTrailers }));
   const tripNumber = smokeTripNumber(manifest.carrier.scac ?? "SMOK");
   const sendId = `smoke-${Date.now()}`;
 
@@ -446,6 +526,7 @@ async function main(): Promise<void> {
             message,
           }),
         );
+        writeFixture?.(message);
       }
       if (i < 5) await sleep(5000);
     }
