@@ -13,6 +13,24 @@
  */
 import { Redis } from "@upstash/redis";
 
+/**
+ * Vercel's Upstash marketplace integration provisions the same REST
+ * credentials under `KV_REST_API_URL`/`KV_REST_API_TOKEN` (its `@vercel/kv`-
+ * compatible naming) rather than this repo's `UPSTASH_REDIS_REST_URL`/
+ * `UPSTASH_REDIS_REST_TOKEN` convention. Falling back to the `KV_*` pair here
+ * means the marketplace-managed values are the single source of truth in
+ * that deployment path — no manually duplicated secret to keep in sync by
+ * hand if the token is ever rotated.
+ */
+export function resolveUpstashRestCredentials(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> = process.env,
+): { url: string | undefined; token: string | undefined } {
+  return {
+    url: env.UPSTASH_REDIS_REST_URL ?? env.KV_REST_API_URL,
+    token: env.UPSTASH_REDIS_REST_TOKEN ?? env.KV_REST_API_TOKEN,
+  };
+}
+
 /** The one interface every cache / rate-limit helper in `infra/` talks to. */
 export interface KvStore {
   get<T>(key: string): Promise<T | null>;
@@ -115,8 +133,7 @@ let cachedKv: KvStore | undefined;
 /** The Upstash client, or `null` when the REST env vars are not configured. */
 export function getRedis(): Redis | null {
   if (cachedRedis !== undefined) return cachedRedis;
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  const { url, token } = resolveUpstashRestCredentials();
   cachedRedis = url && token ? new Redis({ url, token }) : null;
   return cachedRedis;
 }

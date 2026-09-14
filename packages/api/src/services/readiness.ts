@@ -1,6 +1,6 @@
 import { sql, withServiceRole, type DatabaseClient } from "@corridor/db";
 import { corridorMetrics } from "@corridor/observability";
-import { getRedis } from "../infra/redis";
+import { getRedis, resolveUpstashRestCredentials } from "../infra/redis";
 
 const JOB_STALE_MS = 2 * 60_000;
 const DRAIN_STALE_MS = 3 * 60_000;
@@ -89,12 +89,11 @@ export function evaluateReadiness(
   }
   const missingCompanyKeys = snapshot.missingBorderConnectCompanyKeys ?? 0;
   if (missingCompanyKeys > 0) missing.push("BORDERCONNECT_COMPANY_KEY");
-  const redisPartiallyConfigured = Boolean(
-    env.UPSTASH_REDIS_REST_URL || env.UPSTASH_REDIS_REST_TOKEN,
-  );
+  const { url: redisUrl, token: redisToken } = resolveUpstashRestCredentials(env);
+  const redisPartiallyConfigured = Boolean(redisUrl || redisToken);
   if (production && redisPartiallyConfigured) {
-    if (!env.UPSTASH_REDIS_REST_URL) missing.push("UPSTASH_REDIS_REST_URL");
-    if (!env.UPSTASH_REDIS_REST_TOKEN) missing.push("UPSTASH_REDIS_REST_TOKEN");
+    if (!redisUrl) missing.push("UPSTASH_REDIS_REST_URL");
+    if (!redisToken) missing.push("UPSTASH_REDIS_REST_TOKEN");
   }
 
   const jobsOk =
@@ -177,10 +176,10 @@ function dateOrNull(value: Date | string | null): Date | null {
 async function redisReadiness(
   env: NodeJS.ProcessEnv | Record<string, string | undefined>,
 ): Promise<ReadinessSnapshot["redis"]> {
-  const configured = Boolean(env.UPSTASH_REDIS_REST_URL || env.UPSTASH_REDIS_REST_TOKEN);
+  const { url: redisUrl, token: redisToken } = resolveUpstashRestCredentials(env);
+  const configured = Boolean(redisUrl || redisToken);
   if (!configured) return { configured: false, ok: true };
-  if (!env.UPSTASH_REDIS_REST_URL || !env.UPSTASH_REDIS_REST_TOKEN)
-    return { configured: true, ok: false };
+  if (!redisUrl || !redisToken) return { configured: true, ok: false };
   try {
     const redis = getRedis();
     if (!redis) return { configured: true, ok: false };
