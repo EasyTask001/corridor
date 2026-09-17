@@ -43,10 +43,26 @@ export async function lookupSso(email: string): Promise<SsoLookup> {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   const api = supabase.schema("api");
-  const [provider, enforced] = await Promise.all([
+  let [provider, enforced] = await Promise.all([
     api.rpc("sso_provider_for_email", { p_email: email }),
     api.rpc("sso_enforced_for_email", { p_email: email }),
   ]);
+
+  // Some hosted projects expose only Supabase's default public schema. The
+  // same tightly granted SECURITY DEFINER resolvers live there, so use them
+  // only when PostgREST explicitly says the hardened api schema is unavailable.
+  if (provider.error && provider.error.code !== "PGRST106") {
+    throw new Error(provider.error.message);
+  }
+  if (enforced.error && enforced.error.code !== "PGRST106") {
+    throw new Error(enforced.error.message);
+  }
+  if (provider.error || enforced.error) {
+    [provider, enforced] = await Promise.all([
+      supabase.rpc("sso_provider_for_email", { p_email: email }),
+      supabase.rpc("sso_enforced_for_email", { p_email: email }),
+    ]);
+  }
   if (provider.error) throw new Error(provider.error.message);
   if (enforced.error) throw new Error(enforced.error.message);
 

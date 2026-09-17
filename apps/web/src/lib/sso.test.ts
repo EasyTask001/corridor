@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const rpc = vi.fn();
-const schema = vi.fn(() => ({ rpc }));
+const apiRpc = vi.fn();
+const publicRpc = vi.fn();
+const schema = vi.fn(() => ({ rpc: apiRpc }));
 vi.mock("@supabase/supabase-js", () => ({
-  createClient: vi.fn(() => ({ schema })),
+  createClient: vi.fn(() => ({ rpc: publicRpc, schema })),
 }));
 
 process.env.NEXT_PUBLIC_SUPABASE_URL ??= "http://127.0.0.1:55321";
@@ -19,7 +20,7 @@ const {
 
 /** Canned answers for the two resolvers, in call order. */
 function resolvers(provider: unknown, enforced: unknown) {
-  rpc.mockImplementation((fn: string) =>
+  apiRpc.mockImplementation((fn: string) =>
     Promise.resolve(
       fn === "sso_provider_for_email"
         ? { data: provider, error: null }
@@ -29,7 +30,8 @@ function resolvers(provider: unknown, enforced: unknown) {
 }
 
 beforeEach(() => {
-  rpc.mockReset();
+  apiRpc.mockReset();
+  publicRpc.mockReset();
 });
 
 describe("lookupSso", () => {
@@ -53,12 +55,60 @@ describe("lookupSso", () => {
   it("does not call the resolvers for something that is not an address", async () => {
     expect(await lookupSso("not-an-address")).toEqual(NO_SSO);
     expect(await lookupSso("")).toEqual(NO_SSO);
-    expect(rpc).not.toHaveBeenCalled();
+    expect(apiRpc).not.toHaveBeenCalled();
   });
 
   it("throws when a resolver errors, so each caller can choose its fallback", async () => {
-    rpc.mockResolvedValue({ data: null, error: { message: "boom" } });
+    apiRpc.mockResolvedValue({ data: null, error: { message: "boom" } });
     await expect(lookupSso("dispatch@acme.test")).rejects.toThrow("boom");
+  });
+
+  it("uses the public resolvers when production does not expose the api schema", async () => {
+    apiRpc.mockResolvedValue({
+      data: null,
+      error: {
+        code: "PGRST106",
+        details: null,
+        hint: "Only the following schemas are exposed: public, graphql_public",
+        message: "Invalid schema: api",
+      },
+    });
+    publicRpc.mockImplementation((fn: string) =>
+      Promise.resolve(
+        fn === "sso_provider_for_email"
+          ? { data: null, error: null }
+          : { data: false, error: null },
+      ),
+    );
+
+    expect(await lookupSso("owner@pathfinder.demo")).toEqual(NO_SSO);
+  });
+
+  it("does not mask a resolver failure when the other reports an unexposed api schema", async () => {
+    apiRpc.mockImplementation((fn: string) =>
+      Promise.resolve(
+        fn === "sso_provider_for_email"
+          ? {
+              data: null,
+              error: {
+                code: "PGRST106",
+                details: null,
+                hint: "Only the following schemas are exposed: public, graphql_public",
+                message: "Invalid schema: api",
+              },
+            }
+          : { data: null, error: { code: "XX000", message: "resolver failed" } },
+      ),
+    );
+    publicRpc.mockImplementation((fn: string) =>
+      Promise.resolve(
+        fn === "sso_provider_for_email"
+          ? { data: null, error: null }
+          : { data: false, error: null },
+      ),
+    );
+
+    await expect(lookupSso("owner@pathfinder.demo")).rejects.toThrow("resolver failed");
   });
 });
 
@@ -79,12 +129,12 @@ describe("passwordSignInBlockedFor", () => {
   });
 
   it("fails CLOSED when the check itself fails", async () => {
-    rpc.mockRejectedValue(new Error("network down"));
+    apiRpc.mockRejectedValue(new Error("network down"));
     expect(await passwordSignInBlockedFor("dispatch@acme.test")).toBe(SSO_CHECK_FAILED_MESSAGE);
   });
 
   it("does not block an input with no usable domain", async () => {
     expect(await passwordSignInBlockedFor("not-an-address")).toBeNull();
-    expect(rpc).not.toHaveBeenCalled();
+    expect(apiRpc).not.toHaveBeenCalled();
   });
 });
