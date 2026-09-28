@@ -16,7 +16,7 @@
     "@corridor/db": "workspace:*",
     "@corridor/integrations": "workspace:*",
     "@corridor/observability": "workspace:*",
-    "@sentry/node": "^10.74.0",
+    "@sentry/node": "^11.0.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {

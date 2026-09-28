@@ -25,12 +25,12 @@
   "dependencies": {
     "@corridor/ai": "workspace:*",
     "@corridor/domain": "workspace:*",
-    "drizzle-orm": "^0.45.2",
+    "drizzle-orm": "^0.45.3",
     "postgres": "^3.4.7"
   },
   "devDependencies": {
     "@corridor/config": "workspace:*",
-    "@supabase/supabase-js": "^2.57.4",
+    "@supabase/supabase-js": "^2.117.2",
     "@types/node": "^22.18.0",
     "drizzle-kit": "^0.31.4",
     "eslint": "^9.35.0",
