@@ -16,13 +16,13 @@
     "@corridor/db": "workspace:*",
     "@corridor/integrations": "workspace:*",
     "@corridor/observability": "workspace:*",
-    "@sentry/node": "^10.74.0",
-    "ws": "^8.18.0"
+    "@sentry/node": "^11.3.0",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@corridor/config": "workspace:*",
     "@types/node": "^22.18.0",
-    "@types/ws": "^8.5.13",
+    "@types/ws": "^8.18.2",
     "eslint": "^9.35.0",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
