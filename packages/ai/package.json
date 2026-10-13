@@ -15,11 +15,11 @@
     "eval": "vitest run src/eval"
   },
   "dependencies": {
-    "@ai-sdk/gateway": "^4.0.75",
-    "@ai-sdk/openai": "^4.0.60",
+    "@ai-sdk/gateway": "^4.0.110",
+    "@ai-sdk/openai": "^4.0.91",
     "@corridor/domain": "workspace:*",
-    "ai": "^7.0.93",
-    "zod": "^4.1.5"
+    "ai": "^7.0.137",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@corridor/config": "workspace:*",
