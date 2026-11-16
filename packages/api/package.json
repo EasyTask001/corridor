@@ -22,14 +22,14 @@
     "@corridor/integrations": "workspace:*",
     "@corridor/observability": "workspace:*",
     "@corridor/pdf": "workspace:*",
-    "@supabase/supabase-js": "^2.57.4",
-    "@trpc/server": "^11.18.0",
-    "@upstash/ratelimit": "^2.0.8",
-    "@upstash/redis": "^1.38.4",
-    "ai": "^7.0.93",
-    "papaparse": "5.7.0",
+    "@supabase/supabase-js": "^2.119.0",
+    "@trpc/server": "^11.28.0",
+    "@upstash/ratelimit": "^2.2.1",
+    "@upstash/redis": "^1.41.0",
+    "ai": "^7.0.172",
+    "papaparse": "5.7.1",
     "superjson": "^2.2.6",
-    "zod": "^4.1.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@corridor/config": "workspace:*",
